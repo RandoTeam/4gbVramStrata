@@ -1,7 +1,7 @@
 {
  "model": "flint",
  "task": "chat",
- "when": "2026-11-03 11:35",
+ "when": "2026-11-06 05:16",
  "runs": 8,
  "prompt": "bench\\speed\\prompt.txt",
  "prompt_tokens": 1859,
@@ -17,66 +17,66 @@
   "--expert-profile": "C:\\VietnAi\\4gbVramStrata-data\\packs\\flint-ud-q3_k_xl\\expert-profile.txt",
   "--conversation-cache-mib": "auto"
  },
- "median_decode": 21.9,
- "min_decode": 20.5,
- "max_decode": 22.4,
- "median_prefill": 331.15,
+ "median_decode": 22.85,
+ "min_decode": 22.3,
+ "max_decode": 23.4,
+ "median_prefill": 340.25,
  "rows": [
   {
    "prompt_tokens": 1859,
-   "prefill": 102.0,
+   "prefill": 108.9,
    "generated": 128,
-   "decode": 21.7,
-   "drafts": "1/5"
+   "decode": 23.4,
+   "drafts": "7/13"
   },
   {
    "prompt_tokens": 1859,
-   "prefill": 192.7,
+   "prefill": 203.6,
    "generated": 128,
-   "decode": 21.9,
-   "drafts": "2/6"
+   "decode": 22.4,
+   "drafts": "2/8"
   },
   {
    "prompt_tokens": 1859,
-   "prefill": 331.6,
+   "prefill": 340.1,
    "generated": 128,
-   "decode": 21.9,
-   "drafts": "6/19"
+   "decode": 23.3,
+   "drafts": "5/9"
   },
   {
    "prompt_tokens": 1859,
-   "prefill": 329.4,
+   "prefill": 340.6,
    "generated": 128,
-   "decode": 22.0,
+   "decode": 22.3,
+   "drafts": "6/16"
+  },
+  {
+   "prompt_tokens": 1859,
+   "prefill": 340.4,
+   "generated": 128,
+   "decode": 23.0,
+   "drafts": "6/14"
+  },
+  {
+   "prompt_tokens": 1859,
+   "prefill": 339.9,
+   "generated": 128,
+   "decode": 23.3,
    "drafts": "4/8"
   },
   {
    "prompt_tokens": 1859,
-   "prefill": 331.4,
+   "prefill": 342.1,
    "generated": 128,
-   "decode": 22.4,
-   "drafts": "8/15"
+   "decode": 22.7,
+   "drafts": "9/20"
   },
   {
    "prompt_tokens": 1859,
-   "prefill": 333.9,
+   "prefill": 340.6,
    "generated": 128,
-   "decode": 21.3,
-   "drafts": "1/6"
-  },
-  {
-   "prompt_tokens": 1859,
-   "prefill": 333.5,
-   "generated": 128,
-   "decode": 21.9,
-   "drafts": "4/13"
-  },
-  {
-   "prompt_tokens": 1859,
-   "prefill": 330.9,
-   "generated": 128,
-   "decode": 20.5,
-   "drafts": "1/7"
+   "decode": 22.3,
+   "drafts": "4/12"
   }
  ]
 }
