@@ -41,6 +41,11 @@ The shipped settings (`--tail-skip 6 --no-graphs --kv q8_0` on Clover, `--prompt
 | Clover APEX-I-NANOPLUS | **22 of 22** | every domain, including code that runs, the tool loop and the three-fact long context |
 | Flint UD-Q3_K_XL | **21 of 22** | lost the Russian instruction |
 
+**2026-11-07: the repeat-match floor (`--lookup 5`) passed an 8-prompt subset, 8/8** (math, logic, code, JSON, tool
+call, Russian, instruction, fact). This is a smoke check, not the full gate: the 22 prompts above remain the release
+check. Speculation is verified, so the answers should not move; the subset confirms it on the domains most likely to
+show a difference.
+
 **The one failure is real and it is Flint's.** Asked in Russian to list three reasons a laptop can run slowly, Flint
 repeated the instruction back (both attempts that run). The same request at temperature 0 in other runs gave a correct
 numbered list once, a greeting ("Привет, дорогой, друг!") once, and a short story about an author's pseudonym once —

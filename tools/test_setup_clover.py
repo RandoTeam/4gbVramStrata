@@ -95,13 +95,15 @@ class Main(unittest.TestCase):
         cfg = json.loads((self.t / "strata-clover-apex-i-nanoplus.json").read_text())
         args = cfg["args"]
         self.assertEqual(args[args.index("--kv") + 1], "q8_0")
-        # the tail skip and the graphs: the family's measured defaults, on every card size
+        # the tail skip, the repeat-match floor and the graphs: measured on 4 GB
         self.assertEqual(args[args.index("--tail-skip") + 1], "6")
+        self.assertEqual(args[args.index("--lookup") + 1], "5")
         self.assertIn("--no-graphs", args)
         code, out, _ = self.main(family="clover", model="APEX-I-NANOPLUS", ram=32.0, vram=8.0)
         self.assertEqual(code, 0, out)
         cfg = json.loads((self.t / "strata-clover-apex-i-nanoplus.json").read_text())
         self.assertNotIn("--kv", cfg["args"])
+        self.assertNotIn("--lookup", cfg["args"])
 
     def test_a_template_the_file_carries_is_kept(self):
         # what the tokenizer leaves when the GGUF has a template, as IsValorum's has

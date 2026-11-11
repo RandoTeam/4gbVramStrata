@@ -28,9 +28,9 @@ what a person sees. Both are now measured side by side, with the same saved prom
 | Flint UD-Q3_K_XL | raw continuation | 21.6 (21.2-23.3) | 326 tokens/s | 28 of 38-40 |
 
 The engine was `strata-fourgbvram.exe` with SHA-256 `a37654f5f940047f…`, built from the commit this page ships with;
-the settings are the ones setup writes (Clover `--tail-skip 6 --no-graphs --kv q8_0`; Flint `--prompt-batch 512
---expert-swaps 32 --no-graphs`). The rows are `bench/speed/results/*.json`, the appended log is `bench/speed/runs.log`,
-and the harness is `bench/speed/run.py`.
+the settings are the ones setup writes (Clover `--tail-skip 6 --no-graphs --kv q8_0`, plus `--lookup 5` from
+2026-11-07; Flint `--prompt-batch 512 --expert-swaps 32 --no-graphs`). The rows are `bench/speed/results/*.json`, the
+appended log is `bench/speed/runs.log`, and the harness is `bench/speed/run.py`.
 
 **The earlier table — 47.5 and 40.7 written tokens/s — is not reproduced.** Its prompt was not saved and its logs were
 lost, so it cannot be re-run; the same request today writes at 38.1 and 21.9. It is kept further down with that mark,
@@ -42,6 +42,29 @@ Two things stand out:
   where its time goes: the earlier 40.7 was written on a task where the guesses were kept.
 - **The raw continuation is not always faster than chat.** With a question at the end of the text, continuing the
   document is the *harder* task (Clover 31.1 against 38.1), which is the opposite of what a prose prompt shows.
+
+## 2026-11-07: the repeat-match floor (`--lookup 5`)
+
+The saved-prompt run on 2026-11-07 wrote **32.6 tokens/s (29.1-33.6)**, prompt read 437, eight runs, same engine and
+settings plus `--lookup 5`. The same config without it measured **29.4 (28.7-33.8)** earlier that day. This is not a
+new absolute record - the 38.1 row above is from another session and does not reproduce - but it is the first change
+since `--kv q8_0` that raises the median without touching prefill.
+
+The repeat drafter indexes trigrams and proposes what followed the most recent repeat; `--lookup N` is the shortest
+repeat it may use (the engine's default is 3). Two interleaved A/Bs on the saved prompt, four rounds each:
+
+| `--lookup` | A/B 1, written tokens/s | A/B 2, written tokens/s | Prompt read |
+| ---: | ---: | ---: | ---: |
+| 3 (default) | 29.2 (27.7-30.7) | - | 434 |
+| **5** | **32.8 (28.6-33.3)** | **31.1 (26.7-32.3)** | 434 |
+| 6 | - | 27.8 (26.2-29.4) | 433 |
+| 8 | - | 27.9 (24.7-30.9) | 435 |
+| 12 | - | 27.8 (27.1-28.8) | 435 |
+
+At 5 the drafter stops paying for the 3- and 4-token matches that were usually wrong; at 6 and above it finds too few
+matches on this prompt to pay for itself. The output is verified either way: the 8-prompt subset of the 22-prompt gate
+passed 8/8 with `--lookup 5` (math, logic, code, JSON, tool call, Russian, instruction, fact). The full gate is the next
+step. Setup writes `--lookup 5` for Clover on a card of 6 GB or less, beside `--tail-skip 6`, `--no-graphs`, `--kv q8_0`.
 
 - *prompt N tokens* is what the request carried; *reused* is what the conversation cache already held, *read* is
   what the engine had to take in, and the speed is for the read part.

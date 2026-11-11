@@ -527,6 +527,8 @@ FAMILIES = {
     # less, and the third is by name (fourgbvram_default()).  "windows": installed by setup and run there, on one PC.
     # "ran_on_gb": the smallest card it has run on, 32 GB without the key.  "tail_skip": the engine's --tail-skip,
     # for the family whose answers it moves no more than the Strata project's default moves its own (docs/BACKENDS.md).
+    # "lookup": the engine's --lookup floor, measured on a 4 GB card; applied to cards of 6 GB or less until a
+    # larger one is measured.
     # "expert_swaps": the engine's --expert-swaps, for a family measured on a 4 GB card to prefer fewer uploads in
     # flight than the engine's maximum (Flint: 38.0 against 30.6 written tokens/s on the settled answer, 4 of 4 pairs).
     # "laptop_tps": tokens/s written after a prompt that fills each context on the 8 GB laptop, where the family's
@@ -667,6 +669,11 @@ FAMILIES = {
                "tail_skip": 6,      # 4 GB: +16% written tokens/s at a 2K prompt (47.5 against 37.1 with the graphs
                                     # off), +6% at 24K with the 8-bit caches; the answers move a little, eight prompts
                                     # were correct in both (docs/BENCH-4GB.md)
+               "lookup": 5,         # 4 GB: require a 5-token repeat before a guess.  The engine's default 3 proposed
+                                    # many wrong 3-4 token matches; 6 and up proposed little or nothing on the
+                                    # saved prompt and did not beat it.  4 rounds interleaved: 32.8 against 29.2
+                                    # written tokens/s, prefill unchanged (docs/BENCH-4GB.md).  Applied to cards
+                                    # of 6 GB or less until tested above.
                "no_graphs": True,   # 4 GB: 47.9 against 37.1 written tokens/s without CUDA graphs, 3 of 3 pairs
                "kv": "q8_0",        # 4 GB, Clover's clover_moe: half the attention caches' VRAM, which the expert cache
                                     # takes: at 24K of context 39.0 against 30.9 written tokens/s and a prompt read
@@ -7026,6 +7033,10 @@ def fourgbvram_setup(a, family, gpu, hip, cuda_tk, multi, ram, data, elsewhere, 
            "that much less)")
     if fam.get("tail_skip"):
         args += ["--tail-skip", str(fam["tail_skip"])]
+    if fam.get("lookup") and vram <= 6:
+        args += ["--lookup", str(fam["lookup"])]
+        ok(f"repeat guesses need a {fam['lookup']}-token match (--lookup): +12% written tokens/s on a 4 GB card, "
+           "prefill unchanged (docs/BENCH-4GB.md)")
     if fam.get("expert_swaps"):
         args += ["--expert-swaps", str(fam["expert_swaps"])]
     if fam.get("no_graphs"):
