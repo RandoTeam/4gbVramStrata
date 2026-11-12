@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """4gbVramStrata one-click setup and start (Windows and Linux, NVIDIA or AMD GPUs).
 
-    START-HERE.bat  (Windows)   /   ./setup.sh  (Linux)      - they install Python if needed and run this file
+    ./setup.sh  (Linux)   /   python setup.py  (Windows, no launcher)   - they install Python if needed and run this file
 
 The first time it asks four questions - which model (the original Qwen3.8-Flash-Next or the Swift 1.5 fine-tune),
 which size, how much context, and whether the model should also read images - then installs everything and starts the model on http://127.0.0.1:8080 (OpenAI- and Anthropic-compatible
@@ -939,7 +939,8 @@ FOURGBVRAM_EXE = "strata-fourgbvram.exe" if WIN else "strata-fourgbvram"
 FOURGBVRAM_PREBUILT_URL = os.environ.get("STRATA_FOURGBVRAM_PREBUILT_URL",
                                    os.environ.get("STRATA_POLY_PREBUILT_URL",  # name before the rename
                                    "https://github.com/RandoTeam/4gbVramStrata/releases/latest/download/"))
-FOURGBVRAM_ASSET = "strata-fourgbvram-windows-x64-{src}.zip"
+FOURGBVRAM_ASSET = ("strata-fourgbvram-windows-x64-{src}.zip" if WIN
+                    else "strata-fourgbvram-linux-x64-{src}.tar.gz")
 # A model of strata-fourgbvram that reads pictures has its image encoder on the GPU from this much VRAM (GiB), and on the
 # CPU below it: the encoder holds 1.6 to 2.4 GB there, which a smaller card needs for the model
 FOURGBVRAM_VISION_GPU_GB = 15.5
@@ -5665,7 +5666,7 @@ def update_install(have: list, a) -> int:
     keeps its engine (update_installed_engine says to close it and run this again)."""
     have = [p for p in have if model_config(p)]        # #549: a strata-*.json that is no model config is skipped
     if not have:
-        say("  No model is installed in this 4gbVramStrata folder yet: run START-HERE.bat (Linux: ./setup.sh) to set it up -")
+        say("  No model is installed in this 4gbVramStrata folder yet: run ./setup.sh to set it up -")
         say("  it finds an earlier install's model files next to it and reuses them.")
         return 0
     pip_install(requirement_lines() if REQUIREMENTS.exists() else PY_PACKAGES,

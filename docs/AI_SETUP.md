@@ -3,7 +3,8 @@
 This page is written for an AI coding assistant (Claude Code, Cursor, Codex, GitHub Copilot, ...) that a user asked to
 set up 4gbVramStrata on their PC. 4gbVramStrata runs the Qwen3.8-Flash-Next model locally on one NVIDIA or AMD graphics card plus
 system RAM, and serves an OpenAI- and Anthropic-compatible API on `http://127.0.0.1:8080`. The human-oriented
-version of everything below is [INSTALL.md](INSTALL.md).
+version of everything below is [INSTALL.md](INSTALL.md). **This repository is the Linux fork**; Windows notes are
+kept from the original public fork and do not apply here — every setup command is `./setup.sh`.
 
 Work through the steps in order. Tell the user what you are doing in plain words; they may not be technical.
 
@@ -25,19 +26,18 @@ Work through the steps in order. Tell the user what you are doing in plain words
 The quickest way is setup's own check, which prints the GPU(s), driver, RAM, CPU, free disk and whether this PC can run
 4gbVramStrata, and installs nothing except Python and the `.venv` it needs to run (step 2 gets the repository first):
 
-```
-Windows:  START-HERE.bat --check
-Linux:    ./setup.sh --check
+```bash
+./setup.sh --check
 ```
 
 To check by hand:
 
-| What | Windows (PowerShell) | Linux |
-| --- | --- | --- |
-| OS | `[Environment]::OSVersion` | `cat /etc/os-release` |
-| NVIDIA GPU, VRAM, driver | `nvidia-smi --query-gpu=index,name,memory.total,driver_version --format=csv` | the same |
-| AMD GPU | `Get-CimInstance Win32_VideoController \| Select-Object Name, AdapterRAM` (AdapterRAM is capped at 4 GB; trust the model name) | `lspci \| grep -i -E 'vga\|display'`; VRAM: `cat /sys/class/drm/card*/device/mem_info_vram_total` (bytes); `rocm-smi` only if ROCm is installed |
-| RAM | `(Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory / 1GB` | `free -g` |
+| What | Linux |
+| --- | --- |
+| OS | `cat /etc/os-release` |
+| NVIDIA GPU, VRAM, driver | `nvidia-smi --query-gpu=index,name,memory.total,driver_version --format=csv` |
+| AMD GPU | `lspci \| grep -i -E 'vga\|display'`; VRAM: `cat /sys/class/drm/card*/device/mem_info_vram_total` (bytes); `rocm-smi` only if ROCm is installed |
+| RAM | `free -g` |
 | Free disk | `Get-PSDrive -PSProvider FileSystem` | `df -h .` |
 
 Requirements (details: [INSTALL.md](INSTALL.md#what-you-need)):
@@ -50,7 +50,7 @@ Requirements (details: [INSTALL.md](INSTALL.md#what-you-need)):
   driver. If the driver is missing or too old, tell the user to update it (NVIDIA App / nvidia.com/drivers, or AMD
   Software) and restart; do not install drivers yourself unless they ask.
 - **RAM:** 32 GB or more (see step 3). **Disk:** ~80 GB free, ideally on an NVMe SSD. **CPU:** x86-64 with AVX2. Without AVX2 (Xeon E5 v1/v2 and older) setup still installs, as an experimental and slow build it compiles on the PC (10-20 minutes): tell the user that before starting ([INSTALL.md](INSTALL.md#older-cpus-experimental)).
-- **OS:** Windows 10/11 or Linux (Ubuntu 22.04/24.04/26.04 and Debian 12/13 are fully automatic; Debian 13 and Ubuntu 26.04 get the oldest CUDA 13 their NVIDIA repo has, currently 13.1 and 13.3).
+- **OS:** Linux (Ubuntu 22.04/24.04/26.04 and Debian 12/13 are fully automatic; Debian 13 and Ubuntu 26.04 get the oldest CUDA 13 their NVIDIA repo has, currently 13.1 and 13.3).
 
 If the PC does not meet them, say which part is missing and stop.
 
@@ -118,14 +118,13 @@ takes Q4_K_M, Q2_K on a PC with little RAM, or Q3_K_M by name. The support is ne
 
 ## 4. Run setup without questions
 
-From the 4gbVramStrata folder (Windows: in `cmd`, or `cmd /c START-HERE.bat ...` from PowerShell):
+From the 4gbVramStrata folder:
 
-```
-Windows:  START-HERE.bat --yes --family qwen --model IQ2_XS --no-start
-Linux:    ./setup.sh --yes --family qwen --model IQ2_XS --no-start
+```bash
+./setup.sh --yes --family qwen --model IQ2_XS --no-start
 ```
 
-The flags (all of them: `START-HERE.bat --help`):
+The flags (all of them: `./setup.sh --help`):
 
 | Flag | Meaning |
 | --- | --- |
@@ -173,15 +172,14 @@ Notes:
 
 ## 6. Start the server
 
-Setup prints the start script it wrote (`start script: run-<model>.bat`). The name is the family tag plus the size,
+Setup prints the start script it wrote (`start script: run-<model>.sh`). The name is the family tag plus the size,
 lower case: `run-iq2_xs`, `run-swift-iq2_xs`, `run-coder-iq1_m`, `run-unsloth-ud-iq4_xs`.
 
-```
-Windows (PowerShell):  Start-Process -FilePath ".\run-iq2_xs.bat"            (opens its own window)
-Linux:                 nohup ./run-iq2_xs.sh > strata-server.out 2>&1 &
+```bash
+nohup ./run-iq2_xs.sh > strata-server.out 2>&1 &
 ```
 
-Or `START-HERE.bat` / `./setup.sh` without flags, which starts the installed model (it asks which one when several are
+Or `./setup.sh` without flags, which starts the installed model (it asks which one when several are
 installed; add `--yes` to take the first). The server opens the user's browser on `http://127.0.0.1:8080` when it is
 ready. Closing its window (or stopping the process) stops the model.
 

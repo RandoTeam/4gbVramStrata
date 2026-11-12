@@ -4,6 +4,10 @@ The technical side of 4gbVramStrata: every measured number, the API, images, all
 New here? Start with the [README](../README.md); installing step by step is in [INSTALL.md](INSTALL.md), the models in
 [MODELS.md](MODELS.md), common problems in [TROUBLESHOOTING.md](TROUBLESHOOTING.md).
 
+> **This repository is the Linux fork.** The Windows section below and the `START-HERE.bat` examples are kept from the
+> original public fork as history. On Linux every setup command is `./setup.sh` (with the same flags), the start
+> scripts are `run-<model>.sh`, and the benchmark is `./bench.sh --long`.
+
 > **On this page:** [Speed](#speed-measured) · [Other GPUs](#other-gpus-estimated) · [Which model?](#which-model) ·
 > [Requirements](#before-you-start) · [Windows](#windows) · [Linux](#linux) · [API](#using-it) ·
 > [MCP tools](#tools-from-mcp-servers) · [MCP server](#manage-strata-from-your-ai-assistant-mcp-server) ·

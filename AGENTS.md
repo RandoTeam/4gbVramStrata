@@ -7,9 +7,10 @@ this file is the contract.
 
 ## The machine, and the two models this fork is about
 
-**This fork now runs on Linux** (Ubuntu 26.04, CUDA 13.3, driver 595), on the same laptop that produced the Windows
-numbers below: RTX 3050 Laptop 4 GB (`sm_86`), Ryzen 5 5500U (6 cores, 12 threads), 30 GB usable RAM. Windows is kept
-as a secondary target; every command in this file is the Linux one.
+**This repository is the Linux fork** (Ubuntu 26.04, CUDA 13.3, driver 595), on the same laptop that produced the
+Windows numbers below: RTX 3050 Laptop 4 GB (`sm_86`), Ryzen 5 5500U (6 cores, 12 threads), 30 GB usable RAM. Every
+command in this file is the Linux one. The public [RandoTeam/4gbVramStrata](https://github.com/RandoTeam/4gbVramStrata)
+keeps the Windows launchers and the prebuilt Windows engine; do not add `.bat` entry points here.
 
 | Model | File | Chat, tokens/s | Reads the prompt | What setup writes |
 | --- | ---: | ---: | ---: | --- |
@@ -65,11 +66,11 @@ the visible answer starts: use 2000 and up.
     ./tools/build_131k.sh                     # dev engine: CUDA, sm_86 (detected), into build-131k
     ninja -C build-131k strata-fourgbvram     # incremental, with .venv/bin/ninja
     .venv/bin/python tools/make_fourgbvram_release.py OUT_DIR   # portable engine; needs a clean tree
-    .venv/bin/python -m unittest discover -s tools -p "test_setup_*.py"   # 740 tests, no GPU and no downloads
+    .venv/bin/python -m unittest discover -s tools -p "test_setup_*.py"   # 741 tests, no GPU and no downloads
     .venv/bin/python tools/brand_names.py --check
-    .venv/bin/python tools/package_release_131k.py     # the release zip; --check verifies the allowlist
+    .venv/bin/python tools/package_release_131k.py     # the Linux tarball; --check verifies the allowlist
 
-The release notes' table moves with `docs/BENCH-4GB.md`, and the zip is rebuilt from the commit that changed a number.
+The release notes' table moves with `docs/BENCH-4GB.md`, and the tarball is rebuilt from the commit that changed a number.
 
 ## Speed only ships with quality
 

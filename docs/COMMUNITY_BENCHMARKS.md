@@ -3,7 +3,7 @@
 Share measurements from your own hardware so other users can judge how Strata
 might run on a similar machine. This guide suggests a report format and a pull
 request workflow; a single model, GPU, or context length is enough to contribute.
-The quickest way is the built-in benchmark: [`BENCH.bat` / `./bench.sh`](#run-the-benchmark) writes a report in this format.
+The quickest way is the built-in benchmark: [`./bench.sh`](#run-the-benchmark) writes a report in this format.
 
 Existing [benchmark reports](../bench/results/) provide examples. The
 [engine 0.1.26 speed report](../bench/results/2026-09-29-speed-0126/README.md)
@@ -195,7 +195,7 @@ fast.
 
 ## Run the benchmark
 
-The simplest report is one command after setup. Windows: double-click `BENCH.bat`. Linux: `./bench.sh`. Or
+The simplest report is one command after setup: `./bench.sh --long`. Or
 `python tools/strata_bench.py` from the Strata folder. Setup also offers it at the end of an interactive install
 (default no).
 

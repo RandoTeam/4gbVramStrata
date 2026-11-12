@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """One command that measures this 4gbVramStrata install the way it is used, and writes a report you can share.
 
-    BENCH.bat                      (Windows)        ./bench.sh        (Linux)        python tools/strata_bench.py
+    ./bench.sh                                      python tools/strata_bench.py
 
 It starts the server with your existing settings (the newest strata-*.json of this folder, or --config FILE), or uses
 the one already running (it checks the config's port, or --url http://host:port), and sends a fixed suite through the
@@ -989,7 +989,7 @@ def main(argv=None) -> int:
                   f"{names}", file=sys.stderr)
             return 2
         if cfg_path is None or not cfg_path.is_file():
-            print("No 4gbVramStrata model is set up in this folder: run START-HERE.bat (Windows) or ./setup.sh (Linux) first, "
+            print("No 4gbVramStrata model is set up in this folder: run ./setup.sh first, "
                   "or give --url of a running server.", file=sys.stderr)
             return 2
         cfg = json.loads(cfg_path.read_text(encoding="utf-8-sig"))

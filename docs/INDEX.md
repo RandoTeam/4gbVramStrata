@@ -5,7 +5,8 @@ first, then the page that owns the question.
 
 ## 1. This fork's own evidence — measured on the reference laptop
 
-RTX 3050 Laptop 4 GB, Ryzen 5 5500U, 32 GB, Windows 11. Only these pages carry numbers that were measured *here*.
+RTX 3050 Laptop 4 GB, Ryzen 5 5500U, 32 GB. The Windows 11 numbers are history; the Linux (Ubuntu 26.04) section
+of BENCH-4GB.md is this repository's current result. Only these pages carry numbers that were measured *here*.
 
 | Page | What it answers |
 | --- | --- |

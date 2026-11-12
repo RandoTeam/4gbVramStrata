@@ -109,8 +109,9 @@ cd 4gbVramStrata
 Unlike the Windows release, there is no prebuilt Linux engine: setup compiles `strata-fourgbvram` once for your card
 (5-20 minutes, needs the CUDA Toolkit; setup installs it when it is missing). Nothing else needs a compiler.
 
-**Windows 10/11 (secondary):** the same steps with `START-HERE.bat`, `SETUP.bat` and `run-<model>.bat`; the release zip
-already contains the engine for every RTX 20 to RTX 50 card.
+This repository is **Linux-only**. The original public fork,
+[RandoTeam/4gbVramStrata](https://github.com/RandoTeam/4gbVramStrata), keeps the Windows launchers (`START-HERE.bat`,
+`SETUP.bat`, `UPDATE.bat`, `BENCH.bat`) and the prebuilt Windows engine.
 
 Either way the first run downloads the Python packages (a few hundred MB) and the model.
 

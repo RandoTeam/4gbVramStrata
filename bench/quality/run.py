@@ -3,7 +3,7 @@
     python bench/quality/run.py --model clover-apex-i-nanoplus --port 8080
     python bench/quality/run.py --model flint-ud-q3_k_xl --out bench/quality/results/flint.json
 
-The server must already be running with the model loaded (START-HERE.bat, or serve/server.py --config ...).  Every
+The server must already be running with the model loaded (./run-<model>.sh, or serve/server.py --config ...).  Every
 prompt is greedy (temperature 0) with a generous max_tokens, because the reasoning block counts against it.  The checks
 are deliberately shallow - a smoke test that the model still answers the question - not a benchmark: they catch an
 answer that is empty, off-topic, in the wrong language or refuses, and they say pass or fail, never a score.

@@ -1,12 +1,12 @@
-"""Build the Windows release zip of 4gbVramStrata with the ready-made 131K engine.
+"""Build the Linux release tarball of 4gbVramStrata with the 131K engine.
 
-The zip is what a user downloads: START-HERE.bat, setup.py, the server and web app, the tools setup runs, the
-documents a user reads, engine-fourgbvram/ (the built strata-fourgbvram.exe with its BUILD.json), and the engine's
-sources.  The sources are there because setup.source_hash() walks them: without them the shipped BUILD.json names a
-source the zip does not have, and setup takes the engine for stale and tries to compile one.  Tests, benchmark
-records, the paper, the local build folders and the quarantined working files (_attic/) stay out.
+The tarball is what a user downloads: setup.sh, update.sh, bench.sh, setup.py, the server and web app, the tools
+setup runs, the documents a user reads, engine-fourgbvram/ (the built strata-fourgbvram with its BUILD.json), and the
+engine's sources.  The sources are there because setup.source_hash() walks them: without them the shipped BUILD.json
+names a source the tarball does not have, and setup takes the engine for stale and tries to compile one.  Tests,
+benchmark records, the paper, the local build folders and the quarantined working files (_attic/) stay out.
 
-    python tools/package_release_131k.py             # build dist/4gbVramStrata-v<version>-131k-win-x64.zip
+    python tools/package_release_131k.py             # build dist/4gbVramStrata-v<version>-131k-linux-x64.tar.gz
     python tools/package_release_131k.py --check     # list what is missing or would be left out, write nothing
     python tools/package_release_131k.py --engine DIR  # take the engine from DIR instead of engine-fourgbvram/
 
@@ -18,14 +18,14 @@ import os
 import re
 import shutil
 import sys
-import zipfile
+import tarfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 
 # Files a user runs or setup needs, relative to ROOT.  A missing one stops the build.
 FILES = [
-    "START-HERE.bat", "SETUP.bat", "UPDATE.bat",
+    "setup.sh", "update.sh", "bench.sh",
     "setup.py", "fourgbvramstrata.py", "chat.py",
     "requirements.txt", "LICENSE", "README.md",
 ]
@@ -83,21 +83,21 @@ def engine_files(engine: Path) -> list:
     if not engine.is_dir():
         return []
     return [Path("engine-fourgbvram", p.name) for p in sorted(engine.iterdir())
-            if p.is_file() and (p.suffix.lower() in (".exe", ".dll") or p.name == "BUILD.json")]
+            if p.is_file() and (p.name.startswith("strata-fourgbvram") or p.name == "BUILD.json")]
 
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--check", action="store_true", help="list problems, write nothing")
     ap.add_argument("--engine", default=str(ROOT / "engine-fourgbvram"),
-                    help="folder with strata-fourgbvram.exe and BUILD.json (default: engine-fourgbvram/)")
+                    help="folder with strata-fourgbvram and BUILD.json (default: engine-fourgbvram/)")
     a = ap.parse_args()
 
     ver = version()
-    release_name = f"4gbVramStrata-v{ver}-131k-win-x64"
+    release_name = f"4gbVramStrata-v{ver}-131k-linux-x64"
     dist = ROOT / "dist"
     stage = dist / release_name
-    zip_path = dist / f"{release_name}.zip"
+    tar_path = dist / f"{release_name}.tar.gz"
 
     missing = [f for f in FILES if not (ROOT / f).is_file()]
     plan = [Path(f) for f in FILES if (ROOT / f).is_file()]
@@ -110,7 +110,7 @@ def main() -> int:
     plan = list(dict.fromkeys(plan))                 # tools/vision arrives from TREES and SOURCES alike
     eng = engine_files(Path(a.engine))
     if not eng:
-        missing.append(f"{Path(a.engine).name}/strata-fourgbvram.exe")
+        missing.append(f"{Path(a.engine).name}/strata-fourgbvram")
 
     print(f"release: {release_name}")
     print(f"files:   {len(plan)} from the tree (the engine's sources included), {len(eng)} from {Path(a.engine).name}/")
@@ -134,12 +134,12 @@ def main() -> int:
         dst.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(src, dst)
 
-    zip_path.parent.mkdir(parents=True, exist_ok=True)
-    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED, compresslevel=6) as zf:
+    tar_path.parent.mkdir(parents=True, exist_ok=True)
+    with tarfile.open(tar_path, "w:gz", compresslevel=6) as tf:
         for p in sorted(stage.rglob("*")):
             if p.is_file():
-                zf.write(p, p.relative_to(dist))
-    print(f"ready: {zip_path} ({zip_path.stat().st_size / 2**20:.1f} MB)")
+                tf.add(p, p.relative_to(dist), recursive=False)
+    print(f"ready: {tar_path} ({tar_path.stat().st_size / 2**20:.1f} MB)")
     return 0
 
 

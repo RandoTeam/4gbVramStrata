@@ -4,8 +4,9 @@ What this project's engine does on the laptop it is made for. Every number here 
 nothing is estimated.
 
 **The laptop:** NVIDIA GeForce RTX 3050 Laptop, 4 GB of VRAM, `sm_86`; AMD Ryzen 5 5500U, 6 cores and 12 threads;
-32 GB of DDR4-3200; Windows 11. The engine is built from this repository with CUDA 12.8
-(`engine-fourgbvram/strata-fourgbvram.exe`, `kSnapPlaces = 7`).
+32 GB of DDR4-3200. The Windows 11 rows below were measured with CUDA 12.8 (`strata-fourgbvram.exe`); the
+[Linux section](#linux-ubuntu-2604-2026-11-12-the-same-laptop-the-os-changed) has the same hardware on Ubuntu 26.04
+with a locally compiled engine (CUDA 13.3).
 
 **What the server prints.** Each request adds one line to the log:
 
@@ -47,6 +48,41 @@ Two things stand out:
   what the engine had to take in, and the speed is for the read part.
 - *generated* is the answer, and its speed counts from the first token to the last.
 - *drafts accepted* is the draft head's guesses the model kept; the rest it replaced.
+
+## Linux (Ubuntu 26.04, 2026-11-12): the same laptop, the OS changed
+
+The same hardware as above, now running Ubuntu 26.04, driver 595, CUDA 13.3, with the engine compiled locally from
+this repository (`engine-fourgbvram/strata-fourgbvram`, SHA-256 `285f20e579b6bc19…`, `sm_86`). The run config is
+unchanged: `--max-context 32768 --tail-skip 6 --no-graphs --kv q8_0`.
+
+**The saved-prompt chat task** (`bench/speed/prompt.txt`, 1,904 tokens, 128 new, eight runs):
+
+| Model | Task | Written tokens/s, median (range) | Prompt read |
+| --- | --- | ---: | ---: |
+| Clover APEX-I-NANOPLUS | **chat through the server** | **36.1 (34.2-44.3)** | **543 tokens/s** |
+| Clover APEX-I-NANOPLUS (Windows 11, above) | chat through the server | 38.1 (32.6-39.1) | 449 tokens/s |
+
+The decode medians are inside each other's range: the OS change did not make the answer faster or slower in any way
+that reproduces. Prompt reading is the real difference: **543 against 449 tokens/s, about 21% faster**.
+
+**The full suite** (`./bench.sh --long --runs 3`, the engine's own timings, medians of three fresh prompts):
+
+| Test | Result |
+| --- | ---: |
+| chat decode, 9 short answers | 38.8 tokens/s (34.0-44.4) |
+| 4K prompt, 4,019 tokens | 712.5 tokens/s, first token 5.65 s |
+| 16K prompt, 16,058 tokens | 661.4 tokens/s, first token 24.30 s |
+| **32K prompt, 31,294 tokens** | **613.6 tokens/s, first token 51.06 s** |
+| agent session (6 turns, 4 tools) | cache hit 68.5%, turn decode 32.8 tokens/s |
+
+The 32K row is a real 31,294-token prompt with 24 new tokens, not a 1,900-token prompt with a 32K context *setting*.
+It is the row to quote for "32K on this laptop". The report is
+`bench/results/2026-11-12-community-rtx-3050-laptop-gpu-clover-35b-a3b-preview-apex-i-nanoplus-q/`.
+
+**What changed for Linux.** Setup installs CUDA on Ubuntu 26.04 from NVIDIA's repository (there is no
+`cuda-toolkit-13-0` there; it takes 13.3). The benchmark no longer calls PowerShell or writes a `C:\Temp` profile. The
+32K test used to be skipped whenever the context was 32768, because the old margin check demanded 32768 + 24 + 256
+tokens; it now measures 32,000 and reports the actual count (31,294).
 
 ## Clover-35B-A3B-Preview APEX-I-NANOPLUS
 
@@ -456,5 +492,5 @@ reading faster.
 
 The server prints the same lines for your requests, so a chat and a long prompt are enough. For a run with numbers
 side by side, `python fourgbvramstrata.py benchmark --model <name> --prompt-tokens 24000`
-([what it sends and prints](BACKENDS.md#benchmark)) and `BENCH.bat` (`./bench.sh`) write a report you can share
+([what it sends and prints](BACKENDS.md#benchmark)) and `./bench.sh` write a report you can share
 ([how](COMMUNITY_BENCHMARKS.md#run-the-benchmark)).
