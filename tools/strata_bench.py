@@ -14,7 +14,7 @@ real HTTP API, three runs each, medians reported:
                 of a file to the conversation and continuing from the model's own earlier replies - how many prompt
                 tokens the conversation cache reused, how many had to be read again, time to first token per turn
   5. --clients N   N requests at once (the server needs --batch for them to run together): total tok/s, p50/p95 latency
-  6. --long 32K    the same prompt test at about 32,768 tokens
+  6. --long 32K    the same prompt test at about 32,000 tokens (the largest that fits a 32K context with its answer)
 
 Speeds are the engine's own timings (the `timings` of the answer: prompt_per_second, predicted_per_second); time to first
 token and latency are measured by this client.  Thinking is off for the suite (--think turns it on), so the answers are
@@ -55,6 +55,7 @@ import serve_load                                   # noqa: E402  the burst clie
 SCHEMA = 1
 CHAT_MAX_TOKENS = 100
 LONG_MAX_TOKENS = 24
+LONG_TARGET = 32000            # a 32K context minus the answer and a safety margin: 32,768 itself never fits
 AGENT_MAX_TOKENS = 64
 AGENT_TURNS = 5
 AGENT_WORDS = 1500
@@ -280,14 +281,17 @@ class Suite:
                             "prompt_tokens": stat(r["prompt_tokens"] for r in good)}
 
     def run_prompt(self, tokens: int, label: str):
-        if self.ctx and tokens + LONG_MAX_TOKENS + 256 > self.ctx:
+        # The prompt and the answer share one context.  A 32K context can therefore never hold a 32,768-token
+        # prompt plus an answer: measure the deepest prompt that leaves room for the answer, and say which.
+        target = min(tokens, self.ctx - LONG_MAX_TOKENS - 256) if self.ctx else tokens
+        if target < 1024:
             self.out["skipped"][label] = f"the context is {self.ctx} tokens"
             self.log(f"{label} prompt: skipped (the context is {self.ctx} tokens)")
             return
-        self.log(f"{label} prompt: {self.runs} fresh prompts of about {tokens} tokens, {LONG_MAX_TOKENS} new tokens")
+        self.log(f"{label} prompt: {self.runs} fresh prompts of about {target} tokens, {LONG_MAX_TOKENS} new tokens")
         rows = []
         for run in range(self.runs):
-            d = digest(chat(self.base, self.key, self.prompt_for(tokens, run), LONG_MAX_TOKENS, self.think))
+            d = digest(chat(self.base, self.key, self.prompt_for(target, run), LONG_MAX_TOKENS, self.think))
             d["run"] = run
             rows.append(d)
             if not d["ok"]:
@@ -296,7 +300,7 @@ class Suite:
                 self.log(f"  run {run + 1}: {d['prompt_tokens']} tokens, prompt {d['prompt_tps']} tok/s "
                          f"({d['reused_tokens'] or 0} reused), first token {d['ttft_s']} s")
         good = [r for r in rows if r["ok"]]
-        self.out["prompts"][label] = {"target_tokens": tokens, "requests": rows,
+        self.out["prompts"][label] = {"target_tokens": target, "requests": rows,
                                       "prompt_tps": stat(r["prompt_tps"] for r in good),
                                       "ttft_s": stat(r["ttft_s"] for r in good),
                                       "prompt_tokens": stat(r["prompt_tokens"] for r in good),
@@ -408,7 +412,7 @@ class Suite:
         if self.clients:
             self.run_clients(self.clients)
         if self.want_long:
-            self.run_prompt(32768, "32K")
+            self.run_prompt(LONG_TARGET, "32K")
         return self.out
 
 
@@ -951,7 +955,7 @@ def main(argv=None) -> int:
     ap.add_argument("--api-key", default=os.environ.get("STRATA_KEY", ""), help="the server's API key, if it has one (or STRATA_KEY)")
     ap.add_argument("--runs", type=int, default=3, help="runs per test (default 3)")
     ap.add_argument("--clients", type=int, default=0, metavar="N", help="also send N requests at once")
-    ap.add_argument("--long", action="store_true", help="also a prompt of about 32,768 tokens")
+    ap.add_argument("--long", action="store_true", help="also a prompt of about 32,000 tokens (a 32K context)")
     ap.add_argument("--think", action="store_true", help="leave thinking on (the default suite turns it off)")
     ap.add_argument("--out", help="where to write the results folder (default: bench/results)")
     ap.add_argument("--compare", metavar="DIR", help="a results folder (or its results.json) to put beside this run")

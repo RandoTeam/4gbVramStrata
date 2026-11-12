@@ -4539,7 +4539,7 @@ def cuda_apt_repo(osr):
     not one setup adds the CUDA keyring for.  Both families publish cuda-keyring and CUDA 13.x."""
     ver = osr.get("VERSION_ID", "").strip('"').replace(".", "")
     repo = {"ubuntu": "ubuntu", "debian": "debian"}.get(osr.get("ID", ""), "") + ver
-    return repo if repo in ("ubuntu2204", "ubuntu2404", "debian12", "debian13") else None
+    return repo if repo in ("ubuntu2204", "ubuntu2404", "ubuntu2604", "debian12", "debian13") else None
 
 
 def install_build_tools(gpu, yes):
@@ -4603,17 +4603,17 @@ def install_build_tools(gpu, yes):
             osr = dict(line.split("=", 1) for line in open("/etc/os-release").read().splitlines() if "=" in line)
             repo = cuda_apt_repo(osr)
             if repo is None:
-                fail("the CUDA Toolkit can be installed automatically on Ubuntu 22.04 / 24.04 and Debian 12 / 13 only",
+                fail("the CUDA Toolkit can be installed automatically on Ubuntu 22.04 / 24.04 / 26.04 and Debian 12 / 13 only",
                      "install it from https://developer.nvidia.com/cuda-downloads and run it again")
             deb = Path("/tmp/cuda-keyring.deb")
             download(f"https://developer.download.nvidia.com/compute/cuda/repos/{repo}/x86_64/cuda-keyring_1.1-1_all.deb",
                      deb, "CUDA repository key")
             run(["sudo", "dpkg", "-i", str(deb)])
             run(["sudo", "apt-get", "update"])
-            if repo.startswith("ubuntu"):                  # as before: 13.0, and a failed install stops setup here
+            if repo in ("ubuntu2204", "ubuntu2404"):       # as before: 13.0, and a failed install stops setup here
                 run(["sudo", "apt-get", "install", "-y", "cuda-toolkit-13-0"])
             else:
-                # Debian 13's CUDA repo carries no 13.0 package: take the oldest 13.x minor it has
+                # Debian 13 and Ubuntu 26.04's CUDA repos carry no 13.0 package: take the oldest 13.x minor they have
                 for minor in range(10):
                     if run(["sudo", "apt-get", "install", "-y", f"cuda-toolkit-13-{minor}"], check=False).returncode == 0:
                         break

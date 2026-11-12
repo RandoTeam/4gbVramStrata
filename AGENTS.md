@@ -7,16 +7,22 @@ this file is the contract.
 
 ## The machine, and the two models this fork is about
 
-RTX 3050 Laptop 4 GB (`sm_86`), Ryzen 5 5500U (6 cores, 12 threads), 32 GB DDR4-3200, Windows 11.
+**This fork now runs on Linux** (Ubuntu 26.04, CUDA 13.3, driver 595), on the same laptop that produced the Windows
+numbers below: RTX 3050 Laptop 4 GB (`sm_86`), Ryzen 5 5500U (6 cores, 12 threads), 30 GB usable RAM. Windows is kept
+as a secondary target; every command in this file is the Linux one.
 
 | Model | File | Chat, tokens/s | Reads the prompt | What setup writes |
 | --- | ---: | ---: | ---: | --- |
-| Clover-35B-A3B-Preview APEX-I-NANOPLUS | 11.7 GB | **38.1** (32.6–39.1) | 449 tokens/s | `--tail-skip 6 --no-graphs`, `--kv q8_0` on cards of 6 GB or less |
-| Flint 40B-A2.5B UD-Q3_K_XL | 17.2 GB | **21.9** (20.5–22.4) | 331 tokens/s | `--prompt-batch 512 --expert-swaps 32 --no-graphs` |
+| Clover-35B-A3B-Preview APEX-I-NANOPLUS | 12.6 GB | **38.1** Windows / **36.1** Linux | 449 Windows / 543 Linux tokens/s | `--tail-skip 6 --no-graphs`, `--kv q8_0` on cards of 6 GB or less |
+| Flint 40B-A2.5B UD-Q3_K_XL | 17.2 GB | **21.9** Windows | 331 tokens/s | `--prompt-batch 512 --expert-swaps 32 --no-graphs` |
 
-Measured 2026-11-03 on the saved prompt `bench/speed/prompt.txt` (about 1,900 tokens, a question at the end), 8 runs,
-quiet machine, engine `a37654f5f940047f…`; the rows are in `bench/speed/results/`. The marginal cost of a token is
+Windows numbers measured 2026-11-03 on the saved prompt `bench/speed/prompt.txt` (about 1,900 tokens, a question at the
+end), 8 runs, quiet machine, engine `a37654f5f940047f…`. The Linux Clover row is the same task on 2026-11-12 with a
+locally compiled engine (`285f20e579b6bc19…`); the full 32K suite is `bench/results/`. The marginal cost of a token is
 32.9 ms (Clover) and 46.2 ms (Flint) — that is what a long answer pays.
+
+**A 32K context is not a 32K prompt.** The headline chat row uses a ~1,900-token prompt with the context set to 32768;
+the depth test is `./bench.sh --long`, which reads ~32,000 tokens and answers 24. Never call the first one a 32K test.
 
 **`docs/BENCH-4GB.md` is the only page where this fork's speed numbers live.** Numbers on other hardware (RTX 5090, an
 8 GB laptop, AMD, Intel, Mac) are inherited from the donors: useful for how the engine works, not evidence for this
@@ -24,12 +30,15 @@ laptop.
 
 ## Run it, the way a user does
 
-    .venv\Scripts\python.exe serve\server.py --engine strata --config strata-clover-apex-i-nanoplus.json --port 8080
-    # then http://127.0.0.1:8080/ ; closing the window stops the engine
+    .venv/bin/python serve/server.py --engine strata --config strata-clover-apex-i-nanoplus.json --port 8080
+    # or: ./run-clover-apex-i-nanoplus.sh
+    # then http://127.0.0.1:8080/ ; Ctrl+C (or SIGTERM) stops the engine
 
-`run-clover.bat` and `run-flint.bat` are local conveniences for the same command and are git-ignored, as are the
+`run-clover.sh` and `run-flint.sh` are local conveniences for the same command and are git-ignored, as are the
 `strata-*.json` run configs: a fresh clone gets its config from setup, not from git. Start one model at a time — both
-use port 8080 and the same card.
+use port 8080 and the same card. On Linux the engine is this server's child; `./setup.sh` and the run script stop it
+with the server. If a run is killed with `SIGKILL`, remove the orphan engine (`pkill -f engine-fourgbvram/strata-fourgbvram`)
+before the next start.
 
 Every reply appends one line to `strata-<model>.log`: prompt tokens read, at what speed, answer tokens written, at what
 speed, and how many draft guesses were kept. Over the API, a small `max_tokens` is spent on the reasoning block before
@@ -37,8 +46,9 @@ the visible answer starts: use 2000 and up.
 
 ## Measure it — the only accepted way
 
-    python bench/speed/run.py --config strata-clover-apex-i-nanoplus.json --model clover --task chat --runs 8
-    python bench/quality/run.py --model local --repeat 2        # the 22-prompt gate; server already running
+    .venv/bin/python bench/speed/run.py --config strata-clover-apex-i-nanoplus.json --model clover --task chat --runs 8
+    ./bench.sh --long --runs 3                                  # the full suite: 4K, 16K and a 32,000-token prompt
+    .venv/bin/python bench/quality/run.py --model local --repeat 2   # the 22-prompt gate; server already running
 
 - **`chat` is a request through the server; `raw` is the engine continuing the text.** Different tasks, different
   speeds. Never mix them into one number, and never publish `raw` as the answer speed.
@@ -51,13 +61,13 @@ the visible answer starts: use 2000 and up.
 
 ## Build, test, release
 
-    tools\build_131k.bat                     # dev engine: CUDA 12.8, sm_86, into build-131k
-    ninja -C build-131k2 strata-fourgbvram   # incremental, after calling vcvars64.bat
-    python tools\make_fourgbvram_release.py OUT_DIR   # portable engine, CUDA 13.0, sm_75..120; needs a clean tree
-    python -m unittest discover -s tools -p "test_setup_*.py"   # 740 tests, no GPU and no downloads
-    python tools\brand_names.py --check
-    python tools\package_release_131k.py     # the release zip; --check verifies the allowlist
-    gh release upload v0.1.45-131k dist\4gbVramStrata-v0.1.45-131k-win-x64.zip --clobber
+    ./setup.sh                                # normal engine: builds strata-fourgbvram for this card with CUDA
+    ./tools/build_131k.sh                     # dev engine: CUDA, sm_86 (detected), into build-131k
+    ninja -C build-131k strata-fourgbvram     # incremental, with .venv/bin/ninja
+    .venv/bin/python tools/make_fourgbvram_release.py OUT_DIR   # portable engine; needs a clean tree
+    .venv/bin/python -m unittest discover -s tools -p "test_setup_*.py"   # 740 tests, no GPU and no downloads
+    .venv/bin/python tools/brand_names.py --check
+    .venv/bin/python tools/package_release_131k.py     # the release zip; --check verifies the allowlist
 
 The release notes' table moves with `docs/BENCH-4GB.md`, and the zip is rebuilt from the commit that changed a number.
 

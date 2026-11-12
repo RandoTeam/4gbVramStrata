@@ -21,19 +21,26 @@ because it never has to hold the model — only the hottest slice of it.
 
 This is a fork of [PolyStrata](https://github.com/VecSzn/PolyStrata), which is a fork of
 [Strata](https://github.com/Niko1221/Strata). It is tuned, measured and documented on one machine: an **RTX 3050
-Laptop with 4 GB of VRAM**, a Ryzen 5 5500U and 32 GB of RAM, on Windows 11.
+Laptop with 4 GB of VRAM**, a Ryzen 5 5500U and 32 GB of RAM — first on Windows 11, now on **Linux (Ubuntu 26.04,
+CUDA 13.3)**. The Windows numbers are kept as the reference; the Linux result is beside them.
 
 ## Measured on a 4 GB laptop
 
-Reference machine: RTX 3050 Laptop (4 GB, `sm_86`), Ryzen 5 5500U (6 cores, 12 threads), 32 GB DDR4-3200, Windows 11.
-The engine is built from this repository with CUDA 13 for `sm_75` to `sm_120`. **A chat request to the server — what a
-person actually uses** — on a saved prompt of about 1,900 tokens that ends in a question, 128 new tokens, 32K context,
-eight runs on a quiet machine. Median, with the range:
+Reference machine: RTX 3050 Laptop (4 GB, `sm_86`), Ryzen 5 5500U (6 cores, 12 threads), 32 GB DDR4-3200. The Windows
+rows were measured on Windows 11, the Linux row on Ubuntu 26.04 with a locally compiled engine (CUDA 13.3). The engine
+is built from this repository with CUDA 13 for `sm_75` to `sm_120`. **A chat request to the server — what a person
+actually uses** — on a saved prompt of about 1,900 tokens that ends in a question, 128 new tokens, 32K context, eight
+runs on a quiet machine. Median, with the range:
 
 | Model | File | Reads the prompt | Answers | Experts in VRAM |
 | --- | ---: | ---: | ---: | ---: |
-| Clover-35B-A3B-Preview APEX-I-NANOPLUS | 11.7 GB | 449 tokens/s | **38.1 tokens/s** (32.6-39.1) | 529 of 10,240 |
-| Flint 40B-A2.5B UD-Q3_K_XL | 17.2 GB | 331 tokens/s | **21.9 tokens/s** (20.5-22.4) | 518 of 12,032 |
+| Clover-35B-A3B-Preview APEX-I-NANOPLUS, Windows 11 | 11.7 GB | 449 tokens/s | **38.1 tokens/s** (32.6-39.1) | 529 of 10,240 |
+| Clover-35B-A3B-Preview APEX-I-NANOPLUS, Ubuntu 26.04 | 12.6 GB | **543 tokens/s** | **36.1 tokens/s** (34.2-44.3) | 784 of 10,240 |
+| Flint 40B-A2.5B UD-Q3_K_XL, Windows 11 | 17.2 GB | 331 tokens/s | **21.9 tokens/s** (20.5-22.4) | 518 of 12,032 |
+
+This table is a ~1,900-token prompt with a **32K context setting**, not a 32K-deep prompt. The depth test is
+`./bench.sh --long`: it reads about 32,000 tokens at 4K, 16K and 32K and answers 24 tokens at each depth
+([the suite](docs/COMMUNITY_BENCHMARKS.md)). On this laptop the 32K row is the slow one.
 
 The prompt is `bench/speed/prompt.txt`, the harness is `bench/speed/run.py`, and every run appends one line to
 `bench/speed/runs.log` with the engine's SHA-256. The same prompt in the engine's raw token-id mode — the model
@@ -83,19 +90,29 @@ has what that costs.
 
 ## Install
 
-Windows 10 or 11, 64-bit. An NVIDIA RTX 20 series card or newer, driver 580 or newer. 16 GB of RAM runs the smaller
-models, 32 GB the two measured above. Python 3.10 or newer: setup installs it for your user account if it is missing,
-no administrator needed.
+**Linux (the reference platform now):** Ubuntu 22.04/24.04/26.04 or Debian 12/13, 64-bit. An NVIDIA RTX 20 series card
+or newer, driver 580 or newer. 16 GB of RAM runs the smaller models, 32 GB the two measured above. Python 3.10 or newer:
+`./setup.sh` installs it (and, when it has to compile the engine, the CUDA Toolkit) through apt.
 
-1. Download **[the latest release](https://github.com/RandoTeam/4gbVramStrata/releases/latest)** and unzip it anywhere
-   with room for the model you want (11 to 92 GB).
-2. Run `START-HERE.bat`. On the first run it checks the PC, offers the models that fit, downloads one, writes its run
-   config and starts the server.
-3. Later runs start what is installed. `SETUP.bat` asks again — another model, another size, another context.
-   Setup writes a `run-<model>.bat` per installed model: one click, no questions.
+```bash
+git clone https://github.com/RandoTeam/4gbVramStrata.git
+cd 4gbVramStrata
+./setup.sh
+```
 
-The first run downloads the Python packages (a few hundred MB) and the model. Nothing needs a compiler: the engine is
-already inside the release, built for every RTX 20 to RTX 50 card.
+1. On the first run `./setup.sh` checks the PC, offers the models that fit, downloads one, writes its run config and
+   starts the server.
+2. Later runs start what is installed. `./setup.sh --setup` asks again — another model, another size, another context.
+   Setup writes a `run-<model>.sh` per installed model: one command, no questions.
+3. For a start with no questions: `./run-clover-apex-i-nanoplus.sh`.
+
+Unlike the Windows release, there is no prebuilt Linux engine: setup compiles `strata-fourgbvram` once for your card
+(5-20 minutes, needs the CUDA Toolkit; setup installs it when it is missing). Nothing else needs a compiler.
+
+**Windows 10/11 (secondary):** the same steps with `START-HERE.bat`, `SETUP.bat` and `run-<model>.bat`; the release zip
+already contains the engine for every RTX 20 to RTX 50 card.
+
+Either way the first run downloads the Python packages (a few hundred MB) and the model.
 
 ## Use it
 
