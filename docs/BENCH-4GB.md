@@ -100,6 +100,13 @@ inside its range. The second report is
 32K test used to be skipped whenever the context was 32768, because the old margin check demanded 32768 + 24 + 256
 tokens; it now measures 32,000 and reports the actual count (31,294).
 
+**64K is possible, with a price at depth.** A duplicate run config with `--max-context 65536` (the 32K one otherwise
+unchanged; local, not in git) starts on this card and keeps **674 of 10,240 experts** in VRAM (0.7 GiB, 3,515 MiB
+used), against 784 at 32K. A **57,897-token** prompt reads at **634.3 tok/s** (91.3 s) and its 16 new tokens decode at
+**8.2 tok/s** at that depth. So 64K is usable for a long document and a short answer, not for a fast conversation;
+32K remains the daily window. The launcher is `run-clover-apex-i-nanoplus-64k.sh`, and its desktop shortcut opens the
+chat page in the browser.
+
 ## Clover-35B-A3B-Preview APEX-I-NANOPLUS
 
 `Clover-35B-A3B-Preview.APEX-I-NanoPlus-V2.1.gguf`, 11.69 GB, 32K context, 2026-10-31. The run config is

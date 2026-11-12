@@ -7835,6 +7835,10 @@ def main() -> int:
         raise KeyboardInterrupt
     try:
         signal.signal(signal.SIGTERM, on_sigterm)
+        # Closing the terminal (the .desktop launcher runs it with Terminal=true) sends SIGHUP, not SIGTERM: take
+        # Ctrl+C's path there too, so the engine does not outlive the window on Linux.
+        if hasattr(signal, "SIGHUP"):
+            signal.signal(signal.SIGHUP, on_sigterm)
     except (ValueError, OSError, AttributeError):         # not the main thread
         pass
     try:
