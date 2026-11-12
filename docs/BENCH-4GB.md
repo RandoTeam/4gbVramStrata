@@ -79,6 +79,22 @@ The 32K row is a real 31,294-token prompt with 24 new tokens, not a 1,900-token 
 It is the row to quote for "32K on this laptop". The report is
 `bench/results/2026-11-12-community-rtx-3050-laptop-gpu-clover-35b-a3b-preview-apex-i-nanoplus-q/`.
 
+**After the performance profile (same day, second run).** CPU governor and power profile were set to `performance`
+before this run; the engine, config, model and prompts are the same, and the card was free (120 MiB used):
+
+| Test | Before | Performance profile | Change |
+| --- | ---: | ---: | ---: |
+| 4K prompt | 712.5 tok/s | 718.3 tok/s | +0.8% |
+| 16K prompt | 661.4 tok/s | 703.4 tok/s | +6.4% |
+| **32K prompt** | **613.6 tok/s** | **668.2 tok/s** | **+8.9%** |
+| 32K first token | 51.06 s | 46.90 s | -8.2% |
+| chat decode | 38.8 tok/s | 38.7 tok/s | unchanged |
+| agent decode | 32.8 tok/s | 33.1 tok/s | +0.9% |
+
+The gain is in prefill and grows with depth, which is where the CPU computes more of the experts; decode is unchanged
+inside its range. The second report is
+`bench/results/2026-11-12-community-rtx-3050-laptop-gpu-clover-35b-a3b-preview-apex-i-nanoplus-q-2/`.
+
 **What changed for Linux.** Setup installs CUDA on Ubuntu 26.04 from NVIDIA's repository (there is no
 `cuda-toolkit-13-0` there; it takes 13.3). The benchmark no longer calls PowerShell or writes a `C:\Temp` profile. The
 32K test used to be skipped whenever the context was 32768, because the old margin check demanded 32768 + 24 + 256
