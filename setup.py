@@ -8110,6 +8110,8 @@ def main() -> int:
                     "of VRAM. A size whose line says it starts with a small expert cache runs anyway, with its experts "
                     "on the CPU: --model NAME --yes installs it.")
             return 1
+        say("  Note: \"does not fit\" is a dedicated-VRAM/RAM estimate. On Windows 10, WDDM can run an over-size model")
+        say("        from system RAM (slowly); on native Linux the current engine fails the allocation instead.")
         say("\nThis PC can run 4gbVramStrata. Run it again without --check to install.")
         return 0
 

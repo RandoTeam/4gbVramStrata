@@ -130,8 +130,11 @@ picks a size from your RAM.
 **Fits:** LFM2.5 (from 11 GB), Qwen3.6 (from 13 GB), Ornith (from 14 GB), Tiel Coder (from 14 GB), Clover (from
 13 GB), Gemma 4 (from 11 GB), MiniCPM-V (from 16 GB; the Q4 file at 21 GB is tight), Flint (from 18 GB; tight).
 
-**Does not fit:** Kolibri 1 (from 29 GB), GLM 5.3 Flash (from 79 GB), DeepSeek V4 Flash (91 GB),
-Qwen3.8-Flash-Next (from 68 GB).
+**Does not fit in RAM:** Kolibri 1 (from 29 GB), GLM 5.3 Flash (from 79 GB), DeepSeek V4 Flash (91 GB),
+Qwen3.8-Flash-Next (from 68 GB). "Does not fit in RAM" is not "cannot run": the low-RAM mode reads the
+experts from the model file on the SSD, and on Windows 10 WDDM can also page VRAM into system RAM. On the
+reference laptop the owner has run **Qwen3.8-Flash-Next Q2_0**, **Qwen3.8-Flash-Next Coder**,
+**Gemma 4 QAT-UD-Q4_K_XL** and **Qwen3.6-35B-A3B UD-Q4_K_XL** there; they are slow, not impossible.
 
 Measured here so far: the two Cyber-Tiel-Coder sizes, Clover APEX-I-NANOPLUS and Flint UD-Q3_K_XL. At 32K to 131K
 they write 28 to 48 tokens/s; [the numbers, their logs and the settings measured one at a time](BENCH-4GB.md).

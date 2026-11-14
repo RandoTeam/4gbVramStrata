@@ -3,9 +3,32 @@
 This page is generated from the project's own check (`./setup.sh --check`) on the reference laptop:
 RTX 3050 Laptop, 4 GB VRAM (3,770 MiB usable), Ryzen 5 5500U, 31 GB RAM, Ubuntu 26.04.
 It is a **compatibility estimate**, not a download and not a benchmark: `--check` uses the same
-`vram_beside_gb`/`ram_gb`/`arena_gb` estimates setup uses to choose a size. A model that says
-"does not fit" needs more VRAM before its first expert, so no context/quant setting can fix it.
-"starts with a small expert cache" means it starts, but most experts run on the CPU and it is slow.
+`vram_beside_gb`/`ram_gb`/`arena_gb` estimates setup uses to choose a size. "starts with a small
+expert cache" means it starts, but most experts run on the CPU and it is slow.
+
+> **What "does not fit" does not mean.** It means "does not fit the card's **dedicated VRAM**".
+> Windows 10's WDDM driver can back a CUDA allocation with system RAM (`Sysmem Fallback`), so a model
+> that is over the 4 GB line can still run there, slowly. The owner has actually run **Qwen3.8-Flash-Next
+> Coder**, **Qwen3.8-Flash-Next Q2_0**, **Gemma 4 QAT-UD-Q4_K_XL** and **Qwen3.6-35B-A3B UD-Q4_K_XL**
+> on this same laptop under Windows 10. On native Linux the current engine uses `cudaMalloc`, which
+> fails instead of paging; our Linux tests of Qwen Q2_0 and Gemma did fail. The table below is therefore
+> a **native-Linux / dedicated-VRAM** table, not a universal "will not run" verdict.
+
+## Windows 10 vs native Linux: the same laptop
+
+| Model | Windows 10 (WDDM) | Native Linux, current engine |
+|---|---|---|
+| Qwen3.8-Flash-Next Coder | **ran** (owner) | not tested; the main-engine output head is the expected blocker |
+| Qwen3.8-Flash-Next Q2_0 | **ran** (owner) | did not start: native head / MTP allocation |
+| Gemma 4 26B-A4B QAT-UD-Q4_K_XL | **ran** (owner) | not downloaded/tested; estimate 4.1 GB before experts |
+| Qwen3.6-35B-A3B UD-Q4_K_XL | **ran** (owner) | not tested; estimate 4.7 GB before experts |
+
+The reason is the driver model, not the model file: Windows can oversubscribe VRAM into system RAM;
+Linux `cudaMalloc` is strict. A real Linux equivalent needs a host-memory fallback (managed/host-mapped
+allocations) in the engine. Until then, a Windows run is valid evidence for Windows, and a Linux
+"does not fit" is only about dedicated VRAM.
+
+
 
 ## Summary
 
@@ -13,6 +36,9 @@ It is a **compatibility estimate**, not a download and not a benchmark: `--check
 - **ДА, малый кэш**: 11
 - **НЕТ**: 43
 - **НЕ ПРОВЕРЯЛОСЬ**: 3
+
+Every **НЕТ** below means "does not fit dedicated VRAM on native Linux"; it is **not** a claim
+that the model cannot run on Windows. See the platform table above.
 
 ## Every official size
 
@@ -80,8 +106,9 @@ It is a **compatibility estimate**, not a download and not a benchmark: `--check
 ## Profiles of the models that may start
 
 These are the families whose smallest/estimated-fitting quants are in the table above. "May start" is
-setup's estimate; only Clover has been run end-to-end on this PC. Dates and benchmarks are from the
-model cards and this repository's [MODELS-4GB.md](MODELS-4GB.md).
+setup's estimate; only Clover has been run end-to-end on **native Linux**. The Windows 10 runs of
+Qwen3.8 Coder, Qwen3.8 Q2_0, Gemma 4 QAT-Q4 and Qwen3.6 UD-Q4 are separate evidence and are recorded
+above. Dates and benchmarks are from the model cards and this repository's [MODELS-4GB.md](MODELS-4GB.md).
 
 ### Clover-35B-A3B-Preview (DiffuSpace)
 
@@ -157,8 +184,9 @@ model cards and this repository's [MODELS-4GB.md](MODELS-4GB.md).
 - **Knowledge:** base card does not state a cutoff; external trackers list August 2025.
 - **Benchmarks:** Coder SWE-bench Verified 79.20 and LiveCodeBench v6 87.43 (BF16 base 82.80 / 87.43;
   retains 95.7% / 100%). Weaker outside code.
-- **Estimated to start here:** IQ1_M only, in the main engine's low-RAM mode. **Not verified**; on this
-  4 GB card the main engine's output head is likely to fail as it did for Q2_0.
+- **Estimated to start here:** IQ1_M only, in the main engine's low-RAM mode. On **Windows 10** the owner
+  ran this Coder on this laptop (WDDM sysmem fallback). On **native Linux** it is not yet reproduced; the
+  main-engine output head is the expected blocker, as it was for Q2_0.
 
 ## Ranking for a one-shot Three.js / frontend task
 
@@ -167,15 +195,16 @@ single-file `index.html` with Three.js, first-person controls, collision, touch 
 scene. The evidence below mixes coding-agent benchmarks, frontend preference arenas and a few
 independent Three.js tests; treat the order as a judgement, not a single score.
 
-### 1. Qwen3.8-Flash-Next Coder IQ1_M - best ability, worst availability here
+### 1. Qwen3.8-Flash-Next Coder IQ1_M - best ability; Windows-proven, native Linux unproven
 
 - **Code:** SWE-bench Verified 79.20, LiveCodeBench v6 87.43 (95.7% / 100% of the BF16 base).
   The base Qwen3.8-Flash-Next is **#8 overall and #3 among open models on Code Arena WebDev**
   (frontend score ~1648), and there are multiple public one-shot Three.js demos with it.
 - **Design:** the only family here with a strong public WebDev Arena result; the Coder kept
   vision/spatial calibration from the base. Best odds of a polished, complete first answer.
-- **Catch:** the main-engine low-RAM estimate is the only reason it is on the "may start" list,
-  and on this 4 GB card the output head is likely to fail as it did for Q2_0. Not verified.
+- **Catch:** on **Windows 10** this Coder ran on the same laptop (WDDM can page VRAM to system RAM).
+  On **native Linux** it is not yet reproduced; the output head is the expected blocker, as it was
+  for Q2_0. This is a platform limit, not a model limit.
 
 ### 2. Ornith 1.5 35B-A3B - strongest runnable coding/agent model
 
@@ -222,7 +251,7 @@ independent Three.js tests; treat the order as a judgement, not a single score.
   (LiveClaw 48.09, AutomationBench 27.69), not large single-file 3D scenes.
 - **Verdict:** good for fast tool-driven tasks, last for this Three.js prompt.
 
-### Practical order on this 4 GB PC
+### Practical order on native Linux (this 4 GB PC)
 
 1. **Clover APEX-I-NANOPLUS** - the only one actually verified to run; use it if you need a
    working setup today.
@@ -231,15 +260,21 @@ independent Three.js tests; treat the order as a judgement, not a single score.
 3. **Flint UD-Q3_K_XL** - next estimated runnable coding agent.
 4. **MiniCPM-V mix_q3gud_im** - if the task is visual/image-guided.
 5. **LFM2.5 UD-Q3_K_XL** - fastest, weakest for this task.
-6. **Qwen3.8 Coder IQ1_M** - highest ability, but likely will not start on 4 GB.
+6. **Qwen3.8 Coder IQ1_M** - highest ability; **runs on Windows 10**, not yet on native Linux.
+
+On **Windows 10**, where WDDM supplies the system-RAM fallback, Qwen3.8 Coder, Qwen3.8 Q2_0,
+Gemma 4 QAT-Q4 and Qwen3.6 UD-Q4 are all valid options despite the native-Linux "does not fit"
+lines above.
 
 ## What was actually run, not just estimated
 
 | Model | Result |
 |---|---|
 | **Clover-35B-A3B-Preview APEX-I-NANOPLUS** | **Works** on this PC. 32K: 784 experts in VRAM, chat 36.1 tok/s (34.2–44.3), prefill 543 tok/s. 64K: 674 experts, 57,897-token prompt read at 634 tok/s, decode 8.2 tok/s at depth. |
-| **Qwen3.8-Flash-Next Q2_0** | **Does not start** on 4 GB. Low-RAM mode, 31 GB RAM. At 32K/16K/8K it fails at the native output head or prompt scratch; MTP needs 675 MiB for its 512 experts and cannot fit. Files were removed after the test. |
-| **Gemma 4 26B-A4B QAT-UD-Q4_K_XL** | **Does not fit**: 4.1 GB VRAM before any expert at 32K, and 64K is worse. Not downloaded. |
+| **Qwen3.8-Flash-Next Q2_0** | **Native Linux: does not start** on 4 GB. Low-RAM mode, 31 GB RAM. At 32K/16K/8K it fails at the native output head or prompt scratch; MTP needs 675 MiB for its 512 experts and cannot fit. **Windows 10: the owner ran Q2_0 on this same laptop** via WDDM sysmem fallback. Linux files were removed after the test. |
+| **Gemma 4 26B-A4B QAT-UD-Q4_K_XL** | **Windows 10: the owner ran it on this laptop.** Native Linux: 4.1 GB VRAM before any expert at 32K, and 64K is worse; not downloaded or tested here. |
+| **Qwen3.8-Flash-Next Coder IQ1_M** | **Windows 10: the owner ran it on this laptop.** Native Linux: not yet reproduced; the main-engine output head is the expected blocker. |
+| **Qwen3.6-35B-A3B UD-Q4_K_XL** | **Windows 10: the owner ran it on this laptop.** Native Linux: estimate 4.7 GB before any expert; not tested here. |
 
 ## Uncensored / abliterated variants
 
