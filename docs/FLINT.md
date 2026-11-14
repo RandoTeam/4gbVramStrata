@@ -197,6 +197,34 @@ several conversations in RAM, downloads the file, checks its SHA-256, writes the
   setup does not set them. To use them for clients that send no sampling of their own, add
   `"sampling": {"temperature": 1.0, "top_p": 0.95, "top_k": 20}` to the run config.
 
+## Using Flint well
+
+- **What it is for:** terminal-style coding agents: inspect a repository, plan, edit files, run tests and tools.
+  It is not a general-knowledge model and not a designer. Its card states a **June 2026 knowledge cutoff**, so it
+  does not know Qwen3.8, Clover, Ornith 1.5, Tiel or Flint itself; use it for code, not for researching newer models.
+- **Who uses it:** local coding-agent users through OpenHands, Ollama, llama.cpp/SGLang and OpenAI-compatible
+  harnesses; the model card has 1,251 likes and about 19K downloads a month in the repository's notes. It is
+  Apache 2.0, text only, and has no draft/MTP block.
+- **Sampling:** the card's evaluation settings are **temperature 1.0, top_p 0.95, top_k 20**. Setup does not write
+  them. To apply them to clients that send no sampling, add to the run config:
+  `"sampling": {"temperature": 1.0, "top_p": 0.95, "top_k": 20}`. For patches where reproducibility matters,
+  compare a lower temperature (0.2-0.5) on the same task.
+- **Output budget:** Flint always thinks, so `max_tokens` covers reasoning plus the answer. The card recommends
+  at least 32,768 output tokens for hard problems, but that assumes a much larger context. On this 4 GB laptop with
+  a 32K context, reserve 8-12K output and keep the prompt/repo context below the rest; on a 16K context, reserve
+  6-8K. Too small a budget spends everything on the `<think>` block.
+- **Context:** 32K is the practical ceiling here. Flint's KV is fp16 (no q8_0), about 1.47 GiB at 32K; 64K adds
+  another 1.47 GiB and does not fit native 4 GB. If a 32K start fails, try 16K.
+- **Quant on this machine:** **UD-Q3_K_XL (18.5 GB)** is the practical choice: 3.8 GB before experts, 22 GB RAM
+  estimate, and 94.0% of Q8_0's most-likely token. **UD-Q4_K_XL (25.1 GB)** is slightly better (95.9%) but is
+  4.0 GB before experts and wants ~29 GB RAM; on 31 GB it is tight and may read from the SSD. UD-Q6/Q8 do not fit
+  native 4 GB. On Windows WDDM the larger ones can page into system RAM; on native Linux they fail the allocation.
+- **Engine flags:** setup writes `--prompt-batch 512 --expert-swaps 32 --no-graphs`; keep them. Flint has no draft
+  block, so `--spec`/MTP settings do not apply; suffix drafting only uses repeated prompt text.
+- **Tools and history:** use its chat template, keep the returned `reasoning_content` in the conversation, and let
+  the server convert its `<tool_call>` format to OpenAI/Anthropic tools. An agent harness with file/test tools is
+  the intended use; a single chat turn shows much less of the model.
+
 ## What is missing
 
 - Pictures: the model reads text only.
