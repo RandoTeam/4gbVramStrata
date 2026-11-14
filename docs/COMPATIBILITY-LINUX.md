@@ -160,6 +160,79 @@ model cards and this repository's [MODELS-4GB.md](MODELS-4GB.md).
 - **Estimated to start here:** IQ1_M only, in the main engine's low-RAM mode. **Not verified**; on this
   4 GB card the main engine's output head is likely to fail as it did for Q2_0.
 
+## Ranking for a one-shot Three.js / frontend task
+
+The task in question is not SWE-bench: one prompt must produce a complete, good-looking
+single-file `index.html` with Three.js, first-person controls, collision, touch UI and a dense
+scene. The evidence below mixes coding-agent benchmarks, frontend preference arenas and a few
+independent Three.js tests; treat the order as a judgement, not a single score.
+
+### 1. Qwen3.8-Flash-Next Coder IQ1_M - best ability, worst availability here
+
+- **Code:** SWE-bench Verified 79.20, LiveCodeBench v6 87.43 (95.7% / 100% of the BF16 base).
+  The base Qwen3.8-Flash-Next is **#8 overall and #3 among open models on Code Arena WebDev**
+  (frontend score ~1648), and there are multiple public one-shot Three.js demos with it.
+- **Design:** the only family here with a strong public WebDev Arena result; the Coder kept
+  vision/spatial calibration from the base. Best odds of a polished, complete first answer.
+- **Catch:** the main-engine low-RAM estimate is the only reason it is on the "may start" list,
+  and on this 4 GB card the output head is likely to fail as it did for Q2_0. Not verified.
+
+### 2. Ornith 1.5 35B-A3B - strongest runnable coding/agent model
+
+- **Code:** SWE-bench Verified 79.0, SWE-bench Pro 59.6, Terminal-Bench 2.1 67.8-68.5.
+- **Design/Three.js:** an independent Three.js one-shot suite scored it **15/30**, against
+  Qwen3.6-35B 13/30 and Qwen3.8-27B 24/30. So it is a solid agentic coder but not a designer
+  at the Qwen3.8 level.
+- **Verdict:** best all-round choice among the models that setup says can start here, especially
+  for code and multi-step work; visuals may need iteration.
+
+### 3. Flint 40B-A2.5B - excellent coding agent, not a frontend designer
+
+- **Code:** SWE-bench Pro v2 89.7, SWE-bench Verified 74.2, Terminal-Bench 2.1 54.9,
+  LiveCodeBench v6 80.3. Trained from scratch, 262K context.
+- **Design/frontend:** independent testing liked the HTML/CSS structure but found a visible CSS
+  sizing bug in a landing page; it is a coding model first.
+- **Verdict:** strong for code-heavy scenes and logic; less reliable for a polished first-shot
+  visual composition.
+
+### 4. MiniCPM-V 4.7 35B-A3B - vision helps design, code ceiling is lower
+
+- **Code:** independent llm-bench run: **Code 63.8**, Agent 89.1, Quality 79.4; it produced a
+  playable single-file HTML game in that test.
+- **Design:** vision/OCR/UI understanding is its strength (MMMU 80.2, OCRBench 91.2), useful for
+  screenshot-to-UI work; complex 3D code is below the top three.
+- **Verdict:** good for visual/UI tasks and image-guided design, not the first pick for a large
+  collision-heavy Three.js scene.
+
+### 5. Clover-35B-A3B-Preview - creative, but the weakest engineering evidence
+
+- **Code:** SWE-bench Verified 73.6 suggests capability, but on DaBench its **coding score was
+  10 and overall 30** (instruction 53, structured 43, agents 20); Qwen3.8-Flash-Next scored 42
+  overall there. Different harnesses disagree, so treat it as inconsistent.
+- **Design:** DaBench has Clover showcases (portfolio, boat game, snake), so it can produce
+  aesthetic output; one-shot completeness and collision/UI logic are the risk.
+- **Verdict:** actually runs on this PC, but for a complex one-shot frontend it is below the
+  coding-first models.
+
+### 6. LFM2.5-24B-A2B - fastest, but not a complex frontend model
+
+- **Code:** SWE-bench Verified 51.0; on DaBench it loses **72 of 77** differing cases to
+  Qwen3.8-Flash-Next.
+- **Design:** no meaningful frontend/design evidence; its strength is agentic tool use
+  (LiveClaw 48.09, AutomationBench 27.69), not large single-file 3D scenes.
+- **Verdict:** good for fast tool-driven tasks, last for this Three.js prompt.
+
+### Practical order on this 4 GB PC
+
+1. **Clover APEX-I-NANOPLUS** - the only one actually verified to run; use it if you need a
+   working setup today.
+2. **Ornith 1.5 APEX-I-MINI** - best estimated runnable coding ability; needs a download and a
+   real start test.
+3. **Flint UD-Q3_K_XL** - next estimated runnable coding agent.
+4. **MiniCPM-V mix_q3gud_im** - if the task is visual/image-guided.
+5. **LFM2.5 UD-Q3_K_XL** - fastest, weakest for this task.
+6. **Qwen3.8 Coder IQ1_M** - highest ability, but likely will not start on 4 GB.
+
 ## What was actually run, not just estimated
 
 | Model | Result |
