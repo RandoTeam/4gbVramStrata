@@ -77,6 +77,89 @@ It is a **compatibility estimate**, not a download and not a benchmark: `--check
 | Preview: Qwen3.6-35B-A3B on Strata | UD-Q6_K_XL | ~32.6 | `strata` | not covered by `--check`; preview needs 44 GB RAM | **НЕ ПРОВЕРЯЛОСЬ** |
 | Preview: Qwen3.6-35B-A3B on Strata | Q8_0 | ~37.8 | `strata` | not covered by `--check`; preview needs 52 GB RAM | **НЕ ПРОВЕРЯЛОСЬ** |
 
+## Profiles of the models that may start
+
+These are the families whose smallest/estimated-fitting quants are in the table above. "May start" is
+setup's estimate; only Clover has been run end-to-end on this PC. Dates and benchmarks are from the
+model cards and this repository's [MODELS-4GB.md](MODELS-4GB.md).
+
+### Clover-35B-A3B-Preview (DiffuSpace)
+
+- **Released:** 28-30 October 2026, DiffuSpace's first model.
+- **Base:** Qwen3.6-35B-A3B, trained further by DiffuSpace; a **block-diffusion** language model.
+- **Layers / architecture:** 40 layers, hybrid Gated DeltaNet / full-attention MoE; 256 routed experts,
+  top-8, one shared expert; 35B total / ~3B active; 128K context; text only.
+- **Knowledge:** inherits Qwen3.6-35B-A3B; no separate cutoff is stated.
+- **Benchmarks (launch post):** SWE-Verified 73.6, Terminal-Bench 2.1 51.7, GPQA Diamond 83.8,
+  MMLU-Pro 84.8, ZebraLogic 95.8, BFCL-v4 67.9.
+- **Estimated to start here:** Q3_K_M (16.8 GB), APEX-I-NANOPLUS (12.6), Q4_K_M (21.2).
+  **Actually verified:** APEX-I-NANOPLUS works at 32K and 64K.
+
+### Flint 40B-A2.5B (Recursive)
+
+- **Released:** 21 October 2026.
+- **Base:** trained **from scratch** by Recursive; not a fine-tune.
+- **Layers / architecture:** 49 layers (2 dense + 47 MoE); 35 sliding-window layers (513 tokens) and
+  14 full-attention layers; 256 routed experts, top-6, plus a shared expert; 39.8B total / ~2.5B active;
+  262,144-token context; vocabulary 150,144; text.
+- **Knowledge cutoff:** **June 2026** (stated).
+- **Benchmarks:** Terminal-Bench 2.1 54.9, SWE-bench Pro v2 89.7, SWE-bench Verified 74.2.
+- **Estimated to start here:** UD-Q3_K_XL (18.5 GB), UD-Q4_K_XL (25.1). Not yet run here.
+
+### LFM2.5-24B-A2B (Liquid AI)
+
+- **Released:** 12 October 2026.
+- **Base:** LFM2.5-24B-A2B-Base, Liquid AI's own on-device MoE.
+- **Layers / architecture:** 40 layers (30 double-gated short-convolution + 10 GQA); 64 experts,
+  top-4; 24B total / ~2B active; 131,072-token context; 128K vocabulary; always-on reasoning
+  (`<think>` in the chat template); 36T training tokens (~33T pre-training, 2T mid-training,
+  300B long-context).
+- **Knowledge:** no cutoff stated; the card recommends retrieval/web search for knowledge-heavy use.
+- **Benchmarks:** SWE-bench Verified 51.0, GPQA Diamond 74.42, MATH-500 96.04, IFEval 96.75,
+  LiveClaw 48.09, BFCLv4 65.01, AutomationBench 27.69.
+- **Estimated to start here:** UD-Q3_K_XL (10.9 GB), QAD-Q4_0 (13.6). UD-Q4_K_XL does not fit.
+  Not yet run here.
+
+### Ornith 1.5 35B-A3B (ornith-ai)
+
+- **Released:** 23 August 2026.
+- **Base:** Ornith-1.0, itself built on Qwen3.5 and Gemma 4 with continued pre-training, mid-training
+  and post-training; Ornith 1.5 adds a self-improvement loop and RL.
+- **Layers / architecture:** 40 trunk layers + 1 MTP draft layer; 30 Gated DeltaNet (linear attention)
+  + 10 full-attention; 256 routed experts, top-8, plus a shared expert; 35B total / ~3B active;
+  262,144-token context.
+- **Knowledge:** no separate cutoff stated; inherited from the Qwen3.5/Gemma 4 base.
+- **Benchmarks (card):** SWE-bench Verified 79.0, SWE-bench Pro 59.6, SWE-bench Multilingual 71.4,
+  Terminal-Bench 2.1 67.8-68.5, GPQA Diamond 89.2, HLE 25.6/33.4, ClawEval 72.5; AIME and
+  LiveCodeBench not published. Reproducibility is disputed in community reports.
+- **Estimated to start here:** APEX-I-MINI (14.4 GB). Not yet run here.
+
+### MiniCPM-V 4.7 35B-A3B (OpenBMB)
+
+- **Released:** 12 October 2026.
+- **Base:** the first MoE in the MiniCPM-V series; Qwen3.6-like 40-layer MoE with its own vision
+  encoder (27 layers); not a fine-tune of Qwen3.6.
+- **Layers / architecture:** 35.21B total / ~3B active; 40 layers, 256 experts top-8, one MTP layer;
+  mixed 4x/16x visual-token compression; text, images, video; 3 GB on-device demo on an iPhone.
+- **Knowledge:** no cutoff stated.
+- **Benchmarks (vendor, vision):** MMBench 91.7, MMStar 80.7, MMMU 80.2, OCRBench 91.2.
+  SWE/AIME/GPQA not published.
+- **Estimated to start here:** Q4_K_M (21.2 GB), mix_q3gud_im (15.5), Q6_K (28.5), all with a small
+  expert cache. The vision path on 4 GB is not measured.
+
+### Qwen3.8-Flash-Next Coder IQ1_M (ISTA-DASLab)
+
+- **Released:** base Qwen3.8-Flash-Next 26-27 August 2026; Coder compression updated 17 October 2026.
+- **Base:** Qwen3.8-Flash-Next (176.9B parameters); the Coder keeps 256 of each layer's 512 experts,
+  chosen on code/agentic/image data, and stores the retained weights at 3.5 bpw.
+- **Layers / architecture:** 48 layers, 512 experts, top-10 active in the base; the Coder has 256 of
+  512 experts per layer; 58.4 GB transformer + 28.8 GB n-gram shard; text.
+- **Knowledge:** base card does not state a cutoff; external trackers list August 2025.
+- **Benchmarks:** Coder SWE-bench Verified 79.20 and LiveCodeBench v6 87.43 (BF16 base 82.80 / 87.43;
+  retains 95.7% / 100%). Weaker outside code.
+- **Estimated to start here:** IQ1_M only, in the main engine's low-RAM mode. **Not verified**; on this
+  4 GB card the main engine's output head is likely to fail as it did for Q2_0.
+
 ## What was actually run, not just estimated
 
 | Model | Result |
