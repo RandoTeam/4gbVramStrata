@@ -25,6 +25,7 @@ marked as such beside the number that replaced it.
 | Page | What it answers |
 | --- | --- |
 | [INSTALL.md](INSTALL.md) | Every install question, offline installs, other drives |
+| [COMPATIBILITY-LINUX.md](COMPATIBILITY-LINUX.md) | Every official model and quant against this 4 GB Linux PC: starts, starts with a small cache, or does not fit |
 | [AI_SETUP.md](AI_SETUP.md) | Handing the install to an AI assistant, step by step |
 | [TROUBLESHOOTING.md](TROUBLESHOOTING.md) | What to do when a start fails |
 | [MCP_SERVER.md](MCP_SERVER.md) | The same setup steps as MCP tools for an assistant |
