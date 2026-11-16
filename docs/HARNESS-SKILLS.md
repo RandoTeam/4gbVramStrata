@@ -123,3 +123,107 @@ different prompts or different context sizes.
 
 The expected result is not "Clover becomes Qwen3.8"; it is that the same Clover solves more of
 *your* tasks because the harness supplies procedure, tools and verification.
+
+## The Three.js design harness (underwater pod test)
+
+### Why a harness is necessary
+
+The reference output (`sklad-test-0285.html`) is 1.8 MB / 6,298 lines and contains a bundled Three.js
+r186 plus roughly 2,500 lines of scene code. Clover's first two answers on the bare prompt:
+
+| Run | Output budget | Result | What failed |
+| --- | ---: | --- | --- |
+| 1 | 12,000 tok | 8,351 chars, stopped mid-code | the model spent the budget and never finished |
+| 2 | 24,000 tok | 15,237 chars / 465 lines, complete | boot splash never hidden, NaN geometry, walls invisible from inside, props marked `noCollide`, nearly black spawn view, sparse exterior |
+
+A 35B-A3B model can write a scene, but it should not spend its answer on the renderer, collision,
+touch controls, resize, pause/reset/quality and 1,000 lines of boilerplate. The harness owns those.
+
+### Files
+
+- `assets/vendor/three.min.js` — Three.js r160 UMD, one inline script, no module resolution, no 404.
+  r187 splits `three.module.js` from `three.core.js`; naive concatenation duplicates identifiers.
+  The UMD build is deprecated but works and keeps the page a true single file.
+- `assets/procedural.js` — the `POD` asset pack: materials, rocks, coral, kelp, fish (instanced),
+  bubbles, particles, pipes, consoles, lockers, seats, hatches, railings, light shafts, glass,
+  animated canvas screens, gauges, status lamps, lighting rig, collision helpers, merge helper.
+- `assets/framework.js` — the `HARNESS` runtime and a complete baseline scene: renderer, camera,
+  fog, environment map, ACES tone mapping, shadows, practical lights, pod shell (floor, glass ring,
+  mullions, ceiling, bulkhead, wheel hatch, pipes, gauges, beacons, panels, lockers, console bank,
+  seats, crates, railings, tool board, oxygen bottles, bench, life-support cabinet, pendant lamp,
+  dust, caustic floor pool), exterior (seabed, caustics, rocks, reef shelves, coral, kelp, four
+  fish schools, 1,100 particles, vents, jellyfish, whale, submarine, light shafts), first-person
+  controls, touch joystick/look pad, collision, pause/reset/quality, resize, boot and debug API.
+- `templates/underwater-pod/index.template.html` — HTML/CSS shell, HUD, touch controls, boot
+  fallback and error surface. Placeholders: `/*__THREE__*/`, `/*__ASSETS__*/`,
+  `/*__FRAMEWORK__*/`, `/*__APP__*/`.
+- `tools/design_harness.py` — sends the prompt + three skills to Clover, extracts the JS, assembles
+  the single file and writes `response.txt`, `app.js`, `index.html`.
+- `skills/threejs-underwater`, `skills/fps-controls`, `skills/visual-review` — the content API,
+  placement/collision rules and the visual gate.
+
+The model's answer is one `HARNESS.start({ build(ctx), update(ctx,dt,t) })` call. It adds interior
+props, screens, lamps, cables and exterior layers; it does not create a renderer, camera, light rig,
+control listener or UI. The harness guarantees the baseline still exists if the model under-delivers.
+
+### Measured on this laptop (browser uses the AMD iGPU, not the RTX 3050)
+
+`framework-demo` at 1213×1025, high quality:
+
+| Change | Draw calls | Render cost |
+| --- | ---: | ---: |
+| first baseline | 971 | 282 ms/frame |
+| remove `transmission` from the glass (it rerenders the scene) | 471 | 74 ms/frame |
+| merge coral/kelp/fish, instance fish schools | 253 | 74 ms/frame |
+
+The iGPU is the limiter here; the RTX 3050 should be substantially faster. Two rules follow:
+**never use `MeshPhysicalMaterial.transmission` for full-screen glass on this laptop**, and keep
+draw calls near 250 by merging or instancing repeated assets. The reference page's own budget is
+larger, but it is a 1.8 MB bundle with a different renderer path.
+
+### Running it
+
+    ./run-clover-apex-i-nanoplus.sh                 # or serve/server.py --config ... --port 8080
+    .venv/bin/python tools/design_harness.py \
+        --out designs/underwater-pod-harness --max-tokens 16000 --temperature 0.3
+    # harness-only smoke test, no model call:
+    .venv/bin/python tools/design_harness.py --app templates/underwater-pod/demo.app.js \
+        --out designs/framework-demo
+    python3 -m http.server 8099 --directory designs
+    # open http://127.0.0.1:8099/underwater-pod-harness/index.html
+
+Debug hooks in the page: `__POD.position`, `__POD.rotation`, `__POD.frames`,
+`__POD.colliderCount`, `__POD.key(code,down)`, `__POD.step(dx,dz)`, `__POD.setView(yaw,pitch)`,
+`__POD.setPosition(x,y,z)`, `__POD.reset()`, `__POD.pause(bool)`, `__POD.setQuality(0|1|2)`.
+
+### Compliance is part of the harness
+
+The first Clover run with the framework in the system prompt and skills still ignored it: the model
+wrote its own `WebGLRenderer`, scene, camera, lights and controls, appended a second canvas, and
+then died on `document.getElementById('loading')` (an element from its pretraining, not the shell).
+The page showed the boot error instead of a scene.
+
+The fix is not a longer explanation. It is a short, explicit **contract at the end of the user
+message** (recency wins) plus a hard reject in the tool:
+
+- the answer must be exactly one IIFE with one `HARNESS.start({...})` call;
+- no renderer/scene/camera/light/controls/DOM listeners/second canvas;
+- a code-free probe with 220 tokens showed the model planning "one IIFE with HARNESS.start", so the
+  contract is understood; the probe then ran out of budget before writing code, which is expected.
+
+`tools/design_harness.py` now exits with `REJECTED` and keeps `response.txt` if `HARNESS.start` is
+missing. Never assemble a rejected answer: two renderers on one canvas is worse than a blank page.
+
+### What still separates this from the 1.8 MB reference
+
+- **Interior density.** The framework baseline is a solid small pod, not a hero asset. The reference
+  has dozens of named props, layered wall panels, cable bundles, instrument clusters and small
+  stories. The model must add 14+ objects; the skill lists the coordinates.
+- **Exterior composition.** The baseline has depth layers, but the reference has more species,
+  silhouettes, animation cycles and light shafts. Add per-window set pieces rather than random scatter.
+- **Bloom/grade.** The reference's neon screens read better because of post-processing. The harness
+  currently relies on emissive materials and a CSS vignette; a cheap additive halo pack or a small
+  bloom pass is the next visual lever (measure it: the iGPU cannot afford a naive full-res bloom).
+- **Quality gate.** Speed only ships with the 22-prompt gate; a generated scene must also pass the
+  visual checklist in `skills/visual-review/SKILL.md`. A clean console and a screenshot are the
+  minimum, not the whole gate.
