@@ -26,6 +26,7 @@ marked as such beside the number that replaced it.
 | --- | --- |
 | [INSTALL.md](INSTALL.md) | Every install question, offline installs, other drives |
 | [COMPATIBILITY-LINUX.md](COMPATIBILITY-LINUX.md) | Every official model and quant against this 4 GB Linux PC: starts, starts with a small cache, or does not fit |
+| [HARNESS-SKILLS.md](HARNESS-SKILLS.md) | How harness, tools and focused skills multiply a local model's results, and the concrete setup for Clover |
 | [AI_SETUP.md](AI_SETUP.md) | Handing the install to an AI assistant, step by step |
 | [TROUBLESHOOTING.md](TROUBLESHOOTING.md) | What to do when a start fails |
 | [MCP_SERVER.md](MCP_SERVER.md) | The same setup steps as MCP tools for an assistant |
