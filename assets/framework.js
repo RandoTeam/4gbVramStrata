@@ -129,7 +129,7 @@ const HARNESS = (() => {
     const pod = ctx.pod;
     const hull = POD.mat(0x3a4d54, { metalness: 0.6, roughness: 0.46 });
     const hullDark = POD.mat(0x1b2a30, { metalness: 0.5, roughness: 0.6 });
-    const trim = POD.mat(0x8ca0a6, { metalness: 0.8, roughness: 0.36 });
+    const trim = POD.mat(0x69797e, { metalness: 0.72, roughness: 0.36 });
     const brass = POD.mat(0xb98a52, { metalness: 0.75, roughness: 0.35 });
     const rubber = POD.mat(0x11191d, { metalness: 0.1, roughness: 0.92 });
     const rivetMat = POD.mat(0x7e9399, { metalness: 0.85, roughness: 0.32 });
@@ -140,7 +140,8 @@ const HARNESS = (() => {
     const seatColor = 0x7a3742;
 
     // floor with a radial grating
-    const floor = mesh(new T.CylinderGeometry(R, R, 0.16, 40), hullDark, 0, -0.08, 0);
+    const deck = POD.mat(0x33454c, { metalness: 0.55, roughness: 0.6, surface: 'floor' });
+    const floor = mesh(new T.CylinderGeometry(R, R, 0.16, 40), deck, 0, -0.08, 0);
     floor.receiveShadow = true; pod.add(floor);
     const grateMat = POD.mat(0x3e5158, { metalness: 0.8, roughness: 0.4 });
     for (let i = 0; i < 16; i++) {
@@ -153,8 +154,32 @@ const HARNESS = (() => {
       const ring = mesh(new T.TorusGeometry(rr, 0.018, 5, 48), grateMat, 0, 0.01, 0);
       ring.rotation.x = Math.PI / 2; pod.add(ring);
     }
+    // deck lights: a ring of pucks set into the plating, pulsing slowly. The
+    // reference deck reads as a working floor because it is lit from below the
+    // grating, not because it has more polygons.
+    const deckLampMat = POD.glowMat(0xffb877, 0.8, { roughness: 0.5 });
+    const deckLights = new T.Group();
+    for (let i = 0; i < 10; i++) {
+      const a = i * Math.PI / 5 + Math.PI / 10;
+      const x = Math.sin(a) * (i % 2 ? 2.46 : 1.32), z = Math.cos(a) * (i % 2 ? 2.46 : 1.32);
+      const puck = mesh(new T.CylinderGeometry(0.055, 0.06, 0.022, 10), deckLampMat, x, 0.028, z);
+      deckLights.add(puck);
+      const trim = mesh(new T.CylinderGeometry(0.072, 0.075, 0.016, 10), brass, x, 0.024, z);
+      deckLights.add(trim);
+    }
+    deckLights.userData.tick = (t) => {
+      deckLampMat.emissiveIntensity = 0.55 + 0.55 * (0.5 + 0.5 * Math.sin(t * 1.35));
+    };
+    pod.add(deckLights);
     // central drain
-    const drain = mesh(new T.CylinderGeometry(0.34, 0.34, 0.03, 24), hullDark, 0, 0.012, 0);
+    const drainMat = POD.mat(0x24343b, { metalness: 0.72, roughness: 0.46, surface: 'brushed' });
+    const drain = mesh(new T.CylinderGeometry(0.34, 0.34, 0.03, 24), drainMat, 0, 0.012, 0);
+    // bolts round the drain ring so the deck reads as plates, not one sheet
+    for (let i = 0; i < 10; i++) {
+      const a = i * Math.PI / 5;
+      pod.add(mesh(new T.SphereGeometry(0.022, 6, 5), rivetMat,
+        Math.sin(a) * 0.44, 0.026, Math.cos(a) * 0.44));
+    }
     pod.add(drain);
     for (let i = 0; i < 8; i++) {
       const s = mesh(new T.BoxGeometry(0.03, 0.02, 0.28), brass, 0, 0.03, 0.16);
@@ -416,13 +441,21 @@ const HARNESS = (() => {
     const solid = (o) => { props.add(o); ctx.solids.add(o); return o; };
 
     const bank = new T.Group();
-    const deskMat = POD.mat(0x33474f, { metalness: 0.5, roughness: 0.46 });
+    // flat, untextured: a 3 m panel stretches any tiling map into wood grain
+    const deskMat = POD.mat(0x3a4f58, { metalness: 0.5, roughness: 0.46, surface: false });
     const top = mesh(new T.BoxGeometry(3.1, 0.09, 0.72), deskMat, 0, 0.92, 0);
     top.castShadow = top.receiveShadow = true; bank.add(top);
     bank.add(mesh(new T.BoxGeometry(3.14, 0.025, 0.76), POD.mat(0x6f858c, { metalness: 0.85, roughness: 0.3 }), 0, 0.985, 0));
     bank.add(mesh(new T.BoxGeometry(3.0, 0.02, 0.02), POD.glowMat(0xffb35c, 0.9), 0, 0.9, -0.36));
-    const kick = mesh(new T.BoxGeometry(2.8, 0.86, 0.12), hullDark, 0, 0.43, 0.3);
+    const kickMat = POD.mat(0x2b3d45, { metalness: 0.55, roughness: 0.55, surface: false });
+    const kick = mesh(new T.BoxGeometry(2.8, 0.86, 0.12), kickMat, 0, 0.43, 0.3);
     bank.add(kick);
+    // panel seams and a warm strip under the desk: the knee space was one black sheet
+    for (const x of [-0.94, 0, 0.94]) {
+      bank.add(mesh(new T.BoxGeometry(0.02, 0.84, 0.02), POD.mat(0x16232a, { roughness: 0.8, surface: false }), x, 0.43, 0.365));
+    }
+    bank.add(mesh(new T.BoxGeometry(2.7, 0.02, 0.02), POD.glowMat(0xffb35c, 0.55), 0, 0.06, 0.37));
+    bank.add(mesh(new T.BoxGeometry(2.82, 0.03, 0.14), POD.mat(0x5b6f75, { metalness: 0.7, roughness: 0.4 }), 0, 0.875, 0.3));
     for (const x of [-1.45, 1.45]) {
       const leg = mesh(new T.BoxGeometry(0.1, 0.9, 0.6), trim, x, 0.45, 0);
       bank.add(leg);
@@ -435,7 +468,7 @@ const HARNESS = (() => {
     }
     // animated screens above the desk, mounted on one instrument spine so they
     // read as an installed console instead of three floating panels
-    const spine = mesh(new T.BoxGeometry(2.34, 0.82, 0.1), POD.mat(0x1d2b31, { metalness: 0.5, roughness: 0.6 }), 0, 1.32, 0.16);
+    const spine = mesh(new T.BoxGeometry(2.34, 0.82, 0.1), POD.mat(0x22333b, { metalness: 0.5, roughness: 0.6, surface: false }), 0, 1.32, 0.16);
     bank.add(spine);
     bank.add(mesh(new T.BoxGeometry(2.38, 0.04, 0.13), trim, 0, 1.73, 0.16));
     bank.add(mesh(new T.BoxGeometry(2.38, 0.04, 0.13), trim, 0, 0.92, 0.16));
@@ -485,9 +518,9 @@ const HARNESS = (() => {
     solid(bank);
 
     const seatA = POD.seat(0.62, 0.95, 0.6, seatColor);
-    seatA.position.set(-1.05, 0, -1.18); seatA.rotation.y = Math.PI; solid(seatA);
+    seatA.position.set(-1.05, 0, -1.12); seatA.rotation.y = 0; solid(seatA);
     const seatB = POD.seat(0.62, 0.95, 0.6, seatColor);
-    seatB.position.set(1.05, 0, -1.18); seatB.rotation.y = Math.PI; solid(seatB);
+    seatB.position.set(1.05, 0, -1.12); seatB.rotation.y = 0; solid(seatB);
 
     // Everything else — lockers, crates, bench, tanks, tool board, life support,
     // railings, pendant lamp — is a slot in tools/scene_layout.py and is built by
@@ -991,6 +1024,9 @@ const HARNESS = (() => {
   // ── quality / UI ───────────────────────────────────────────────────────
   function applyQuality(q) {
     state.quality = clamp(q, 0, 2);
+    // Low drops the surface maps: measured 60 -> 41 fps in software GL with
+    // them on, so the cheapest quality level has to give that back first.
+    if (POD.setSurfaceLevel) POD.setSurfaceLevel(state.quality > 0 ? 1 : 0);
     const pr = [1, 1.35, 1.75][state.quality];
     state.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, pr));
     state.renderer.setSize(window.innerWidth, window.innerHeight);

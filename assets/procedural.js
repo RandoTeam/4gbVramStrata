@@ -75,6 +75,148 @@ const POD = (() => {
     return d.matrix.clone();
   }
 
+  // ── packed surface textures ──────────────────────────────────────────
+  // The reference page's surfaces read as painted steel and worn deck because
+  // every material carries a data texture in bumpMap + roughnessMap +
+  // metalnessMap (R = height, G = roughness, B = metalness: the glTF packing).
+  // Ours were flat colour + one roughness value, which is why props looked like
+  // plastic. Four small canvas textures cover the whole library, share their
+  // maps per kind, and add no draw calls.
+  const SURFACES = {
+    paint:   { seed: 3,  scaleX: 42, scaleY: 42, h0: 0.50, hv: 0.30, r0: 0.54, rv: 0.26, m0: 0.40, mv: 0.14, repeat: 3, bump: 0.10, tint: 0.035 },
+    brushed: { seed: 11, scaleX: 110, scaleY: 14, h0: 0.50, hv: 0.18, r0: 0.38, rv: 0.16, m0: 0.66, mv: 0.10, repeat: 3, bump: 0.07, tint: 0.04 },
+    floor:   { seed: 23, scaleX: 30, scaleY: 30, h0: 0.50, hv: 0.50, r0: 0.60, rv: 0.30, m0: 0.58, mv: 0.20, repeat: 4, bump: 0.34, tint: 0.09 },
+    soft:    { seed: 31, scaleX: 60, scaleY: 60, h0: 0.50, hv: 0.18, r0: 0.88, rv: 0.08, m0: 0.04, mv: 0.04, repeat: 4, bump: 0.05, tint: 0.03 },
+  };
+  const surfCache = new Map();
+  // every material that carries the surface maps, so Low quality can drop them
+  // and give the iGPU back the per-fragment texture cost (60 -> 41 fps in
+  // software GL with the maps on)
+  const surfaced = [];
+
+  function hash2(x, y, seed) {
+    let h = Math.imul(x | 0, 374761393) ^ Math.imul(y | 0, 668265263) ^ Math.imul(seed | 0, 1442695041);
+    h = Math.imul(h ^ (h >>> 13), 1274126177);
+    return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
+  }
+  function noise2(x, y, seed) {
+    const xi = Math.floor(x), yi = Math.floor(y);
+    const xf = x - xi, yf = y - yi;
+    const u = xf * xf * (3 - 2 * xf), v = yf * yf * (3 - 2 * yf);
+    const a = hash2(xi, yi, seed), b = hash2(xi + 1, yi, seed);
+    const c = hash2(xi, yi + 1, seed), d = hash2(xi + 1, yi + 1, seed);
+    const top = a + (b - a) * u, bot = c + (d - c) * u;
+    return top + (bot - top) * v;
+  }
+  function fbm(x, y, seed, oct) {
+    let sum = 0, amp = 0.5, f = 1, norm = 0;
+    for (let i = 0; i < oct; i++) {
+      sum += noise2(x * f, y * f, seed + i * 37) * amp;
+      norm += amp; amp *= 0.5; f *= 2;
+    }
+    return sum / norm;
+  }
+
+  function surfacePack(kind) {
+    const cached = surfCache.get(kind);
+    if (cached) return cached;
+    const cfg = SURFACES[kind] || SURFACES.paint;
+    const N = 256;
+    const dataCv = document.createElement('canvas');
+    dataCv.width = dataCv.height = N;
+    const dg = dataCv.getContext('2d');
+    const img = dg.createImageData(N, N), d = img.data;
+    const tintCv = document.createElement('canvas');
+    tintCv.width = tintCv.height = N;
+    const tg = tintCv.getContext('2d');
+    const tint = tg.createImageData(N, N), td = tint.data;
+    for (let y = 0; y < N; y++) {
+      for (let x = 0; x < N; x++) {
+        const u = (x / N) * cfg.scaleX, v = (y / N) * cfg.scaleY;
+        const h = fbm(u, v, cfg.seed, 4);
+        const r = fbm(u * 0.55 + 13, v * 0.55 + 5, cfg.seed + 101, 3);
+        const m = fbm(u * 0.35 + 7, v * 0.35 + 9, cfg.seed + 211, 2);
+        const cl = (t) => (t < 0 ? 0 : t > 1 ? 1 : t) * 255;
+        const i = (y * N + x) * 4;
+        d[i] = cl(cfg.h0 + (h - 0.5) * cfg.hv);
+        d[i + 1] = cl(cfg.r0 + (r - 0.5) * cfg.rv);
+        d[i + 2] = cl(cfg.m0 + (m - 0.5) * cfg.mv);
+        d[i + 3] = 255;
+        // albedo: mostly white with a little grime, so the colour still reads
+        const g = 1 - cfg.tint * (0.35 + 0.65 * (1 - h)) - cfg.tint * 0.4 * (1 - r);
+        td[i] = td[i + 1] = td[i + 2] = cl(g);
+        td[i + 3] = 255;
+      }
+    }
+    dg.putImageData(img, 0, 0);
+    tg.putImageData(tint, 0, 0);
+    const tex = new T.CanvasTexture(dataCv);
+    tex.wrapS = tex.wrapT = T.RepeatWrapping;
+    tex.repeat.set(cfg.repeat, cfg.repeat);
+    tex.anisotropy = 4;
+    // data, not colour: R/G/B are height, roughness and metalness
+    tex.colorSpace = T.NoColorSpace;
+    const albedo = new T.CanvasTexture(tintCv);
+    albedo.wrapS = albedo.wrapT = T.RepeatWrapping;
+    albedo.repeat.set(cfg.repeat, cfg.repeat);
+    albedo.anisotropy = 4;
+    albedo.colorSpace = T.SRGBColorSpace;
+    const pack = { data: tex, albedo };
+    surfCache.set(kind, pack);
+    return pack;
+  }
+
+  // Metals get brushed streaks, painted metal gets blotchy paint, everything
+  // else gets a fine grain. One rule, so every prop in the library and every
+  // shell surface is textured without touching a hundred call sites.
+  function surfaceFor(metalness) {
+    return metalness >= 0.7 ? 'brushed' : metalness >= 0.28 ? 'paint' : 'soft';
+  }
+
+  function applySurface(m, kind) {
+    const cfg = SURFACES[kind] || SURFACES.paint;
+    const pack = surfacePack(kind);
+    const base = { roughness: m.roughness, metalness: m.metalness };
+    m.map = pack.albedo;
+    m.bumpMap = pack.data;
+    m.bumpScale = cfg.bump;
+    m.roughnessMap = pack.data;
+    m.metalnessMap = pack.data;
+    // the maps multiply these, so they must be 1 for the packed values to win
+    m.roughness = 1;
+    m.metalness = 1;
+    m.needsUpdate = true;
+    surfaced.push({ m, pack, bump: cfg.bump, base });
+    return m;
+  }
+
+  // Low quality drops the maps: three extra texture fetches per fragment are
+  // what turned 60 fps into 41 on the software renderer, and on the iGPU the
+  // grain is worth less than the frame rate.
+  function setSurfaceLevel(level) {
+    for (const it of surfaced) {
+      const m = it.m;
+      if (level > 0 && !m.map) {
+        m.map = it.pack.albedo;
+        m.bumpMap = it.pack.data;
+        m.bumpScale = it.bump;
+        m.roughnessMap = it.pack.data;
+        m.metalnessMap = it.pack.data;
+        m.roughness = 1;
+        m.metalness = 1;
+        m.needsUpdate = true;
+      } else if (level <= 0 && m.map) {
+        m.map = null;
+        m.bumpMap = null;
+        m.roughnessMap = null;
+        m.metalnessMap = null;
+        m.roughness = it.base.roughness;
+        m.metalness = it.base.metalness;
+        m.needsUpdate = true;
+      }
+    }
+  }
+
   function mat(color, opts = {}) {
     if (color && color.isMaterial) return color;
     // A polished metal under this rig mirrors the bright env gradient and clips to
@@ -83,7 +225,10 @@ const POD = (() => {
     if (opts.envMapIntensity == null) {
       opts = { envMapIntensity: (opts.metalness || 0) >= 0.45 ? 0.5 : 1, ...opts };
     }
-    return new T.MeshStandardMaterial({ color, roughness: 0.72, metalness: 0.08, ...opts });
+    const kind = opts.surface === false ? null : (opts.surface || surfaceFor(opts.metalness == null ? 0.08 : opts.metalness));
+    delete opts.surface;
+    const m = new T.MeshStandardMaterial({ color, roughness: 0.72, metalness: 0.08, ...opts });
+    return kind ? applySurface(m, kind) : m;
   }
   function glowMat(color, intensity = 1.4, opts = {}) {
     if (color && color.isMaterial) return color;
@@ -664,5 +809,6 @@ const POD = (() => {
   return { T, V, rng, extent3, mergeGeometries, dummyMatrix, mat, glowMat, box, cyl, sphere, rock, coral, kelp, fishGeometry, fishGeometryMerged, fishSchool,
            bubbleField, particleField, pipe, consoleUnit, locker, seat, hatch, railing, lightShaft,
            glassMaterial, lighting, screen, statusLamp, gauge, cachedMat, cachedGlow, halo, sign,
-           collidersFrom, moveWithCollision, tick, updateLife, compactWorld };
+           collidersFrom, moveWithCollision, tick, updateLife, compactWorld,
+           setSurfaceLevel };
 })();
