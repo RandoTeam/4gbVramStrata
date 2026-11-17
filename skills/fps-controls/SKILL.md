@@ -1,7 +1,10 @@
 # Skill: fps-controls
 
 The first-person controller, collision loop and touch UI are already implemented by
-`HARNESS.start`. Your job is to place objects so the implemented controller can walk the room.
+`HARNESS.start`. In the slot harness (`tools/build_scene.py`) the model does not place objects at
+all: it names a prop for a slot whose position, facing and collision are fixed by
+`tools/scene_layout.py`. Read this file for the geometry those slots respect — walkable ring, eye
+height, mounted wall props, the reserved hatch approach — and use it when you add or move a slot.
 
 ## What the runtime does (do not reimplement)
 

@@ -77,11 +77,34 @@ const POD = (() => {
 
   function mat(color, opts = {}) {
     if (color && color.isMaterial) return color;
+    // A polished metal under this rig mirrors the bright env gradient and clips to
+    // white, which is how the trim bands turned into light bars. Metals reflect the
+    // environment at half strength; dielectrics keep the full map.
+    if (opts.envMapIntensity == null) {
+      opts = { envMapIntensity: (opts.metalness || 0) >= 0.45 ? 0.5 : 1, ...opts };
+    }
     return new T.MeshStandardMaterial({ color, roughness: 0.72, metalness: 0.08, ...opts });
   }
   function glowMat(color, intensity = 1.4, opts = {}) {
     if (color && color.isMaterial) return color;
     return new T.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: intensity, roughness: 0.4, metalness: 0.1, ...opts });
+  }
+
+  // Shared material cache. The merge pass can only fold meshes that use the
+  // same material instance, so every prop in the library asks for materials
+  // through these two functions instead of creating a new one per part.
+  const matCache = new Map();
+  function cachedMat(color, opts = {}) {
+    const key = color + '|' + JSON.stringify(opts);
+    let m = matCache.get(key);
+    if (!m) { m = mat(color, opts); matCache.set(key, m); }
+    return m;
+  }
+  function cachedGlow(color, intensity = 1.2, opts = {}) {
+    const key = 'g' + color + '|' + intensity + '|' + JSON.stringify(opts);
+    let m = matCache.get(key);
+    if (!m) { m = glowMat(color, intensity, opts); matCache.set(key, m); }
+    return m;
   }
   function box(w, h, d, material, x = 0, y = 0, z = 0) {
     const m = new T.Mesh(new T.BoxGeometry(w, h, d), material);
@@ -205,6 +228,25 @@ const POD = (() => {
     return mesh;
   }
 
+  // Round, soft sprites for the dust and bubble fields. Without a map every
+  // particle is a hard square, which is exactly what a 4 cm cube in mid-air
+  // looks like when one of them drifts close to the camera.
+  let dotTex = null;
+  function softDot() {
+    if (dotTex) return dotTex;
+    const cv = document.createElement('canvas');
+    cv.width = cv.height = 32;
+    const c = cv.getContext('2d');
+    const g = c.createRadialGradient(16, 16, 0, 16, 16, 16);
+    g.addColorStop(0, 'rgba(255,255,255,1)');
+    g.addColorStop(0.45, 'rgba(255,255,255,0.55)');
+    g.addColorStop(1, 'rgba(255,255,255,0)');
+    c.fillStyle = g; c.fillRect(0, 0, 32, 32);
+    dotTex = new T.CanvasTexture(cv);
+    dotTex.colorSpace = T.SRGBColorSpace;
+    return dotTex;
+  }
+
   function bubbleField(count = 180, spread = 8, height = 7) {
     const [sx, , sz] = extent3(spread, 8);
     const h = Math.max(0.05, height || 7);
@@ -215,7 +257,7 @@ const POD = (() => {
       pos[i * 3 + 2] = (r() - 0.5) * sz;
     }
     const geo = new T.BufferGeometry(); geo.setAttribute('position', new T.BufferAttribute(pos, 3));
-    const m = new T.Points(geo, new T.PointsMaterial({ color: 0xc9f7ff, size: 0.045, transparent: true, opacity: 0.65, depthWrite: false, blending: T.AdditiveBlending }));
+    const m = new T.Points(geo, new T.PointsMaterial({ color: 0xc9f7ff, size: 0.05, map: softDot(), transparent: true, opacity: 0.55, depthWrite: false, blending: T.AdditiveBlending }));
     m.userData = { kind: 'bubbles', height: h, spread: sx };
     return m;
   }
@@ -229,7 +271,7 @@ const POD = (() => {
       pos[i * 3 + 2] = (r() - 0.5) * sz;
     }
     const geo = new T.BufferGeometry(); geo.setAttribute('position', new T.BufferAttribute(pos, 3));
-    return new T.Points(geo, new T.PointsMaterial({ color, size: 0.025, transparent: true, opacity: 0.5, depthWrite: false, blending: T.AdditiveBlending }));
+    return new T.Points(geo, new T.PointsMaterial({ color, size: 0.03, map: softDot(), transparent: true, opacity: 0.45, depthWrite: false, blending: T.AdditiveBlending }));
   }
 
   function pipe(points, radius = 0.045, color = 0x8a9aa2) {
@@ -266,19 +308,37 @@ const POD = (() => {
 
   function seat(w = 1.0, h = 1.1, d = 0.8, color = 0x3a4c54) {
     const g = new T.Group();
-    const m = mat(color, { roughness: 0.82 });
-    const dark = mat(0x26343a, { roughness: 0.9 });
+    const m = mat(color, { roughness: 0.7, metalness: 0.06 });
+    const trimC = mat(0x1a2327, { roughness: 0.85 });
     const metal = mat(0x71858b, { metalness: 0.82, roughness: 0.34 });
+    // pedestal, foot ring and a skirt so the seat is not a slab on a stick
     g.add(cyl(0.3, 0.34, 0.055, metal, 0, 0.028, 0, 18));
     g.add(cyl(0.055, 0.075, h * 0.42, metal, 0, h * 0.23, 0, 10));
+    g.add(cyl(0.16, 0.2, 0.05, trimC, 0, h * 0.47, 0, 14));
     g.add(box(w, 0.14, d * 0.92, m, 0, h * 0.55, 0));
+    // piping round the cushion edge
+    g.add(box(w + 0.01, 0.018, d * 0.93, trimC, 0, h * 0.615, 0));
+    // back with two stitch seams and a headrest
     const back = box(w * 0.94, h * 0.62, d * 0.13, m, 0, h * 0.82, d * 0.38);
     back.rotation.x = -0.13; g.add(back);
-    const head = box(w * 0.68, 0.16, d * 0.12, dark, 0, h * 1.14, d * 0.34);
+    // rounded edges: a slab with square corners reads as a bench, not a seat
+    const backRoll = cyl(0.055, 0.055, w * 0.94, m, 0, h * 1.13, d * 0.38, 12);
+    backRoll.rotation.z = Math.PI / 2; backRoll.rotation.x = -0.13; g.add(backRoll);
+    const seatRoll = cyl(0.06, 0.06, w, m, 0, h * 0.55, d * 0.46, 12);
+    seatRoll.rotation.z = Math.PI / 2; g.add(seatRoll);
+    for (const sx of [-0.3, 0.3]) {
+      const seam = box(0.012, h * 0.5, 0.015, trimC, sx * w, h * 0.83, d * 0.44);
+      seam.rotation.x = -0.13; g.add(seam);
+    }
+    const head = box(w * 0.68, 0.16, d * 0.12, m, 0, h * 1.14, d * 0.34);
     head.rotation.x = -0.13; g.add(head);
+    const headSeam = box(w * 0.7, 0.016, d * 0.13, trimC, 0, h * 1.06, d * 0.35);
+    headSeam.rotation.x = -0.13; g.add(headSeam);
+    // arms with a padded top
     for (const sx of [-1, 1]) {
       g.add(cyl(0.03, 0.03, 0.05, metal, sx * w * 0.48, h * 0.72, d * 0.06, 8));
-      g.add(box(0.07, 0.05, d * 0.5, dark, sx * w * 0.48, h * 0.74, d * 0.06));
+      g.add(box(0.07, 0.05, d * 0.5, trimC, sx * w * 0.48, h * 0.74, d * 0.06));
+      g.add(box(0.075, 0.03, d * 0.42, m, sx * w * 0.48, h * 0.775, d * 0.06));
     }
     g.add(box(w * 0.9, 0.04, 0.05, metal, 0, h * 0.63, d * 0.44));
     return g;
@@ -323,9 +383,9 @@ const POD = (() => {
   // a rig with update(t) for slow flicker and a drifting caustic tint.
   function lighting(scene, quality = 1) {
     const g = new T.Group();
-    const hemi = new T.HemisphereLight(0xa8ecff, 0x0b1c22, 0.8);
-    const ambient = new T.AmbientLight(0x335566, 0.38);
-    const sun = new T.DirectionalLight(0xb8f0ff, 1.75);
+    const hemi = new T.HemisphereLight(0xa8ecff, 0x14303a, 1.05);
+    const ambient = new T.AmbientLight(0x3c6675, 0.55);
+    const sun = new T.DirectionalLight(0xb8f0ff, 2.1);
     sun.position.set(7, 14, 5);
     sun.castShadow = quality > 0;
     if (sun.castShadow) {
@@ -334,24 +394,32 @@ const POD = (() => {
       c.left = -12; c.right = 12; c.top = 12; c.bottom = -12; c.near = 0.5; c.far = 45;
       sun.shadow.bias = -0.0008;
     }
-    const warm = new T.PointLight(0xffc27a, 5.5, 5.2, 2);
-    warm.position.set(0.15, 1.45, -1.25);
-    const cool = new T.PointLight(0x62e9ff, 11, 7, 2);
-    cool.position.set(-2.0, 1.85, 1.45);
-    const consoleGlow = new T.PointLight(0x54ffe0, 7, 4.5, 2);
+    const warm = new T.PointLight(0xffc27a, 11.5, 6.0, 2);
+    warm.position.set(0.15, 1.55, -1.1);
+    const cool = new T.PointLight(0x62e9ff, 9.5, 8, 2);
+    cool.position.set(-2.0, 1.95, 1.45);
+    const consoleGlow = new T.PointLight(0x54ffe0, 8, 5, 2);
     consoleGlow.position.set(1.6, 1.35, -1.6);
-    g.add(hemi, ambient, sun, warm, cool, consoleGlow);
+    // two practicals that lift the shell instead of leaving the ceiling black
+    const ceiling = new T.PointLight(0xffd9a8, 6.5, 6.5, 2);
+    ceiling.position.set(0, 2.45, 0.6);
+    // the wall sits ~0.6 m from this lamp, so at 6.0 it washed the whole bulkhead
+    const hatch = new T.PointLight(0x9fe8ff, 3.2, 4.2, 2);
+    hatch.position.set(0, 2.1, 2.0);
+    g.add(hemi, ambient, sun, warm, cool, consoleGlow, ceiling, hatch);
     scene.add(g);
     return {
-      group: g, hemi, ambient, sun, warm, cool, consoleGlow,
+      group: g, hemi, ambient, sun, warm, cool, consoleGlow, ceiling, hatch,
       sunBase: sun.intensity, warmBase: warm.intensity, coolBase: cool.intensity,
+      ceilingBase: ceiling.intensity,
       update(t) {
         const swell = 0.5 + 0.5 * Math.sin(t * 0.31);
         sun.intensity = this.sunBase * (0.92 + 0.08 * Math.sin(t * 0.17));
         warm.intensity = this.warmBase * (0.88 + 0.12 * Math.sin(t * 2.1 + 1.4));
         cool.intensity = this.coolBase * (0.86 + 0.14 * swell);
-        hemi.intensity = 0.76 + 0.08 * Math.sin(t * 0.23);
-        consoleGlow.intensity = this.consoleGlow.intensity * 0.94 + 6 * 0.06 * (0.7 + 0.3 * Math.sin(t * 3.7));
+        hemi.intensity = 1.0 + 0.08 * Math.sin(t * 0.23);
+        this.ceiling.intensity = this.ceilingBase * (0.93 + 0.07 * Math.sin(t * 1.1));
+        this.consoleGlow.intensity = this.consoleGlow.intensity * 0.94 + 6 * 0.06 * (0.7 + 0.3 * Math.sin(t * 3.7));
       },
     };
   }
@@ -440,6 +508,109 @@ const POD = (() => {
     return g;
   }
 
+  // A cheap bloom substitute: one additive sprite with a radial falloff behind
+  // a screen, lamp or beacon. Costs one draw call and reads as a glow halo,
+  // unlike a real bloom pass which is far too expensive on the AMD iGPU.
+  let haloTex = null;
+  function halo(color = 0x64e8ff, size = 1, opacity = 0.5) {
+    if (!haloTex) {
+      const cv = document.createElement('canvas');
+      cv.width = cv.height = 128;
+      const g = cv.getContext('2d');
+      const grad = g.createRadialGradient(64, 64, 2, 64, 64, 62);
+      grad.addColorStop(0, 'rgba(255,255,255,1)');
+      grad.addColorStop(0.35, 'rgba(255,255,255,.55)');
+      grad.addColorStop(1, 'rgba(255,255,255,0)');
+      g.fillStyle = grad; g.fillRect(0, 0, 128, 128);
+      haloTex = new T.CanvasTexture(cv);
+      haloTex.colorSpace = T.SRGBColorSpace;
+    }
+    const s = new T.Sprite(new T.SpriteMaterial({
+      map: haloTex, color, transparent: true, opacity,
+      blending: T.AdditiveBlending, depthWrite: false, toneMapped: false,
+    }));
+    s.scale.set(size, size, 1);
+    return s;
+  }
+
+  // Stencilled plate: a canvas texture with a border and one or two lines.
+  // Signs are the cheapest way to make a procedural room look authored.
+  function sign(text, width = 0.5, height = 0.14, opts = {}) {
+    const bg = opts.bg || '#0b1a1e';
+    const fg = opts.fg || '#ffd27a';
+    const border = opts.border || fg;
+    const px = 512, py = Math.max(64, Math.round(px * height / Math.max(0.02, width)));
+    const cv = document.createElement('canvas');
+    cv.width = px; cv.height = py;
+    const g = cv.getContext('2d');
+    g.fillStyle = bg; g.fillRect(0, 0, px, py);
+    if (border) {
+      g.strokeStyle = border; g.lineWidth = Math.max(2, py * 0.05);
+      g.globalAlpha = 0.85; g.strokeRect(py * 0.06, py * 0.06, px - py * 0.12, py - py * 0.12);
+      g.globalAlpha = 1;
+    }
+    g.fillStyle = fg;
+    g.textAlign = 'center'; g.textBaseline = 'middle';
+    const sub = opts.sub || '';
+    const size = py * (sub ? 0.34 : 0.46);
+    g.font = '700 ' + Math.round(size) + 'px ui-monospace,monospace';
+    g.fillText(String(text).toUpperCase(), px / 2, py * (sub ? 0.4 : 0.52));
+    if (sub) {
+      g.globalAlpha = 0.72;
+      g.font = '600 ' + Math.round(py * 0.2) + 'px ui-monospace,monospace';
+      g.fillText(String(sub).toUpperCase(), px / 2, py * 0.74);
+    }
+    const tex = new T.CanvasTexture(cv);
+    tex.colorSpace = T.SRGBColorSpace;
+    tex.minFilter = T.LinearFilter;
+    const m = new T.Mesh(new T.PlaneGeometry(width, height),
+      new T.MeshBasicMaterial({ map: tex, transparent: true, toneMapped: false }));
+    return m;
+  }
+
+  // Collapse every static mesh under `root` into one mesh per material.
+  // This is what lets the asset library stay detailed (hundreds of bolts,
+  // seams and plates) without hundreds of draw calls: 30 props become ~8.
+  // Anything with userData.tick (screens, fans, gauges) and anything flagged
+  // `dynamic` is re-parented instead of merged, so it keeps animating.
+  function compactWorld(root) {
+    if (!root) return root;
+    root.updateMatrixWorld(true);
+    const inv = new T.Matrix4().copy(root.matrixWorld).invert();
+    const buckets = new Map();
+    const statics = [];
+    const rel = new T.Matrix4();
+    (function walk(o, dyn) {
+      const own = !!(o.userData && (o.userData.dynamic === true || typeof o.userData.tick === 'function'));
+      const next = dyn || own;
+      if (o !== root && next) {
+        if (o.parent !== root) {
+          rel.multiplyMatrices(inv, o.matrixWorld).decompose(o.position, o.quaternion, o.scale);
+          o.parent.remove(o);
+          root.add(o);
+        }
+        return;
+      }
+      if (o.isMesh && o.geometry && o.material && !Array.isArray(o.material) &&
+          !o.isInstancedMesh && !o.isSprite && !o.isPoints) {
+        const b = buckets.get(o.material) || { g: [], m: [] };
+        b.g.push(o.geometry);
+        b.m.push(new T.Matrix4().multiplyMatrices(inv, o.matrixWorld));
+        buckets.set(o.material, b);
+        statics.push(o);
+        return;
+      }
+      for (const c of o.children.slice()) walk(c, next);
+    })(root, false);
+    for (const o of statics) if (o.parent) o.parent.remove(o);
+    for (const [material, b] of buckets) {
+      const mesh = new T.Mesh(mergeGeometries(b.g, b.m), material);
+      mesh.castShadow = false; mesh.receiveShadow = true;
+      root.add(mesh);
+    }
+    return root;
+  }
+
   function collidersFrom(root) {
     const out = [];
     root.updateMatrixWorld(true);
@@ -492,6 +663,6 @@ const POD = (() => {
 
   return { T, V, rng, extent3, mergeGeometries, dummyMatrix, mat, glowMat, box, cyl, sphere, rock, coral, kelp, fishGeometry, fishGeometryMerged, fishSchool,
            bubbleField, particleField, pipe, consoleUnit, locker, seat, hatch, railing, lightShaft,
-           glassMaterial, lighting, screen, statusLamp, gauge,
-           collidersFrom, moveWithCollision, tick, updateLife };
+           glassMaterial, lighting, screen, statusLamp, gauge, cachedMat, cachedGlow, halo, sign,
+           collidersFrom, moveWithCollision, tick, updateLife, compactWorld };
 })();

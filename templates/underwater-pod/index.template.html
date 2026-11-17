@@ -21,6 +21,13 @@
   .hud button:hover{background:rgba(120,230,230,.1);border-color:rgba(130,232,236,.25)}
   .hud button:active{transform:translateY(1px)}
   #quality{min-width:86px}
+  #readout{position:fixed;left:calc(14px + env(safe-area-inset-left));
+    top:calc(12px + env(safe-area-inset-top));display:flex;gap:16px;z-index:18;
+    font:600 10px/1 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.09em;
+    color:#b9ecf2;text-shadow:0 1px 3px rgba(0,8,12,.9);pointer-events:none}
+  #readout .k{display:block;opacity:.55;font-size:8.5px;letter-spacing:.16em;margin-bottom:4px}
+  #readout .v{display:block;font-size:12px;letter-spacing:.04em;color:#e6fbff}
+  #readout .v b{font-weight:600;color:#8ff0e2}
   #joy{position:fixed;left:calc(18px + env(safe-area-inset-left));bottom:calc(22px + env(safe-area-inset-bottom));
     width:116px;height:116px;border-radius:50%;border:1.5px solid rgba(190,245,240,.35);
     background:rgba(4,18,24,.32);backdrop-filter:blur(6px);z-index:15;touch-action:none;display:none}
@@ -46,6 +53,8 @@
     .hud{right:calc(8px + env(safe-area-inset-right));gap:2px;padding:3px}
     .hud button{padding:0 7px;font-size:9px;height:28px}
     #quality{min-width:0}
+    #readout{gap:10px;font-size:9px;top:calc(10px + env(safe-area-inset-top))}
+    #readout .v{font-size:10.5px}
     #joy{width:104px;height:104px}
     #look{width:124px;height:124px}
   }
@@ -53,6 +62,12 @@
 </head>
 <body>
 <canvas id="c"></canvas>
+<div id="readout">
+  <div><span class="k">DEPTH</span><span class="v" id="ro-depth">24.5 m</span></div>
+  <div><span class="k">PRESS</span><span class="v" id="ro-press">3.45 bar</span></div>
+  <div><span class="k">HDG</span><span class="v" id="ro-hdg">000&deg;</span></div>
+  <div><span class="k">TRIM</span><span class="v" id="ro-trim">0.0&deg;</span></div>
+</div>
 <div class="hud">
   <button id="reset" title="Reset">Reset</button>
   <button id="pause" title="Pause">Pause</button>
@@ -64,6 +79,24 @@
 <div id="boot"><div class="t">OBSERVATION POD</div><div class="s">Pressurising&hellip;</div></div>
 <script>
 (function () {
+  // Console capture: the automated gate reads this instead of guessing from a
+  // screenshot whether the scene threw.
+  window.__LOG = [];
+  function push(level, args) {
+    var msg = Array.prototype.map.call(args, function (a) {
+      if (a && a.stack) return a.stack;
+      return typeof a === 'object' ? JSON.stringify(a) : String(a);
+    }).join(' ');
+    window.__LOG.push({ level: level, msg: msg.slice(0, 600), t: Date.now() });
+    if (window.__LOG.length > 120) window.__LOG.shift();
+  }
+  var ce = console.error, cw = console.warn;
+  console.error = function () { push('error', arguments); ce.apply(console, arguments); };
+  console.warn = function () { push('warn', arguments); cw.apply(console, arguments); };
+  window.addEventListener('error', function (e) { push('error', ['window: ' + (e.message || 'script error')]); });
+  window.addEventListener('unhandledrejection', function (e) {
+    push('error', ['promise: ' + ((e.reason && e.reason.message) || e.reason || '')]);
+  });
   var boot = document.getElementById('boot');
   var sub = boot ? boot.querySelector('.s') : null;
   var failed = false;
@@ -99,6 +132,8 @@
 /*__THREE__*/
 /*__NAMESPACE__*/
 /*__ASSETS__*/
+/*__CHUNKS__*/
+/*__SCENE__*/
 /*__FRAMEWORK__*/
 /*__APP__*/
 </script>

@@ -90,6 +90,14 @@ different behaviours across four runs, recorded in `docs/QUALITY-4GB.md`).
    rate is 19% against Clover's 29%. That is where its 46 ms per token goes.
 4. **Qwen3.8-Flash-Next Q2_0** only after these two are where they should be.
 
+## Design harness (auxiliary, not the engine)
+
+`tools/build_scene.py` generates the single-file Three.js underwater pod used as the design test:
+plan → five zone calls that fill named slots with JSON → deterministic compile → headless-Firefox
+gate. The model writes no HTML, CSS or JS; `tools/scene_layout.py` owns the slot geometry,
+`assets/chunks.js` owns the 37 props, `assets/scene.js` compiles them. `designs/` is git-ignored.
+None of this changes the engine, the configs or the numbers above.
+
 ## Donors
 
 `VecSzn/PolyStrata` (`upstream`) is the line the engine comes from; `Niko1221/Strata` (`strata-upstream`) moves faster

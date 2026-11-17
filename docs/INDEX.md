@@ -34,7 +34,7 @@ marked as such beside the number that replaced it.
 
 ## 3. Inherited from the donors — **not evidence for this laptop**
 
-The rest of `docs/` comes from PolyStrata and Strata. It describes how the engine works, which flags exist and which
+The rest of `docs/` comes from the PolyStrata project and Strata. It describes how the engine works, which flags exist and which
 model families it can run, and its numbers were measured on an RTX 5090 (32 GB), an 8 GB laptop, AMD cards, Intel Arc
 or a Mac. Useful for mechanisms and flags; **never quote its speeds as ours**.
 

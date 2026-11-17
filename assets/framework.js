@@ -69,7 +69,7 @@ const HARNESS = (() => {
     renderer.setSize(window.innerWidth, window.innerHeight);
     renderer.outputColorSpace = T.SRGBColorSpace;
     renderer.toneMapping = T.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.02;
+    renderer.toneMappingExposure = 1.12;
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = T.PCFSoftShadowMap;
     return renderer;
@@ -127,12 +127,17 @@ const HARNESS = (() => {
   // ── pod shell ─────────────────────────────────────────────────────────
   function buildShell(ctx) {
     const pod = ctx.pod;
-    const hull = POD.mat(0x2b3c43, { metalness: 0.62, roughness: 0.46 });
-    const hullDark = POD.mat(0x162227, { metalness: 0.55, roughness: 0.55 });
-    const trim = POD.mat(0x71878d, { metalness: 0.88, roughness: 0.28 });
+    const hull = POD.mat(0x3a4d54, { metalness: 0.6, roughness: 0.46 });
+    const hullDark = POD.mat(0x1b2a30, { metalness: 0.5, roughness: 0.6 });
+    const trim = POD.mat(0x8ca0a6, { metalness: 0.8, roughness: 0.36 });
     const brass = POD.mat(0xb98a52, { metalness: 0.75, roughness: 0.35 });
     const rubber = POD.mat(0x11191d, { metalness: 0.1, roughness: 0.92 });
+    const rivetMat = POD.mat(0x7e9399, { metalness: 0.85, roughness: 0.32 });
     const glass = POD.glassMaterial({ opacity: 0.13 });
+    // One fixed saturated material: an oxblood cushion. The plan palette moves
+    // every other surface, but the seats have to stay the warm anchor the eye
+    // lands on from the hatch, and a palette-driven seat turns green or pink.
+    const seatColor = 0x7a3742;
 
     // floor with a radial grating
     const floor = mesh(new T.CylinderGeometry(R, R, 0.16, 40), hullDark, 0, -0.08, 0);
@@ -178,15 +183,43 @@ const HARNESS = (() => {
     glassBand.renderOrder = 6; glassBand.name = 'glass';
     pod.add(glassBand);
 
-    // mullions and rings
-    for (let i = 0; i < 12; i++) {
-      const a = i * Math.PI / 6;
-      const m = mesh(new T.BoxGeometry(0.1, H, 0.15), trim,
-        Math.sin(a) * (R - 0.03), H / 2, Math.cos(a) * (R - 0.03));
-      m.rotation.y = a; m.castShadow = true; pod.add(m);
+    // window framing: eight bays with thick pilasters, a deep sill and bolt
+    // lines. Thin mullions made the room read as a fish tank, and the sill is
+    // the horizontal the eye uses to measure the room.
+    const sillRing = new T.Mesh(new T.RingGeometry(R - 0.2, R - 0.005, 48, 1), trim);
+    sillRing.rotation.x = -Math.PI / 2; sillRing.position.y = 0.835;
+    sillRing.receiveShadow = true; pod.add(sillRing);
+    const sillLip = mesh(new T.TorusGeometry(R - 0.2, 0.026, 5, 56), trim, 0, 0.835, 0);
+    sillLip.rotation.x = Math.PI / 2; pod.add(sillLip);
+    const bay = Math.PI * 2 / 8;
+    for (let i = 0; i < 8; i++) {
+      const a = i * bay;
+      const px = Math.sin(a) * (R - 0.045), pz = Math.cos(a) * (R - 0.045);
+      const pillar = mesh(new T.BoxGeometry(0.32, 2.66, 0.2), hull, px, 1.35, pz);
+      pillar.rotation.y = a; pillar.castShadow = true; pod.add(pillar);
+      // bright inner edge so the pillar separates from the dark hull
+      const edge = mesh(new T.BoxGeometry(0.03, 2.6, 0.045), trim,
+        Math.sin(a) * (R - 0.135), 1.35, Math.cos(a) * (R - 0.135));
+      edge.rotation.y = a; pod.add(edge);
+      // two bolt lines up the inner face
+      for (let b = 0; b < 7; b++) {
+        const y = 0.55 + b * 0.32;
+        for (const s of [-1, 1]) {
+          pod.add(mesh(new T.SphereGeometry(0.017, 6, 5), rivetMat,
+            Math.sin(a) * (R - 0.15) + Math.cos(a) * 0.095 * s, y,
+            Math.cos(a) * (R - 0.15) - Math.sin(a) * 0.095 * s));
+        }
+      }
+      // gusset under the sill: a small brace at every pillar foot
+      const gus = mesh(new T.BoxGeometry(0.06, 0.12, 0.16), trim,
+        Math.sin(a) * (R - 0.16), 0.76, Math.cos(a) * (R - 0.16));
+      gus.rotation.y = a; gus.rotation.x = 0.5; pod.add(gus);
     }
-    for (const y of [0.815, 2.35]) {
-      const ring = mesh(new T.TorusGeometry(R - 0.04, 0.055, 6, 64), trim, 0, y, 0);
+    // The upper band is painted steel, not polished: at trim metalness it became
+    // the brightest line in every wide shot and pulled the eye off the room.
+    const bandMat = POD.mat(0x4c6168, { metalness: 0.62, roughness: 0.44 });
+    for (const [y, tube, m] of [[0.8, 0.05, trim], [2.35, 0.045, bandMat]]) {
+      const ring = mesh(new T.TorusGeometry(R - 0.065, tube, 6, 64), m, 0, y, 0);
       ring.rotation.x = Math.PI / 2; pod.add(ring);
     }
 
@@ -210,52 +243,114 @@ const HARNESS = (() => {
       s.rotation.y = a + Math.PI; pod.add(s);
     }
 
-    // ceiling with ribs and practical lamps
-    const ceil = mesh(new T.CylinderGeometry(R, R, 0.16, 40), hullDark, 0, H + 0.08, 0);
-    pod.add(ceil);
-    const hubMat = POD.mat(0x1b282d, { metalness: 0.45, roughness: 0.62 });
-    const hub = mesh(new T.CylinderGeometry(0.4, 0.5, 0.2, 20), hubMat, 0, H - 0.03, 0);
-    pod.add(hub);
+    // ceiling: a panelled dome with dark ribs, a small vent and a hub light.
+    // Bright radial beams made it read as a tent; on a real ceiling the ribs
+    // are darker than the panels and the detail lives in the seams.
+    const ceilMat = POD.mat(0x33464d, { metalness: 0.38, roughness: 0.74 });
+    const ceilSeam = POD.mat(0x141f24, { metalness: 0.4, roughness: 0.7 });
+    const ceil = mesh(new T.CylinderGeometry(R, R, 0.16, 40), ceilMat, 0, H + 0.08, 0);
+    ceil.receiveShadow = true; pod.add(ceil);
+    // a cool perimeter cove so the ceiling reads as a lit surface, not a void
+    const ceilStrip = new T.Mesh(new T.TorusGeometry(R - 0.28, 0.032, 6, 56),
+      POD.glowMat(0xa8f0ff, 0.2, { roughness: 0.5 }));
+    ceilStrip.rotation.x = Math.PI / 2;
+    ceilStrip.position.y = H - 0.07;
+    pod.add(ceilStrip);
+    // concentric and radial seams, plus eight dark ribs that tie into them
+    for (const rr of [1.0, 1.8]) {
+      const s = mesh(new T.TorusGeometry(rr, 0.013, 4, 56), ceilSeam, 0, H - 0.006, 0);
+      s.rotation.x = Math.PI / 2; pod.add(s);
+    }
     for (let i = 0; i < 8; i++) {
       const a = i * Math.PI / 4;
-      const beam = mesh(new T.BoxGeometry(0.07, 0.09, R - 0.5), trim, Math.sin(a) * (R - 0.5) / 2, H - 0.1, Math.cos(a) * (R - 0.5) / 2);
-      beam.rotation.y = a; pod.add(beam);
+      const seam = mesh(new T.BoxGeometry(0.03, 0.014, R - 0.55), ceilSeam,
+        Math.sin(a) * (R - 0.55) / 2, H - 0.005, Math.cos(a) * (R - 0.55) / 2);
+      seam.rotation.y = a; pod.add(seam);
+      const rib = mesh(new T.BoxGeometry(0.08, 0.05, R - 0.9), hullDark,
+        Math.sin(a) * (R - 0.9) / 2, H - 0.045, Math.cos(a) * (R - 0.9) / 2);
+      rib.rotation.y = a; pod.add(rib);
+      const lip = mesh(new T.BoxGeometry(0.012, 0.018, R - 0.9), trim,
+        Math.sin(a) * (R - 0.9) / 2, H - 0.012, Math.cos(a) * (R - 0.9) / 2);
+      lip.rotation.y = a; pod.add(lip);
     }
+    // hub plate with a grille and a warm downlight
+    const hubMat = POD.mat(0x1b282d, { metalness: 0.45, roughness: 0.62 });
+    const hub = mesh(new T.CylinderGeometry(0.36, 0.42, 0.14, 20), hubMat, 0, H - 0.06, 0);
+    pod.add(hub);
+    const grilleMat = POD.mat(0x0f191d, { roughness: 0.8 });
+    for (let i = 0; i < 5; i++) {
+      const bar = mesh(new T.BoxGeometry(0.62, 0.012, 0.022), grilleMat, 0, H - 0.135, 0);
+      bar.rotation.y = i * Math.PI / 5; pod.add(bar);
+    }
+    const hubLamp = mesh(new T.CylinderGeometry(0.075, 0.095, 0.035, 14),
+      POD.glowMat(0xffb877, 0.16, { roughness: 0.62 }), 0, H - 0.152, 0);
+    pod.add(hubLamp);
+    const hubHalo = POD.halo(0xffb877, 0.5, 0.11);
+    hubHalo.rotation.x = Math.PI / 2; hubHalo.position.set(0, H - 0.2, 0);
+    pod.add(hubHalo);
+    const hubRim = new T.Mesh(new T.TorusGeometry(0.14, 0.016, 5, 18), hubMat);
+    hubRim.rotation.x = Math.PI / 2; hubRim.position.y = H - 0.16; pod.add(hubRim);
     const lampMat = POD.glowMat(0xffd09a, 0.8, { roughness: 0.4 });
     for (let i = 0; i < 4; i++) {
-      const a = i * Math.PI / 2 + Math.PI / 4;
-      const x = Math.sin(a) * 1.15, z = Math.cos(a) * 1.15;
+      const a = i * Math.PI / 2 + Math.PI / 8;
+      const x = Math.sin(a) * 1.5, z = Math.cos(a) * 1.5;
       const housing = mesh(new T.CylinderGeometry(0.17, 0.12, 0.14, 12), hullDark, x, H - 0.02, z);
       pod.add(housing);
       const lamp = mesh(new T.CylinderGeometry(0.1, 0.13, 0.06, 12), lampMat, x, H - 0.11, z);
       pod.add(lamp);
-      const rim = mesh(new T.TorusGeometry(0.145, 0.018, 5, 16), trim, x, H - 0.115, z);
+      const rim = new T.Mesh(new T.TorusGeometry(0.145, 0.018, 5, 16), trim, x, H - 0.115, z);
       rim.rotation.x = Math.PI / 2; pod.add(rim);
     }
-    // ceiling vent with slowly turning blades
+    // ceiling vent, hugging the ceiling and small enough to read as a fitting
     const vent = new T.Group();
-    const ventRim = new T.Mesh(new T.TorusGeometry(0.72, 0.035, 6, 28), trim);
+    const ventRim = new T.Mesh(new T.TorusGeometry(0.42, 0.026, 6, 28), hullDark);
     ventRim.rotation.x = Math.PI / 2; vent.add(ventRim);
-    for (let i = 0; i < 6; i++) {
-      const blade = new T.Mesh(new T.BoxGeometry(0.54, 0.012, 0.1), POD.mat(0x2a3a40, { metalness: 0.55, roughness: 0.5 }));
-      blade.position.x = Math.cos(i * Math.PI / 3) * 0.35;
-      blade.position.z = Math.sin(i * Math.PI / 3) * 0.35;
-      blade.rotation.y = -i * Math.PI / 3;
+    const bladeMat = POD.mat(0x2a3a40, { metalness: 0.55, roughness: 0.5 });
+    for (let i = 0; i < 5; i++) {
+      const blade = new T.Mesh(new T.BoxGeometry(0.34, 0.01, 0.09), bladeMat);
+      blade.position.x = Math.cos(i * Math.PI / 5) * 0.19;
+      blade.position.z = Math.sin(i * Math.PI / 5) * 0.19;
+      blade.rotation.y = -i * Math.PI / 5;
       vent.add(blade);
     }
-    vent.position.set(0, H - 0.18, 0);
+    vent.position.set(0, H - 0.07, 0);
     vent.userData.tick = (t) => { vent.rotation.y = t * 0.08; };
     pod.add(vent);
 
     // rear bulkhead with a working-looking hatch
     const bulk = mesh(new T.BoxGeometry(3.3, H, 0.14), hull, 0, H / 2, 2.58);
     bulk.receiveShadow = true; pod.add(bulk);
-    const bulkTrim = mesh(new T.BoxGeometry(3.42, 0.08, 0.18), trim, 0, 2.3, 2.56);
+    // top conduit trim, kept above the wall slots so a hanging prop is not cut
+    const bulkTrim = mesh(new T.BoxGeometry(3.42, 0.08, 0.18), trim, 0, 2.76, 2.56);
     pod.add(bulkTrim);
     for (const sx of [-1.5, 1.5]) pod.add(mesh(new T.BoxGeometry(0.08, H, 0.18), trim, sx, H / 2, 2.56));
 
+    // panel seams, rivets and a kick band: without them the bulkhead is one
+    // flat 3.3 m sheet and reads as unfinished next to the detailed props
+    const seamMat = POD.mat(0x22333a, { metalness: 0.55, roughness: 0.55 });
+    for (const sx of [-0.82, 0.82]) {
+      pod.add(mesh(new T.BoxGeometry(0.035, 2.56, 0.012), seamMat, sx, 1.34, 2.505));
+      for (let i = 0; i < 10; i++) {
+        const rivet = new T.Mesh(new T.SphereGeometry(0.016, 6, 5), rivetMat);
+        rivet.position.set(sx + 0.045, 0.24 + i * 0.25, 2.505);
+        pod.add(rivet);
+      }
+    }
+    pod.add(mesh(new T.BoxGeometry(3.3, 0.035, 0.012), seamMat, 0, 1.06, 2.505));
+    pod.add(mesh(new T.BoxGeometry(3.3, 0.035, 0.012), seamMat, 0, 2.28, 2.505));
+    // lower kick band and two recessed vent grilles
+    pod.add(mesh(new T.BoxGeometry(3.3, 0.34, 0.02), POD.mat(0x1a282e, { roughness: 0.8 }), 0, 0.17, 2.505));
+    for (const sx of [-1.05, 1.05]) {
+      pod.add(mesh(new T.BoxGeometry(0.44, 0.22, 0.015), POD.mat(0x121d22, { roughness: 0.9 }), sx, 0.42, 2.5));
+      for (let i = 0; i < 4; i++) {
+        pod.add(mesh(new T.BoxGeometry(0.4, 0.016, 0.02), rivetMat, sx, 0.35 + i * 0.05, 2.505));
+      }
+    }
+
     const hatch = new T.Group();
-    const door = mesh(new T.CylinderGeometry(0.46, 0.46, 0.1, 32), POD.mat(0x40565c, { metalness: 0.8, roughness: 0.35 }), 0, 0, 0);
+    // Painted steel, not chrome: at metalness 0.8 / roughness 0.35 the door face
+    // took the hatch light as one huge white ball and the wheel vanished into it.
+    const door = mesh(new T.CylinderGeometry(0.46, 0.46, 0.1, 32), POD.mat(0x3c5259, { metalness: 0.55, roughness: 0.54 }), 0, 0, 0);
     door.rotation.x = Math.PI / 2; hatch.add(door);
     const ring = mesh(new T.TorusGeometry(0.46, 0.06, 8, 36), trim, 0, 0, 0);
     ring.rotation.x = 0; hatch.add(ring);
@@ -296,27 +391,24 @@ const HARNESS = (() => {
     pod.add(sign);
     wheel.userData.tick = (t) => { wheel.rotation.z = Math.sin(t * 0.12) * 0.05; };
 
-    // hatch side gauges and a warning beacon
-    for (let i = 0; i < 3; i++) {
-      const g = POD.gauge(0.095, 0x9fe8ef);
-      g.position.set(-0.95 + i * 0.26, 2.04, 2.49); g.rotation.y = Math.PI;
-      pod.add(g);
+    // hatch-side beacon. The gauge row that used to sit here is gone: the
+    // bulkhead wall slots own that height now, and a fixed row of gauges would
+    // collide with whatever the model hangs there.
+    const lampCup = POD.mat(0x1a272c, { metalness: 0.55, roughness: 0.5 });
+    for (const [x, color, r] of [[-1.24, 0xd23a26, 0.052], [1.24, 0x53e39a, 0.04]]) {
+      const cup = mesh(new T.CylinderGeometry(r * 1.5, r * 1.9, 0.05, 12), lampCup, x, 2.15, 2.5);
+      cup.rotation.x = Math.PI / 2; pod.add(cup);
+      const lamp = POD.statusLamp(color, r);
+      lamp.position.set(x, 2.15, 2.47); pod.add(lamp);
     }
-    const beacon = POD.statusLamp(0xff5b3c, 0.075);
-    beacon.position.set(1.22, 2.15, 2.47); pod.add(beacon);
-    const beacon2 = POD.statusLamp(0x66ffb0, 0.05);
-    beacon2.position.set(1.38, 2.04, 2.47); pod.add(beacon2);
 
     // ceiling pipes and cables
-    const copper = POD.mat(0x9a6b45, { metalness: 0.8, roughness: 0.36 });
-    pod.add(POD.pipe([[-2.3, 2.62, 2.35], [-2.55, 2.62, 0.4], [-1.7, 2.62, -2.1], [0.4, 2.62, -2.55]], 0.055, 0x9a6b45));
-    pod.add(POD.pipe([[2.4, 2.58, 2.3], [2.6, 2.58, 0.1], [2.1, 2.58, -2.0]], 0.045, 0x6d7f84));
-    pod.add(POD.pipe([[-2.7, 2.48, -0.6], [-2.7, 1.0, -0.62]], 0.04, 0x6d7f84));
-    for (let i = 0; i < 5; i++) {
-      const a = -0.9 + i * 0.42;
-      pod.add(POD.pipe([[Math.sin(a) * 2.8, 2.7, Math.cos(a) * 2.8], [Math.sin(a) * 2.55, 2.5, Math.cos(a) * 2.55]], 0.018, 0x222b2f));
-    }
-    const cable = POD.pipe([[2.55, 2.72, 1.9], [2.35, 2.35, 0.6], [2.1, 1.9, -0.9], [1.7, 1.35, -1.7]], 0.022, 0x11181b);
+    // A horizontal conduit at ceiling height crossed the dome in every upward
+    // view and read as a bar through the glass. The room keeps the wall riser
+    // and the clamped drop instead; the horizontal runs are gone.
+    pod.add(POD.pipe([[-2.88, 2.55, -0.6], [-2.88, 1.15, -0.62], [-2.84, 0.62, -0.4]], 0.04, 0x6d7f84));
+    pod.add(POD.pipe([[-2.8, 2.4, 0.75], [-2.84, 1.2, 0.7]], 0.028, 0x9a6b45));
+    const cable = POD.pipe([[2.62, 2.7, 1.9], [2.55, 2.4, 0.6], [2.35, 2.0, -1.2], [2.05, 1.5, -2.1]], 0.016, 0x11181b);
     cable.material = rubber; pod.add(cable);
 
     // default furniture: console bank, seats, lockers, crates, railings
@@ -324,9 +416,11 @@ const HARNESS = (() => {
     const solid = (o) => { props.add(o); ctx.solids.add(o); return o; };
 
     const bank = new T.Group();
-    const deskMat = POD.mat(0x263a41, { metalness: 0.5, roughness: 0.5 });
+    const deskMat = POD.mat(0x33474f, { metalness: 0.5, roughness: 0.46 });
     const top = mesh(new T.BoxGeometry(3.1, 0.09, 0.72), deskMat, 0, 0.92, 0);
     top.castShadow = top.receiveShadow = true; bank.add(top);
+    bank.add(mesh(new T.BoxGeometry(3.14, 0.025, 0.76), POD.mat(0x6f858c, { metalness: 0.85, roughness: 0.3 }), 0, 0.985, 0));
+    bank.add(mesh(new T.BoxGeometry(3.0, 0.02, 0.02), POD.glowMat(0xffb35c, 0.9), 0, 0.9, -0.36));
     const kick = mesh(new T.BoxGeometry(2.8, 0.86, 0.12), hullDark, 0, 0.43, 0.3);
     bank.add(kick);
     for (const x of [-1.45, 1.45]) {
@@ -339,7 +433,17 @@ const HARNESS = (() => {
       cu.rotation.x = -0.18;
       bank.add(cu);
     }
-    // animated screens above the desk
+    // animated screens above the desk, mounted on one instrument spine so they
+    // read as an installed console instead of three floating panels
+    const spine = mesh(new T.BoxGeometry(2.34, 0.82, 0.1), POD.mat(0x1d2b31, { metalness: 0.5, roughness: 0.6 }), 0, 1.32, 0.16);
+    bank.add(spine);
+    bank.add(mesh(new T.BoxGeometry(2.38, 0.04, 0.13), trim, 0, 1.73, 0.16));
+    bank.add(mesh(new T.BoxGeometry(2.38, 0.04, 0.13), trim, 0, 0.92, 0.16));
+    for (const x of [-1.16, 1.16]) bank.add(mesh(new T.BoxGeometry(0.05, 0.84, 0.12), trim, x, 1.32, 0.16));
+    for (let i = 0; i < 5; i++) {
+      bank.add(mesh(new T.BoxGeometry(2.2, 0.012, 0.02), POD.mat(0x3b5259, { metalness: 0.6, roughness: 0.45 }),
+        0, 1.62 + i * 0.002, 0.115));
+    }
     const s1 = POD.screen(0.72, 0.42, '#5ff0dd', 'wave');
     s1.position.set(-0.72, 1.42, 0.22); bank.add(s1);
     const s2 = POD.screen(0.62, 0.38, '#ffb35c', 'bars');
@@ -380,35 +484,16 @@ const HARNESS = (() => {
     bank.position.set(0, 0, -2.06);
     solid(bank);
 
-    const seatA = POD.seat(0.62, 0.95, 0.6, 0x3c4e55);
+    const seatA = POD.seat(0.62, 0.95, 0.6, seatColor);
     seatA.position.set(-1.05, 0, -1.18); seatA.rotation.y = Math.PI; solid(seatA);
-    const seatB = POD.seat(0.62, 0.95, 0.6, 0x3c4e55);
+    const seatB = POD.seat(0.62, 0.95, 0.6, seatColor);
     seatB.position.set(1.05, 0, -1.18); seatB.rotation.y = Math.PI; solid(seatB);
 
-    const lockL = POD.locker(0.78, 2.0, 0.46, 0x35474e);
-    lockL.position.set(-2.34, 0, 1.16); lockL.rotation.y = -Math.PI / 2; solid(lockL);
-    const lockR = POD.locker(0.78, 2.0, 0.46, 0x35474e);
-    lockR.position.set(2.34, 0, 1.16); lockR.rotation.y = Math.PI / 2; solid(lockR);
+    // Everything else — lockers, crates, bench, tanks, tool board, life support,
+    // railings, pendant lamp — is a slot in tools/scene_layout.py and is built by
+    // assets/chunks.js, so the model can choose what stands where.
 
-    const crate1 = mesh(new T.BoxGeometry(0.62, 0.5, 0.52), POD.mat(0x6b5a3e, { roughness: 0.86 }), 2.1, 0.25, -0.9);
-    crate1.castShadow = crate1.receiveShadow = true; solid(crate1);
-    const crate2 = mesh(new T.BoxGeometry(0.48, 0.4, 0.42), POD.mat(0x4e5f45, { roughness: 0.9 }), 2.12, 0.7, -1.0);
-    crate2.rotation.y = 0.2; solid(crate2);
-    const crate3 = mesh(new T.BoxGeometry(0.4, 0.34, 0.4), POD.mat(0x6a4a3a, { roughness: 0.9 }), 2.16, 0.17, -0.28);
-    solid(crate3);
-
-    const railL = POD.railing(1.35, 0.92, 0x8fa4a8);
-    railL.position.set(-2.25, 0, -0.55); railL.rotation.y = Math.PI / 2; solid(railL);
-    const railR = POD.railing(1.35, 0.92, 0x8fa4a8);
-    railR.position.set(2.25, 0, -0.55); railR.rotation.y = Math.PI / 2; solid(railR);
-
-    // wall pipes behind the lockers and a fire extinguisher
-    const ext = new T.Group();
-    ext.add(mesh(new T.CylinderGeometry(0.09, 0.1, 0.5, 12), POD.mat(0xa63b32, { metalness: 0.35, roughness: 0.5 }), 0, 0.28, 0));
-    ext.add(mesh(new T.CylinderGeometry(0.03, 0.03, 0.14, 8), brass, 0, 0.58, 0));
-    ext.position.set(-2.52, 0, -0.15); props.add(ext);
-
-    // metal backing panels behind the lockers, so they do not float on glass
+    // metal backing panels behind the side equipment, so wall units do not float on glass
     const backPanelMat = POD.mat(0x223036, { metalness: 0.5, roughness: 0.62 });
     for (const ang of [-1.11, 1.11]) {
       const pg = new T.CylinderGeometry(R - 0.13, R - 0.13, 1.6, 12, 1, true, ang - 0.31, 0.62);
@@ -433,91 +518,8 @@ const HARNESS = (() => {
       pnl.rotation.y = a;
       pod.add(pnl);
     }
-    // a life-support cabinet on the port side
-    const support = new T.Group();
-    support.add(mesh(new T.BoxGeometry(0.42, 1.05, 0.55), POD.mat(0x2a3c42, { metalness: 0.55, roughness: 0.5 }), 0, 0.525, 0));
-    support.add(mesh(new T.BoxGeometry(0.36, 0.3, 0.02), POD.mat(0x1d2b30, { roughness: 0.7 }), 0, 0.7, 0.285));
-    support.add(mesh(new T.BoxGeometry(0.28, 0.02, 0.02), POD.glowMat(0x5ee8d8, 0.9), 0, 0.78, 0.3));
-    for (let i = 0; i < 4; i++) support.add(mesh(new T.BoxGeometry(0.3, 0.022, 0.02), POD.mat(0x4d6469, { metalness: 0.5 }), 0, 0.18 + i * 0.07, 0.3));
-    support.add(POD.gauge(0.08, 0x8fe8ef));
-    support.children[support.children.length - 1].position.set(0.09, 0.92, 0.3);
-    support.add(mesh(new T.CylinderGeometry(0.055, 0.055, 0.04, 10), POD.glowMat(0xff5b3c, 1.2), -0.1, 0.94, 0.3));
-    support.position.set(-2.52, 0, -0.75);
-    support.rotation.y = Math.PI / 2;
-    solid(support);
-
-    // tool board, life ring and first-aid box on the bulkhead
-    const board = new T.Group();
-    board.add(mesh(new T.BoxGeometry(1.05, 0.72, 0.05), POD.mat(0x1d2b30, { roughness: 0.85 }), 0, 0, 0));
-    const peg = POD.mat(0x4b6168, { metalness: 0.3, roughness: 0.8 });
-    for (let i = 0; i < 5; i++) for (let j = 0; j < 3; j++) {
-      board.add(mesh(new T.SphereGeometry(0.012, 5, 4), peg, -0.4 + i * 0.2, -0.22 + j * 0.22, -0.03));
-    }
-    const toolMat = POD.mat(0x9fb2b6, { metalness: 0.85, roughness: 0.3 });
-    const wrench = new T.Group();
-    wrench.add(mesh(new T.BoxGeometry(0.035, 0.3, 0.02), toolMat, 0, 0, 0));
-    for (const sy of [-1, 1]) {
-      const jaw = new T.Mesh(new T.TorusGeometry(0.045, 0.012, 5, 10, Math.PI), toolMat);
-      jaw.rotation.z = sy > 0 ? Math.PI : 0; jaw.position.y = sy * 0.15; wrench.add(jaw);
-    }
-    wrench.position.set(-0.34, -0.02, -0.045); wrench.rotation.z = 0.2; board.add(wrench);
-    const hammer = new T.Group();
-    hammer.add(mesh(new T.BoxGeometry(0.03, 0.3, 0.02), POD.mat(0x6b4a2e, { roughness: 0.8 }), 0, 0, 0));
-    hammer.add(mesh(new T.BoxGeometry(0.16, 0.05, 0.05), toolMat, 0, 0.15, 0));
-    hammer.position.set(-0.08, -0.02, -0.05); hammer.rotation.z = -0.15; board.add(hammer);
-    for (let i = 0; i < 3; i++) {
-      board.add(mesh(new T.BoxGeometry(0.022, 0.18, 0.018), POD.mat([0xd05a3a, 0x4f9fd0, 0xd0b03a][i], { roughness: 0.5 }),
-        0.2 + i * 0.06, -0.02, -0.045));
-    }
-    board.add(mesh(new T.BoxGeometry(0.2, 0.26, 0.012), POD.mat(0xc8d6d2, { roughness: 0.9 }), 0.42, 0.03, -0.04));
-    board.position.set(-1.72, 1.62, 2.495);
-    props.add(board);
-
-    const lifeRing = new T.Group();
-    lifeRing.add(new T.Mesh(new T.TorusGeometry(0.21, 0.055, 8, 22), POD.mat(0xd06a32, { roughness: 0.72 })));
-    for (let i = 0; i < 4; i++) {
-      const band = new T.Mesh(new T.TorusGeometry(0.21, 0.058, 8, 6, 0.5), POD.mat(0xe8e2d0, { roughness: 0.7 }));
-      band.rotation.z = i * Math.PI / 2 + 0.2; lifeRing.add(band);
-    }
-    lifeRing.position.set(1.62, 1.72, 2.48); props.add(lifeRing);
-
-    const aid = new T.Group();
-    aid.add(mesh(new T.BoxGeometry(0.34, 0.26, 0.11), POD.mat(0xc9c3b4, { roughness: 0.7 }), 0, 0, 0));
-    aid.add(mesh(new T.BoxGeometry(0.2, 0.05, 0.012), POD.mat(0xc03a30, { roughness: 0.6 }), 0, 0.02, -0.06));
-    aid.add(mesh(new T.BoxGeometry(0.05, 0.2, 0.012), POD.mat(0xc03a30, { roughness: 0.6 }), 0, 0.02, -0.06));
-    aid.position.set(1.72, 2.42, 2.5); props.add(aid);
-
-    // oxygen bottles and a bench by the hatch
-    const tankMat = POD.mat(0x5a7d4f, { metalness: 0.55, roughness: 0.45 });
-    const tanks = new T.Group();
-    for (const x of [-0.16, 0.16]) {
-      tanks.add(mesh(new T.CylinderGeometry(0.11, 0.11, 0.82, 14), tankMat, x, 0.44, 0));
-      tanks.add(mesh(new T.SphereGeometry(0.11, 12, 8), tankMat, x, 0.85, 0));
-      tanks.add(mesh(new T.CylinderGeometry(0.025, 0.025, 0.1, 8), brass, x, 0.94, 0));
-      tanks.add(mesh(new T.TorusGeometry(0.055, 0.012, 5, 10), brass, x, 0.98, 0));
-    }
-    tanks.position.set(2.2, 0, 2.15); solid(tanks);
-
-    const bench = new T.Group();
-    bench.add(mesh(new T.BoxGeometry(1.0, 0.09, 0.36), POD.mat(0x35464d, { roughness: 0.7 }), 0, 0.43, 0));
-    bench.add(mesh(new T.BoxGeometry(0.9, 0.3, 0.08), POD.mat(0x28383e, { roughness: 0.8 }), 0, 0.27, -0.15));
-    for (const x of [-0.4, 0.4]) bench.add(mesh(new T.BoxGeometry(0.06, 0.42, 0.3), trim, x, 0.21, 0));
-    bench.position.set(-1.55, 0, 2.28); solid(bench);
-    const mug = mesh(new T.CylinderGeometry(0.045, 0.04, 0.09, 10), POD.mat(0xd8cfae, { roughness: 0.6 }), -1.3, 0.52, 2.22);
-    props.add(mug);
-    const mugHandle = new T.Mesh(new T.TorusGeometry(0.035, 0.01, 5, 8), mug.material);
-    mugHandle.position.set(-1.24, 0.52, 2.22); mugHandle.rotation.y = Math.PI / 2; props.add(mugHandle);
-
-    // pendant lamp over the console bank
-    const pendant = new T.Group();
-    pendant.position.set(0, 2.9, -1.45);
-    pendant.add(mesh(new T.CylinderGeometry(0.008, 0.008, 0.46, 6), rubber, 0, -0.23, 0));
-    pendant.add(mesh(new T.ConeGeometry(0.21, 0.17, 18, 1, true), POD.mat(0x2f4a45, { metalness: 0.5, roughness: 0.5, side: T.DoubleSide }), 0, -0.5, 0));
-    pendant.add(mesh(new T.SphereGeometry(0.05, 10, 8), POD.glowMat(0xffd9a0, 2.0), 0, -0.57, 0));
-    props.add(pendant);
-    pendant.userData.tick = (t) => { pendant.rotation.z = Math.sin(t * 0.5) * 0.018; };
-
-    // caustic light pool on the floor
+    // a life-support stub on the port side is now a slot (workbench / shelf)
+    // recessed service panels and vents along the lower hull
     const floorCaustic = new T.ShaderMaterial({
       uniforms: { uTime: { value: 0 }, uColor: { value: new T.Color(0x58d8d0) } },
       vertexShader: 'varying vec2 vUv; void main(){ vUv=uv; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0); }',
@@ -553,10 +555,6 @@ const HARNESS = (() => {
     };
     pod.add(dust);
 
-    // ready-made side stations (the model can add more with ctx.station)
-    buildSideStation(ctx, -1, -0.45, 0x64e8ff);
-    buildSideStation(ctx, 1, -0.45, 0xffb35c);
-
     // wall colliders: 12 tangent boxes round the pod plus the bulkhead
     const wallMat = new T.MeshBasicMaterial({ visible: false });
     for (let i = 0; i < 12; i++) {
@@ -589,7 +587,7 @@ const HARNESS = (() => {
       p.setY(i, y + SEABED);
     }
     seabed.computeVertexNormals();
-    const sand = new T.Mesh(seabed, POD.mat(0x24383a, { roughness: 0.98, metalness: 0 }));
+    const sand = new T.Mesh(seabed, POD.mat(0x2e4448, { roughness: 0.98, metalness: 0 }));
     sand.receiveShadow = true;
     root.add(sand);
 
@@ -689,8 +687,8 @@ const HARNESS = (() => {
     schools[1].position.set(7, -1.2, -6);
     schools[2].position.set(2, 6.5, -18);
     schools.forEach(s => root.add(s));
-    const nearSchool = POD.fishSchool(10, [3.2, 1.2, 2.6], 0xa8e6ff);
-    nearSchool.position.set(4.2, 1.9, -3.8);
+    const nearSchool = POD.fishSchool(8, [2.2, 1.0, 2.0], 0xa8e6ff);
+    nearSchool.position.set(5.0, 2.1, -5.2);
     root.add(nearSchool);
 
     // drifting particles and vent bubbles
@@ -752,6 +750,7 @@ const HARNESS = (() => {
     whale.position.set(-16, 4.2, -27);
     whale.rotation.y = 0.5;
     whale.scale.setScalar(0.9);
+    whale.userData.dynamic = true;
     root.add(whale);
     root.userData.whale = whale;
     root.userData.whaleTail = tail;
@@ -769,6 +768,7 @@ const HARNESS = (() => {
     subLamp2.position.set(-2.2, 0.9, 0); sub.add(subLamp2);
     sub.position.set(24, 9, -34);
     sub.rotation.y = -0.4;
+    sub.userData.dynamic = true;
     root.add(sub);
     root.userData.sub = sub;
 
@@ -779,6 +779,7 @@ const HARNESS = (() => {
       s.position.set(-16 + i * 5.2, 8, -10 - rnd() * 14);
       s.material.opacity = 0.035 + rnd() * 0.03;
       s.rotation.z = (rnd() - 0.5) * 0.2;
+      s.userData.dynamic = true;
       root.add(s); shafts.push(s);
     }
     root.userData.shafts = shafts;
@@ -906,6 +907,32 @@ const HARNESS = (() => {
   }
 
   // ── frame loop ─────────────────────────────────────────────────────────
+  // Station readout: a fixed survey depth (the pod is on the seabed) plus the
+  // live heading and pitch. Cheap DOM writes, throttled to ~8 Hz.
+  const readout = { depth: 0, press: 0, hdg: 0, trim: 0, t: -1, el: null };
+  function updateReadout(t) {
+    if (!readout.el) {
+      readout.el = {
+        depth: document.getElementById('ro-depth'),
+        press: document.getElementById('ro-press'),
+        hdg: document.getElementById('ro-hdg'),
+        trim: document.getElementById('ro-trim'),
+      };
+      if (!readout.el.depth) return;
+    }
+    readout.depth = 24.5 + (state.camera.position.y - EYE) * 2;
+    const press = 1.013 + readout.depth / 10.06;
+    let hdg = (-yaw * 180 / Math.PI) % 360;
+    if (hdg < 0) hdg += 360;
+    readout.hdg = Math.round(hdg);
+    readout.trim = pitch * 180 / Math.PI;
+    if (readout.el.depth) readout.el.depth.textContent = readout.depth.toFixed(1) + ' m';
+    if (readout.el.press) readout.el.press.textContent = press.toFixed(2) + ' bar';
+    if (readout.el.hdg) readout.el.hdg.textContent = ('00' + readout.hdg).slice(-3) + '\u00b0';
+    if (readout.el.trim) readout.el.trim.textContent = (readout.trim < 0 ? '-' : '+')
+      + Math.abs(readout.trim).toFixed(1) + '\u00b0';
+  }
+
   function updateCamera() {
     state.camera.rotation.order = 'YXZ';
     state.camera.rotation.set(pitch, yaw, 0);
@@ -930,6 +957,7 @@ const HARNESS = (() => {
     }
     updateCamera();
     state.renderer.render(state.scene, state.camera);
+    if (t - readout.t > 0.12) { readout.t = t; updateReadout(t); }
     state.frames++;
     if (!bootDone && state.frames > 2) {
       bootDone = true;
@@ -1093,6 +1121,18 @@ const HARNESS = (() => {
     // collect prop colliders once, after the app has placed its furniture
     const propBoxes = POD.collidersFrom(state.solids);
     for (const b of propBoxes) state.colliders.push(b);
+
+    // One draw call per material instead of one per bolt. Colliders are already
+    // computed, so baking the static meshes is safe; anything animated is kept.
+    if (config.compact !== false) {
+      try {
+        POD.compactWorld(state.pod);
+        POD.compactWorld(state.props);
+        POD.compactWorld(state.exterior);
+      } catch (err) {
+        console.warn('static merge skipped:', err && err.message ? err.message : err);
+      }
+    }
 
     bindControls(canvas);
     bindUI();

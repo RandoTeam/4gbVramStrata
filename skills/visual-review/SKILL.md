@@ -1,8 +1,9 @@
 # Skill: visual-review
 
-The harness assembles one `index.html`. Do not consider the module done until this gate passes.
-The runtime already hides the boot splash after the first frames; if you see "Could not start",
-read the console.
+`tools/build_scene.py` assembles one `index.html` from the plan, the zone answers and the compiler,
+then runs `tools/browser_gate.py`. Do not consider a scene done until this gate passes. Never fix a
+generated page by editing `designs/*/index.html` — fix the slot, the chunk or the framework and
+rebuild, or the next run reintroduces the bug.
 
 ## Hard failures
 
@@ -56,4 +57,7 @@ Turn a full 360° from the spawn and inspect:
    clips through glass.
 4. Change to a 390×844 viewport; check the joystick/look pad, safe areas and the HUD.
 5. Pause, reset, cycle quality; check each changes state.
-6. If a check fails, fix the smallest thing; do not rewrite the scene.
+6. If a check fails, decide which layer owns it: the model's choice (re-ask one zone with
+   `--zones <id>`), the layout (a slot position or size in `tools/scene_layout.py`), a chunk
+   (`assets/chunks.js`) or the shell (`assets/framework.js`). Fix that layer, rebuild, and re-gate.
+   Never hand-edit the generated HTML.
