@@ -56,11 +56,10 @@ def normalize(v, t: Path):
     if isinstance(v, list):
         return [normalize(x, t) for x in v]
     if isinstance(v, str):
-        s = v.replace(str(t), "<T>").replace("\\", "/")
-        # the golden file was recorded on Windows: both "strata" and "strata.exe" compare as the same name here,
-        # and the vision encoder likewise (its name is the only difference between a Windows and a Linux config)
-        s = re.sub(rf"(?<![\w.-]){re.escape(setup.VEXE)}(?:\.exe)?(?![\w.-])", "<VEXE>", s)
-        return re.sub(rf"(?<![\w.-]){re.escape(setup.EXE)}(?:\.exe)?(?![\w.-])", "<EXE>", s)   # #973: not "strata-x.log"
+        # The stored baseline uses the Windows encoder name; normalize only a
+        # complete executable basename, as for the main engine below.
+        v = re.sub(r"(?<![\w.-])strata-vision(?:\.exe)?(?![\w.-])", "strata-vision.exe", v)
+        return re.sub(rf"(?<![w.-]){re.escape(setup.EXE)}(?![w.-])", "<EXE>", v.replace(str(t), "<T>").replace("\\", "/"))   # #973: only the whole name, not "strata-x.log" on Linux
     return v
 
 
@@ -98,6 +97,8 @@ def install(ram, found, argv, answers=None, extra=(), avx512=False, configs=()):
             setup.mark(dst)
 
         patches = [
+            # These fixtures describe PCs, even when the test runner is a Mac.
+            mock.patch.object(setup.sys, "platform", "win32" if setup.WIN else "linux"),
             mock.patch.object(setup, "ROOT", t),
             mock.patch.object(setup, "GPU_PICK", None),
             mock.patch.object(setup, "data_folder", lambda d: (t / "data", [])),
