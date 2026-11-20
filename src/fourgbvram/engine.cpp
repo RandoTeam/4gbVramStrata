@@ -4800,7 +4800,11 @@ int Engine::room_key(int n) const {
     return key;
 }
 
-// Records what `work` hands to the stream, as a graph that is launched with one call from then on.
+// Records what `work` hands to the stream, as a graph that is launched with one call from then on.  A card with no
+// VRAM left for the instantiation leaves `work` run as it was: a recording is an optimisation, and on a 4 GB card it
+// is the last thing to claim the reserve (a 13,000-token prompt's attention graph did not fit at a 128 MiB reserve,
+// and the engine ended the request with "cudaGraphInstantiate: out of memory").  The caller gets a launchable handle or
+// nullptr, and runs `work` itself when it is nullptr - see the `replayed` helpers and their callers.
 template <class F>
 void* Engine::record(F&& work) {
     cudaGraph_t g = nullptr;
@@ -4819,7 +4823,18 @@ void* Engine::record(F&& work) {
     cudaGraphExec_t exec = nullptr;
     const cudaError_t made = cudaGraphInstantiateWithFlags(&exec, g, 0);
     cudaGraphDestroy(g);
-    ck(made, "cudaGraphInstantiate");
+    if (made != cudaSuccess) {
+        if (made != cudaErrorMemoryAllocation) ck(made, "cudaGraphInstantiate");
+        (void) cudaGetLastError();                      // clear it: the next call must see its own
+        static bool told = false;
+        if (!told) {
+            told = true;
+            std::fprintf(stderr, "strata-fourgbvram: no VRAM for a recorded launch: its kernels are launched one by "
+                                 "one from here on (--no-graphs does the same from the start)\n");
+        }
+        ++graphs_failed_;
+        return nullptr;
+    }
     graphs_.push_back(exec);
     return exec;
 }
@@ -4871,7 +4886,8 @@ void Engine::run(const int32_t* tokens, int n) {
     for (int t = 0; t < n && replay; ++t) replay = !image_at(pos_ + t);
     const auto replayed = [&](std::vector<void*>& made, size_t key, auto&& work) {
         if (made.size() <= key) made.resize(key + 1, nullptr);
-        if (!made[key]) made[key] = record(work);
+        if (!made[key] && !graphs_failed_) made[key] = record(work);
+        if (!made[key]) return work();          // the card had no VRAM for the graph: launch the kernels one by one
         ck(cudaGraphLaunch((cudaGraphExec_t) made[key], cs(st_)), "layer graph");
     };
     if (replay) {   // a pair a token: a window's tokens may go one by one, each from its own
@@ -5010,20 +5026,25 @@ void Engine::run(const int32_t* tokens, int n) {
         std::vector<int> key{block_pass_ ? -n : n};
         for (int il = lo_; il < hi_; ++il) key.push_back(head_key(il, n));
         void*& pass = passes_[key];
-        if (!pass)
-            pass = record([&] {
-                for (int il = lo_; il < hi_; ++il) {
-                    Layer& L = layers_[(size_t) il];
-                    layer_head(L, il, n);
-                    if (!L.moe) continue;
-                    moe_shared(L, il, n);
-                    moe_card(L, il, n);
-                    layer_tail(L, il, n);
-                }
-            });
-        ck(cudaGraphLaunch((cudaGraphExec_t) pass, cs(st_)), "layer graph");
-        for (int il = lo_; il < hi_; ++il) stats_.gpu_experts += layers_[(size_t) il].moe ? n * n_used_ : 0;
-        return;
+        const auto layers_work = [&] {
+            for (int il = lo_; il < hi_; ++il) {
+                Layer& L = layers_[(size_t) il];
+                layer_head(L, il, n);
+                if (!L.moe) continue;
+                moe_shared(L, il, n);
+                moe_card(L, il, n);
+                layer_tail(L, il, n);
+            }
+        };
+        if (!pass && !graphs_failed_) pass = record(layers_work);
+        if (!pass) {                            // the card had no VRAM for the graph: the layers, launch by launch
+            layers_work();
+            replay = false;
+        } else {
+            ck(cudaGraphLaunch((cudaGraphExec_t) pass, cs(st_)), "layer graph");
+            for (int il = lo_; il < hi_; ++il) stats_.gpu_experts += layers_[(size_t) il].moe ? n * n_used_ : 0;
+            return;
+        }
     }
     for (int il = lo_; il < hi_; ++il) {
         Layer& L = layers_[(size_t) il];
@@ -5106,7 +5127,8 @@ void Engine::step(const int* seqs, const int32_t* tokens, int n, const int32_t* 
     const bool replay = opt_.graphs && !opt_.dump;
     const auto replayed = [&](std::vector<void*>& made, size_t key, auto&& work) {
         if (made.size() <= key) made.resize(key + 1, nullptr);
-        if (!made[key]) made[key] = record(work);
+        if (!made[key] && !graphs_failed_) made[key] = record(work);
+        if (!made[key]) return work();          // the card had no VRAM for the graph: launch the kernels one by one
         ck(cudaGraphLaunch((cudaGraphExec_t) made[key], cs(st_)), "layer graph");
     };
     const bool card = R < kStageRows && card_moe(R);
@@ -5135,8 +5157,9 @@ void Engine::step(const int* seqs, const int32_t* tokens, int n, const int32_t* 
             n_rows_of_ = R;
             if (replay && L.fixed) {
                 void*& made = L.rows_heads[key];
-                if (!made) made = record([&] { layer_head(L, il, R); });
-                ck(cudaGraphLaunch((cudaGraphExec_t) made, cs(st_)), "layer graph");
+                if (!made && !graphs_failed_) made = record([&] { layer_head(L, il, R); });
+                if (made) ck(cudaGraphLaunch((cudaGraphExec_t) made, cs(st_)), "layer graph");
+                else layer_head(L, il, R);       // no VRAM for the graph: the head's kernels, one by one
             } else {
                 layer_head(L, il, R);
             }
@@ -5416,8 +5439,9 @@ void Engine::eval(const int32_t* tokens, int n, bool want_logits) {
                "logits");
         };
         if (replay) {
-            if (!tail_) tail_ = record(tail);
-            ck(cudaGraphLaunch((cudaGraphExec_t) tail_, cs(st_)), "logits graph");
+            if (!tail_ && !graphs_failed_) tail_ = record(tail);
+            if (tail_) ck(cudaGraphLaunch((cudaGraphExec_t) tail_, cs(st_)), "logits graph");
+            else tail();                        // no VRAM for the graph: the tail's kernels, one by one
         } else {
             tail();
         }

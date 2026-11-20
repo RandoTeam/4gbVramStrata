@@ -697,6 +697,8 @@ protected:
     long long* at_ = nullptr;     ///< on the card: {pos(), turn(pos())}, and the same for a window's later tokens
     long long* h_at_ = nullptr;   ///< pinned
     bool recording_ = false;      ///< a layer's launches are being recorded: positions are read from at_
+    int graphs_failed_ = 0;       ///< record() calls the card had no VRAM for: from the first, launches go one
+                                  ///< by one (a 4 GB card, a prompt whose attention graph does not fit the reserve)
     bool recorded_ = false;       ///< took_record()
 
     // geometry
