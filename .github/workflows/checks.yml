@@ -1,0 +1,106 @@
+# The checks that catch a broken checkout without a graphics card.
+#
+# This is deliberately not a release builder: a hosted runner has no 4 GB card, so it cannot produce a speed number,
+# and a CUDA build there proves only that it compiles - ./tools/build_131k.sh proves that here, on the card, faster.
+# What it does catch is the class of bug a release has actually shipped here: a path that stopped resolving after a
+# rename, a test that only passes with a GPU present, an allowlist that drops a file a user needs.
+#
+# Local equivalent, one command each:
+#   .venv/bin/python -m unittest discover -s tools -p "test_setup_*.py"
+#   .venv/bin/python tools/brand_names.py --check
+#   .venv/bin/python tools/rename_fourgbvram.py --check
+#   .venv/bin/python tools/package_release_131k.py --check
+#
+# docs/RELEASE.md is the contract this workflow serves.
+name: Checks
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: checks-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    name: Checks on ${{ matrix.os }} / Python ${{ matrix.python }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    # A provisional row reports without failing the run (see the matrix's comment).
+    continue-on-error: ${{ matrix.provisional || false }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Linux is the reference platform; Windows is the other one this fork ships, and its installer path is the
+          # one that has never had a second pair of eyes. A 3.10 row keeps the floor honest: setup.sh accepts it.
+          - { os: ubuntu-24.04, python: '3.12' }
+          - { os: ubuntu-24.04, python: '3.10' }
+          # Provisional: this suite has never run on Windows (the fork's work was on Linux, and the tests that exercise
+          # the Windows path mock WIN on Linux). The first run reports; drop continue-on-error when it is green.
+          - { os: windows-latest, python: '3.12', provisional: true }
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # the engine's source hash walks src/ and include/; a shallow clone is enough, but the tag check below wants
+          # the commit the run is for, which fetch-depth: 1 gives
+          fetch-depth: 1
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: The setup tests (784 of them, no GPU and no downloads)
+        # -p "test_setup_*.py" is the same discovery AGENTS.md names. The tests mock urllib and subprocess, so a runner
+        # with no CUDA, no driver and no network reaches the same code paths a user's PC does.
+        run: python -m unittest discover -s tools -p "test_setup_*.py"
+
+      - name: The fork's names stay the fork's
+        # A merge that brings the donors' strings back is the failure this check exists for: it has happened once.
+        run: python tools/brand_names.py --check
+
+      - name: No `poly` left in the code the rename moved
+        run: python tools/rename_fourgbvram.py --check
+
+      - name: The release allowlist still finds every file
+        # --check reads the tree and exits non-zero when a required file is missing or a forbidden one would ship.
+        run: python tools/package_release_131k.py --check
+
+      - name: The docs a user reads have no broken links
+        # Every relative link in README.md must resolve in the checkout: docs get renamed by merges, and a release note
+        # that points at a page nobody has is the cheapest bug to find and the most embarrassing to ship.
+        shell: bash
+        run: |
+          set -eu
+          python - <<'PY'
+          import pathlib, re, sys
+          bad = []
+          for page in ["README.md", "docs/RELEASE.md", "docs/INDEX.md"]:
+              text = pathlib.Path(page).read_text(encoding="utf-8")
+              for target in re.findall(r"\]\((docs/[^)#\s]+|LICENSE|SECURITY\.md|DONATION\.md)", text):
+                  if not pathlib.Path(target).exists():
+                      bad.append(f"{page} -> {target}")
+          if bad:
+              sys.exit("broken links:\n  " + "\n  ".join(bad))
+          print("every relative link resolves")
+          PY
+
+      - name: The tag this run is for names the commit it built
+        # A release is cut from a tag, and a tag on another commit is the mistake that makes BUILD.json a lie. Only runs on
+        # a tag: a branch push has no release to check.
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        run: |
+          set -eu
+          tagged="$(git rev-list -n1 "$GITHUB_REF_NAME")"
+          if [ "$tagged" != "$GITHUB_SHA" ]; then
+            echo "the tag $GITHUB_REF_NAME points at $tagged, but this run built $GITHUB_SHA"
+            exit 1
+          fi
+          echo "the tag names the built commit"

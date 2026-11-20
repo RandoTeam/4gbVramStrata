@@ -75,9 +75,15 @@ the visible answer starts: use 2000 and up.
     ./tools/build_131k.sh                     # dev engine: CUDA, sm_86 (detected), into build-131k
     ninja -C build-131k strata-fourgbvram     # incremental, with .venv/bin/ninja
     .venv/bin/python tools/make_fourgbvram_release.py OUT_DIR   # portable engine; needs a clean tree
-    .venv/bin/python -m unittest discover -s tools -p "test_setup_*.py"   # 741 tests, no GPU and no downloads
+    .venv/bin/python -m unittest discover -s tools -p "test_setup_*.py"   # 784 tests, no GPU and no downloads
     .venv/bin/python tools/brand_names.py --check
     .venv/bin/python tools/package_release_131k.py     # the Linux tarball; --check verifies the allowlist
+
+**`docs/RELEASE.md` is the release contract** and outranks convenience: which platforms we build, what an asset must
+contain, the order of work, and what is deliberately not shipped. Two rules from it, because they are the ones broken
+first: an asset is published only for a platform this project has started on, and the tag names the commit that was
+built. `.github/workflows/checks.yml` runs the part of the gate that needs no card (the setup tests, both name checks,
+the release allowlist, the docs' links) on Linux for Python 3.10 and 3.12, and provisionally on Windows.
 
 The release notes' table moves with `docs/BENCH-4GB.md`, and the tarball is rebuilt from the commit that changed a number.
 

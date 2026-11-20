@@ -32,6 +32,13 @@ marked as such beside the number that replaced it.
 | [MCP_SERVER.md](MCP_SERVER.md) | The same setup steps as MCP tools for an assistant |
 | [FAQ.md](FAQ.md) | Short answers to the questions that come back |
 
+## 2b. Maintaining and releasing
+
+| Page | What it answers |
+| --- | --- |
+| [RELEASE.md](RELEASE.md) | **The release contract**: which platforms this fork builds and which it refuses to ship, what an asset must contain, the order of work, and what is deliberately absent (CI that builds engines, signed feeds, cross-compilation) |
+| [../AGENTS.md](../AGENTS.md) | The repository's own rules: what may be claimed, how speed is measured, and what never to do |
+
 ## 3. Inherited from the donors — **not evidence for this laptop**
 
 The rest of `docs/` comes from the PolyStrata project and Strata. It describes how the engine works, which flags exist and which
