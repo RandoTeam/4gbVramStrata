@@ -90,6 +90,9 @@ def engine_files(engine: Path) -> list:
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--check", action="store_true", help="list problems, write nothing")
+    ap.add_argument("--no-engine", action="store_true",
+                    help="check the tree only: do not require the compiled engine in --engine DIR (CI has no card to "
+                         "build one). Every other required file is still checked")
     ap.add_argument("--engine", default=str(ROOT / "engine-fourgbvram"),
                     help="folder with strata-fourgbvram and BUILD.json (default: engine-fourgbvram/)")
     a = ap.parse_args()
@@ -110,7 +113,7 @@ def main() -> int:
     plan += source_files()
     plan = list(dict.fromkeys(plan))                 # tools/vision arrives from TREES and SOURCES alike
     eng = engine_files(Path(a.engine))
-    if not eng:
+    if not eng and not a.no_engine:
         missing.append(f"{Path(a.engine).name}/strata-fourgbvram")
 
     print(f"release: {release_name}")

@@ -46,13 +46,13 @@ jobs:
           # the Windows path mock WIN on Linux). The first run reports; drop continue-on-error when it is green.
           - { os: windows-latest, python: '3.12', provisional: true }
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           # the engine's source hash walks src/ and include/; a shallow clone is enough, but the tag check below wants
           # the commit the run is for, which fetch-depth: 1 gives
           fetch-depth: 1
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python }}
 
@@ -68,9 +68,13 @@ jobs:
       - name: No `poly` left in the code the rename moved
         run: python tools/rename_fourgbvram.py --check
 
-      - name: The release allowlist still finds every file
-        # --check reads the tree and exits non-zero when a required file is missing or a forbidden one would ship.
-        run: python tools/package_release_131k.py --check
+      - name: The release sources are all in the tree
+        # NOT `package_release_131k.py --check` in full: that also requires the compiled engine in engine-fourgbvram/,
+        # which a runner has no card to build and which is not committed. What is checked here is the part that a merge
+        # can break - the files and the source trees the packager walks - by running its own required-file test with the
+        # engine's check disabled, which is exactly what `--check --no-engine` does.
+        # Locally the full check runs with the engine present: see docs/RELEASE.md.
+        run: python tools/package_release_131k.py --check --no-engine
 
       - name: The docs a user reads have no broken links
         # Every relative link in README.md must resolve in the checkout: docs get renamed by merges, and a release note
