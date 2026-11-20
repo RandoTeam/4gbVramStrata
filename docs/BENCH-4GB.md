@@ -4,8 +4,11 @@ What this project's engine does on the laptop it is made for. Every number here 
 nothing is estimated.
 
 **The laptop:** NVIDIA GeForce RTX 3050 Laptop, 4 GB of VRAM, `sm_86`; AMD Ryzen 5 5500U, 6 cores and 12 threads;
-32 GB of DDR4-3200; Windows 11. The engine is built from this repository with CUDA 12.8
-(`engine-fourgbvram/strata-fourgbvram.exe`, `kSnapPlaces = 7`).
+32 GB of DDR4-3200. The Windows 11 rows below were measured with CUDA 12.8 (`strata-fourgbvram.exe`); the
+[Linux section](#linux-ubuntu-2604-2026-11-12-the-same-laptop-the-os-changed) has the same hardware on Ubuntu 26.04
+with a locally compiled engine (CUDA 13.3). The newest row — the engine updated to the donor's v0.1.45-poly.10, with
+the old binary measured beside the new one in the same session — is
+[poly.7 → poly.10](#poly7--poly10-2026-11-20-the-engine-updated-the-numbers-did-not-move).
 
 **What the server prints.** Each request adds one line to the log:
 
@@ -48,6 +51,120 @@ Two things stand out:
 - *generated* is the answer, and its speed counts from the first token to the last.
 - *drafts accepted* is the draft head's guesses the model kept; the rest it replaced.
 
+## Linux (Ubuntu 26.04, 2026-11-12): the same laptop, the OS changed
+
+The same hardware as above, now running Ubuntu 26.04, driver 595, CUDA 13.3, with the engine compiled locally from
+this repository (`engine-fourgbvram/strata-fourgbvram`, SHA-256 `285f20e579b6bc19…`, `sm_86`). The run config is
+unchanged: `--max-context 32768 --tail-skip 6 --no-graphs --kv q8_0`. **The decode numbers in this section are not
+reproduced by the same binary on 2026-11-20 (36.1 → 44.5); the comparison that replaces them is
+[poly.7 → poly.10](#poly7--poly10-2026-11-20-the-engine-updated-the-numbers-did-not-move) below.**
+
+**The saved-prompt chat task** (`bench/speed/prompt.txt`, 1,904 tokens, 128 new, eight runs):
+
+| Model | Task | Written tokens/s, median (range) | Prompt read |
+| --- | --- | ---: | ---: |
+| Clover APEX-I-NANOPLUS | **chat through the server** | **36.1 (34.2-44.3)** | **543 tokens/s** |
+| Clover APEX-I-NANOPLUS (Windows 11, above) | chat through the server | 38.1 (32.6-39.1) | 449 tokens/s |
+
+The decode medians are inside each other's range: the OS change did not make the answer faster or slower in any way
+that reproduces. Prompt reading is the real difference: **543 against 449 tokens/s, about 21% faster**.
+
+**The full suite** (`./bench.sh --long --runs 3`, the engine's own timings, medians of three fresh prompts):
+
+| Test | Result |
+| --- | ---: |
+| chat decode, 9 short answers | 38.8 tokens/s (34.0-44.4) |
+| 4K prompt, 4,019 tokens | 712.5 tokens/s, first token 5.65 s |
+| 16K prompt, 16,058 tokens | 661.4 tokens/s, first token 24.30 s |
+| **32K prompt, 31,294 tokens** | **613.6 tokens/s, first token 51.06 s** |
+| agent session (6 turns, 4 tools) | cache hit 68.5%, turn decode 32.8 tokens/s |
+
+The 32K row is a real 31,294-token prompt with 24 new tokens, not a 1,900-token prompt with a 32K context *setting*.
+It is the row to quote for "32K on this laptop". The report is
+`bench/results/2026-11-12-community-rtx-3050-laptop-gpu-clover-35b-a3b-preview-apex-i-nanoplus-q/`.
+
+**After the performance profile (same day, second run).** CPU governor and power profile were set to `performance`
+before this run; the engine, config, model and prompts are the same, and the card was free (120 MiB used):
+
+| Test | Before | Performance profile | Change |
+| --- | ---: | ---: | ---: |
+| 4K prompt | 712.5 tok/s | 718.3 tok/s | +0.8% |
+| 16K prompt | 661.4 tok/s | 703.4 tok/s | +6.4% |
+| **32K prompt** | **613.6 tok/s** | **668.2 tok/s** | **+8.9%** |
+| 32K first token | 51.06 s | 46.90 s | -8.2% |
+| chat decode | 38.8 tok/s | 38.7 tok/s | unchanged |
+| agent decode | 32.8 tok/s | 33.1 tok/s | +0.9% |
+
+The gain is in prefill and grows with depth, which is where the CPU computes more of the experts; decode is unchanged
+inside its range. The second report is
+`bench/results/2026-11-12-community-rtx-3050-laptop-gpu-clover-35b-a3b-preview-apex-i-nanoplus-q-2/`.
+
+**What changed for Linux.** Setup installs CUDA on Ubuntu 26.04 from NVIDIA's repository (there is no
+`cuda-toolkit-13-0` there; it takes 13.3). The benchmark no longer calls PowerShell or writes a `C:\Temp` profile. The
+32K test used to be skipped whenever the context was 32768, because the old margin check demanded 32768 + 24 + 256
+tokens; it now measures 32,000 and reports the actual count (31,294).
+
+**64K is possible, with a price at depth.** A duplicate run config with `--max-context 65536` (the 32K one otherwise
+unchanged; local, not in git) starts on this card and keeps **674 of 10,240 experts** in VRAM (0.7 GiB, 3,515 MiB
+used), against 784 at 32K. A **57,897-token** prompt reads at **634.3 tok/s** (91.3 s) and its 16 new tokens decode at
+**8.2 tok/s** at that depth. So 64K is usable for a long document and a short answer, not for a fast conversation;
+32K remains the daily window. The launcher is `run-clover-apex-i-nanoplus-64k.sh`, and its desktop shortcut opens the
+chat page in the browser.
+
+## poly.7 → poly.10 (2026-11-20): the engine updated, the numbers did not move
+
+The fork took the donor's v0.1.45-poly.10 (commit `b798306b`; the donor carries the shared expert scratch, the
+Gemma 4 tool-call fix, `--kv` in setup, the RAM budget with SSD spill and `--batch-mtp`). The engine was rebuilt here
+for `sm_86` from the merged tree: `engine-fourgbvram/strata-fourgbvram`, SHA-256 `cf0e29415ce7b486…`. The old binary
+(`285f20e579b6bc19…`, poly.7) was kept and measured beside it in the same session.
+
+**The saved-prompt chat task, the two binaries one after the other** (`bench/speed/prompt.txt`, 1,904 tokens, 128 new,
+32K context, `--tail-skip 6 --no-graphs --kv q8_0`, 11 and 8 runs of one run each, the profile file shared):
+
+| Engine | Written tokens/s, median (range) | Prompt read |
+| --- | ---: | ---: |
+| poly.7, `285f20e5…` | 44.5 (41.6-46.2), n=11 | 543 tokens/s |
+| poly.10, `cf0e2941…` | 43.2 (38.9-45.3), n=8 | 546 tokens/s |
+
+**The full suite, `./bench.sh --long --runs 3`, one binary and then the other:**
+
+| Test | poly.7 | poly.10 |
+| --- | ---: | ---: |
+| chat decode, 9 short answers | 43.5 tok/s | 46.0 tok/s |
+| 4K prompt | 718.8 tok/s | 731.2 tok/s |
+| 16K prompt | 699.2 tok/s | 709.8 tok/s |
+| **32K prompt, 31,294 tokens** | **668.0 tok/s** | **668.5 tok/s** |
+| 32K first token | 46.88 s | 46.84 s |
+| agent cache hit | 68.61% | 68.71% |
+| agent turn decode | 34.3 tok/s | 34.7 tok/s |
+| experts in VRAM at load (32K) | 804 | 791 to 895 |
+
+Every row is inside the other's range or a fraction of a percent apart, except the 4K and 16K reads, which are 1.0
+and 1.5% faster: **poly.10 is not slower here and is not measurably faster.** (The suites ran one after the other, so
+that 1 to 1.5% may be the card being warm; the two chat runs above, alternated, put the two engines the other way
+round.) The donor's own gain from the shared scratch (+93 to 190 MiB of experts) is a 32 GB-card figure; on this card
+the cache is sized by what VRAM is free after the reserve, and the reserve already leaves the scratch room, so the
+bytes land in the reserve rather than in more experts.
+
+The reports are `bench/results/2026-11-20-community-rtx-3050-laptop-gpu-clover-35b-a3b-preview-apex-i-nanoplus-poly7/`
+(the engine named `strata-fourgbvram.poly7.bin`) and `…-apex-i-nanoplus-q/`.
+
+**Two things moved and must not be read as engine speed.**
+
+- **The old 36.1 tokens/s is not reproduced.** The same poly.7 binary wrote 44.5 today, so the machine is faster than
+  it was on 2026-11-12 (the `performance` governor and power profile are now set permanently, which the 2026-11-12
+  section added part-way through, and the expert profile has been written by forty more requests). The 2026-11-12 row
+  stays where it is, marked here; the comparison above is the one to quote, because both binaries ran in one session.
+- **The default CPU thread count changed** with poly.10: 70% of the usable CPUs (8 here) instead of all 12. Matched,
+  thread for thread, it is still parity: poly.7 at `--threads 8` 44.9 tok/s (n=4) against poly.10 at `--threads 8`
+  44.5 (n=4), and poly.10 at `--threads 12` 43.1 (n=7).
+
+**Quality.** The 22-prompt gate on poly.10, two attempts each: **22 of 22**, every domain including code that runs,
+the three-call tool loop and the three facts across about 18K tokens (`bench/quality/results/local.json`).
+
+**Not measured here.** The 8-bit attention caches at depth, the SSD expert spill (this model's experts fit in RAM)
+and `--batch-mtp` (the parallel-request path) are donor changes that need their own runs on this card.
+
 ## Clover-35B-A3B-Preview APEX-I-NANOPLUS
 
 `Clover-35B-A3B-Preview.APEX-I-NanoPlus-V2.1.gguf`, 11.69 GB, 32K context, 2026-10-31. The run config is
@@ -79,6 +196,77 @@ What it says:
 
 The first request's 13-token read took 938 ms, which is the engine warming up rather than a read speed: at 13 tokens
 there is nothing to measure.
+
+## Gemma 4 26B-A4B QAT-UD-Q4_K_XL (2026-11-20): the third model, and the one setup said was too big
+
+`gemma-4-26B-A4B-it-qat-UD-Q4_K_XL.gguf`, 14.25 GB, with its own draft model `mtp-gemma-4-26B-A4B-it-Q8_0.gguf`
+(461 MB). The run config is the one setup wrote: `--max-context 32768 --expert-profile … --draft-model …`, and
+nothing else. Engine `cf0e29415ce7b486…` (poly.10, `sm_86`), rebuilt for this session.
+
+`setup.sh --check` says **"does not fit: it takes about 4.1 GB of VRAM before any expert, and this card has 4 GB"**.
+That is wrong for this file, and the reason is worth knowing before any other 26B model is judged:
+
+| What | Bytes | Why |
+| --- | ---: | --- |
+| dense weights, head included | 1.29 GiB | 658 tensors from the header; the head is `token_embd` (Q4_0, 396 MiB), there is no `output.weight` |
+| attention caches at 32K, fp16 | **0.84 GiB** | 25 of its 30 layers are sliding-window with a 1,024-row ring and 8 KV heads; only 5 are global (512 wide, 2 KV heads) |
+| draft model | 0.44 GiB | Q8_0, 461 MB |
+| **sum** | **≈2.6 GiB** | against 3.68 GiB usable — so **~1.0 GiB is left for experts**, and 178 of 3,840 fit (0.6 GiB) |
+
+A dense 30-layer estimate would put the caches at 5.5 GiB and the model out of reach. The sliding window is the whole
+difference, and `vram_beside_gb` (measured on an RTX 5090 at 32K, with the draft included and nothing subtracted) does
+not see it.
+
+**The saved-prompt chat task** (`bench/speed/prompt.txt`, 1,921 tokens, 128 new, eight runs, 32K context):
+
+| Setting | Written tokens/s, median (range) | Prompt read | What it shows |
+| --- | ---: | ---: | --- |
+| setup's config | **39.0 (38.4-39.8)** | 524 tok/s | the honest headline |
+| `--kv int8` | 39.5 (37.6-43.5) | 536 tok/s | +0.5 tok/s at a short prompt; wins 3 of 3 interleaved rounds |
+| `--kv int8k` | 38.8 (36.9-39.9) | 524 tok/s | no gain over fp16 |
+| `--no-draft` | **32.2 (30.9-33.8)** | 525 tok/s | the draft block is worth **+21%** |
+| `--threads 12` | 34.3 | 506 tok/s | 8 threads (setup's 70%) is better here |
+| `--expert-swaps 0` | 34.8 | 502 tok/s | swapping pays |
+
+The draft block keeps **92 of ~108** guesses — the opposite of Flint, whose draft keeps almost none on this same
+prompt. That is most of why a 26B model with a tenth of Clover's cached experts answers only 11% slower than Clover
+(39.0 against 44.3 tokens/s) while reading 4% slower (524 against 546).
+
+**Depth is where it gives up.** `./bench.sh --long --runs 3`, three fresh prompts at each depth:
+
+| Test | Gemma 4 QAT | Clover APEX, same session |
+| --- | ---: | ---: |
+| 4K prompt | 692.2 tok/s | 731.2 tok/s |
+| 16K prompt | **501.4 tok/s** | 709.8 tok/s |
+| **32K prompt, 32,006 tokens** | **286.4 tok/s** | **668.5 tok/s** |
+| 32K first token | 111.8 s | 46.8 s |
+| chat decode (9 short answers) | 35.2 tok/s | 46.0 tok/s |
+| agent turn decode | 16.2 tok/s | 34.7 tok/s |
+
+The engine's own log says why: as the context grows the caches take VRAM back from the experts, and Gemma's cache
+falls from **178 to 100 experts** (0.6 → 0.31 GiB) while Clover's *grows* to 1,019. Gemma routes 8 of 128 experts a
+layer, so 240 expert slots a token against a cache of 100 — most of every token's experts come from RAM. Clover routes
+8 of 256 and caches 1,019, so the same read finds most of them already there. **A 26B model with a tenth of the
+cache does not survive a long prompt on this card**, and that, not raw speed, is the finding.
+
+Neither of the two obvious remedies helps at depth, and both were measured:
+
+| Remedy | 4K | 16K | 32K | Verdict |
+| --- | ---: | ---: | ---: | --- |
+| `--kv int8` | **724.9** (better) | 425.4 (worse) | 243.6 (worse) | more experts (200 against 100) but the 8-bit read costs more than they win |
+| `--no-graphs` | 705.0 | 504.1 | 287.3 | level at 32K, 40.9 tok/s chat decode against 35.2 — the better daily setting |
+
+The reports are `bench/results/2026-11-20-community-rtx-3050-laptop-gpu-gemma-4-26b-a4b-qat-ud-q4-k-xl/` (setup's
+config), `…-2/` (`--kv int8`) and `…-3/` (`--no-graphs`).
+
+**An engine defect this model found.** A 13,335-token prompt with 700 new tokens ended the request with
+`cudaGraphInstantiate: out of memory`: the CUDA graph for that row count did not fit the 128 MiB the reserve leaves
+after the first request. Both binaries did it, the poly.7 one included, so it was an engine defect and not the merge's.
+`Engine::record()` now returns null instead of throwing and the kernels launch one by one; the case generates all 700
+tokens at 14.6 tok/s with one line on stderr. See the commit `7aa47611`.
+
+**Pictures were not tried.** The image encoder is 1.19 GB and needs 2.4 GB of VRAM warm, which this configuration does
+not have; `--vision cpu` is the option and it is unmeasured here.
 
 ## Flint 40B-A2.5B UD-Q3_K_XL
 
@@ -162,8 +350,10 @@ What the numbers say:
 ## The engine this release ships
 
 The zip's engine is built with CUDA 13.0 for sm_75, 80, 86, 89 and 120 (RTX 20 to RTX 50) with `STRATA_PORTABLE`, from
-v0.1.45-poly.7 (slots sized by each layer's experts, read-ahead of every token's guess, page work queued behind the
-reads). The same harness, the same prompt, the same settings — only these four were re-measured, the median of three
+v0.1.45-poly.10 (the donor's shared expert scratch, the Gemma 4 tool-call fix, `--kv` in setup, the RAM budget with SSD
+spill, `--batch-mtp`; the measurements below were taken on the poly.7 engine before the merge, and the two binaries
+measure the same on this card — [see above](#poly7--poly10-2026-11-20-the-engine-updated-the-numbers-did-not-move)).
+The same harness, the same prompt, the same settings — only these four were re-measured, the median of three
 runs, except Flint's defaults: six runs, because its first two in a fresh process read at 112 and 258 tokens/s while
 the card's clocks settled.
 
@@ -456,5 +646,5 @@ reading faster.
 
 The server prints the same lines for your requests, so a chat and a long prompt are enough. For a run with numbers
 side by side, `python fourgbvramstrata.py benchmark --model <name> --prompt-tokens 24000`
-([what it sends and prints](BACKENDS.md#benchmark)) and `BENCH.bat` (`./bench.sh`) write a report you can share
+([what it sends and prints](BACKENDS.md#benchmark)) and `./bench.sh` write a report you can share
 ([how](COMMUNITY_BENCHMARKS.md#run-the-benchmark)).

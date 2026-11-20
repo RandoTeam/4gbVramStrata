@@ -1,4 +1,4 @@
-"""Tests for `setup.py --update` (#475, UPDATE.bat / update.sh): it refreshes what a start would - the Python packages,
+"""Tests for `setup.py --update` (#475, ./update.sh): it refreshes what a start would - the Python packages,
 the engine, each model's config and draft subset - and never starts the model.  Every outside effect is mocked: no
 GPU, no downloads, nothing written outside a temp folder.
 
@@ -67,7 +67,7 @@ class Update(unittest.TestCase):
         self.assertEqual(rc, 0)
         for m in (pip, eng, dv, start, call):
             m.assert_not_called()
-        self.assertIn("START-HERE.bat", out)
+        self.assertIn("./setup.sh", out)
 
     def test_a_json_that_is_no_model_config_is_skipped(self):
         """#549: a strata-*.json without "args" (not written by setup) stopped update.sh with KeyError: 'args'."""
@@ -196,6 +196,9 @@ class KvWhole(unittest.TestCase):
 
     def test_once(self):
         self.assertEqual(self.upgraded("hip", ["--kv-whole"]).count("--kv-whole"), 1)
+
+    def test_a_vram_pool_config_is_left_alone(self):
+        self.assertNotIn("--kv-whole", self.upgraded("hip", ["--vram-pool"]))
 
     def test_no_build_stamp_is_left_alone(self):
         with tempfile.TemporaryDirectory() as d:

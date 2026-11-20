@@ -22,6 +22,7 @@ class AptRepo(unittest.TestCase):
     def test_known_and_unknown_distros(self):
         for osr, want in ({"ID": "ubuntu", "VERSION_ID": '"22.04"'}, "ubuntu2204"), \
                           ({"ID": "ubuntu", "VERSION_ID": '"24.04"'}, "ubuntu2404"), \
+                          ({"ID": "ubuntu", "VERSION_ID": '"26.04"'}, "ubuntu2604"), \
                           ({"ID": "debian", "VERSION_ID": '"12"'}, "debian12"), \
                           ({"ID": "debian", "VERSION_ID": '"13"'}, "debian13"), \
                           ({"ID": "debian", "VERSION_ID": '"11"'}, None), \
@@ -49,6 +50,27 @@ class AptRepo(unittest.TestCase):
         self.assertEqual(nvcc, "/usr/local/cuda-13.1/bin/nvcc")
         self.assertIn("repos/debian13/x86_64/cuda-keyring_1.1-1_all.deb", download.call_args[0][0])
         self.assertEqual(installed[-2:], ["cuda-toolkit-13-0", "cuda-toolkit-13-1"])
+
+    def test_ubuntu_2604_falls_back_to_the_oldest_13_x_it_has(self):
+        # Ubuntu 26.04's repo starts at 13.3: setup must try from 13.0 and stop at the first that installs
+        installed = []
+
+        def fake_run(cmd, **kw):
+            installed.append(cmd[-1])
+            return types.SimpleNamespace(returncode=100 if cmd[-1] in ("cuda-toolkit-13-0", "cuda-toolkit-13-1",
+                                                                      "cuda-toolkit-13-2") else 0)
+
+        with mock.patch.object(setup, "WIN", False), \
+                mock.patch.object(setup, "find_nvcc", side_effect=[(None, (0, 0)), ("/usr/local/cuda-13.3/bin/nvcc", (13, 3))]), \
+                mock.patch.object(setup.shutil, "which", lambda n: "/usr/bin/" + n), \
+                mock.patch("builtins.open", mock.mock_open(read_data='ID=ubuntu\nVERSION_ID="26.04"\n')), \
+                mock.patch.object(setup, "download") as download, \
+                mock.patch.object(setup, "run", side_effect=fake_run), \
+                contextlib.redirect_stdout(io.StringIO()):
+            nvcc, _ = setup.install_build_tools({"arch": "86", "archs": [86]}, True)
+        self.assertEqual(nvcc, "/usr/local/cuda-13.3/bin/nvcc")
+        self.assertIn("repos/ubuntu2604/x86_64/cuda-keyring_1.1-1_all.deb", download.call_args[0][0])
+        self.assertEqual(installed[-2:], ["cuda-toolkit-13-2", "cuda-toolkit-13-3"])
 
     def test_ubuntu_still_installs_exactly_13_0(self):
         installed = []

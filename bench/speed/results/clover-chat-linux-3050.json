@@ -1,0 +1,82 @@
+{
+ "model": "clover",
+ "task": "chat",
+ "when": "2026-11-12 11:42",
+ "runs": 8,
+ "prompt": "bench/speed/prompt.txt",
+ "prompt_tokens": 1904,
+ "max_new": 128,
+ "engine_sha256": "285f20e579b6bc19e7cd8ca923afd5330e659807a14daf2eb99c7486c4bef35b",
+ "config": "/home/ilia/\u0414\u043e\u043a\u0443\u043c\u0435\u043d\u0442\u044b/OpenCode/4gbVramStrata/strata-clover-apex-i-nanoplus.json",
+ "settings": {
+  "--model": "/home/ilia/\u0414\u043e\u043a\u0443\u043c\u0435\u043d\u0442\u044b/OpenCode/4gbVramStrata-data/models/clover-APEX-I-NANOPLUS/Clover-35B-A3B-Preview.APEX-I-NanoPlus-V2.1.gguf",
+  "--max-context": "32768",
+  "--expert-profile": "/home/ilia/\u0414\u043e\u043a\u0443\u043c\u0435\u043d\u0442\u044b/OpenCode/4gbVramStrata-data/packs/clover-apex-i-nanoplus/expert-profile.txt",
+  "--conversation-cache-mib": "auto",
+  "--tail-skip": "6",
+  "--no-graphs": true,
+  "--kv": "q8_0"
+ },
+ "median_decode": 36.099999999999994,
+ "min_decode": 34.2,
+ "max_decode": 44.3,
+ "median_prefill": 542.8,
+ "rows": [
+  {
+   "prompt_tokens": 1904,
+   "prefill": 558.5,
+   "generated": 128,
+   "decode": 44.3,
+   "drafts": "24/44"
+  },
+  {
+   "prompt_tokens": 1904,
+   "prefill": 543.3,
+   "generated": 128,
+   "decode": 39.0,
+   "drafts": "49/70"
+  },
+  {
+   "prompt_tokens": 1904,
+   "prefill": 543.0,
+   "generated": 128,
+   "decode": 34.2,
+   "drafts": "23/42"
+  },
+  {
+   "prompt_tokens": 1904,
+   "prefill": 542.6,
+   "generated": 128,
+   "decode": 35.9,
+   "drafts": "25/40"
+  },
+  {
+   "prompt_tokens": 1904,
+   "prefill": 543.0,
+   "generated": 128,
+   "decode": 35.4,
+   "drafts": "22/40"
+  },
+  {
+   "prompt_tokens": 1904,
+   "prefill": 541.0,
+   "generated": 128,
+   "decode": 36.5,
+   "drafts": "45/68"
+  },
+  {
+   "prompt_tokens": 1904,
+   "prefill": 540.7,
+   "generated": 128,
+   "decode": 36.3,
+   "drafts": "41/55"
+  },
+  {
+   "prompt_tokens": 1904,
+   "prefill": 540.0,
+   "generated": 128,
+   "decode": 34.4,
+   "drafts": "45/68"
+  }
+ ]
+}

@@ -19,10 +19,12 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import re
 import statistics
 import subprocess
 import sys
+import tempfile
 import time
 import urllib.request
 from pathlib import Path
@@ -88,15 +90,22 @@ def run_chat(cfg: dict, ids: list[int], text: str, max_new: int) -> dict:
         with urllib.request.urlopen(request, timeout=3600) as answer:
             answer.read()
     finally:
-        subprocess.run(["powershell", "-c", "Get-Process strata-fourgbvram -ErrorAction SilentlyContinue | "
-                                            "Stop-Process -Force -ErrorAction SilentlyContinue"])
+        if os.name == "nt":
+            subprocess.run(["powershell", "-c", "Get-Process strata-fourgbvram -ErrorAction SilentlyContinue | "
+                                                "Stop-Process -Force -ErrorAction SilentlyContinue"])
         server.terminate()
         try:
             server.wait(timeout=20)
         except subprocess.TimeoutExpired:
             server.kill()
+        if os.name != "nt":                       # the engine is the server's child; end one the server outlived
+            subprocess.run(["pkill", "-f", Path(cfg["exe"]).name], check=False)
         time.sleep(3)
-    fresh = log.read_text(encoding="utf-8", errors="replace")[start:] if log.exists() else ""
+    fresh = ""
+    if log.exists():                              # `start` is a byte offset: read bytes, not characters (a path with
+        with open(log, "rb") as fh:               # non-ASCII in it made the two differ and cut the line away)
+            fh.seek(start)
+            fresh = fh.read().decode("utf-8", "replace")
     found = SERVER_LINE.findall(fresh)
     if not found:
         raise RuntimeError("no serve line in " + str(log))
@@ -106,7 +115,8 @@ def run_chat(cfg: dict, ids: list[int], text: str, max_new: int) -> dict:
 
 
 def run_raw(cfg: dict, ids: list[int], max_new: int) -> dict:
-    profile = Path(rf"C:\Temp\opencode\speed-profile.txt")
+    profile = Path(tempfile.gettempdir()) / "opencode" / "speed-profile.txt"
+    profile.parent.mkdir(parents=True, exist_ok=True)
     profile.write_bytes(Path(cfg["_profile"]).read_bytes())
     args = [cfg["exe"], "--model", cfg["_model"], "--tokens", ",".join(map(str, ids)), "--max-new", str(max_new),
             "--max-context", "32768", "--expert-profile", str(profile)]

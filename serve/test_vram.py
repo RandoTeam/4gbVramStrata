@@ -71,6 +71,9 @@ class EngineCommand(unittest.TestCase):
         self.assertEqual(engine_args({**cfg, "vram_elastic": True, "vram_segment_mib": 256}),
                          ["--max-context", "8192", "--vram-elastic", "--vram-segment-mib", "256"])
         self.assertEqual(engine_args({**cfg, "vram_elastic": "yes"}), ["--max-context", "8192"])
+        # strata-fourgbvram has no such option and ends at one it does not know: its cache is resized as it is
+        fourgbvram = {**cfg, "exe": "engine-fourgbvram/strata-fourgbvram.exe", "vram_elastic": True, "vram_segment_mib": 256}
+        self.assertEqual(engine_args(fourgbvram), ["--max-context", "8192"])
 
 
 class Route(unittest.TestCase):

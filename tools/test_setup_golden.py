@@ -56,6 +56,9 @@ def normalize(v, t: Path):
     if isinstance(v, list):
         return [normalize(x, t) for x in v]
     if isinstance(v, str):
+        # The stored baseline uses the Windows encoder name; normalize only a
+        # complete executable basename, as for the main engine below.
+        v = re.sub(r"(?<![\w.-])strata-vision(?:\.exe)?(?![\w.-])", "strata-vision.exe", v)
         return re.sub(rf"(?<![w.-]){re.escape(setup.EXE)}(?![w.-])", "<EXE>", v.replace(str(t), "<T>").replace("\\", "/"))   # #973: only the whole name, not "strata-x.log" on Linux
     return v
 
@@ -71,6 +74,8 @@ def install(ram, found, argv, answers=None, extra=(), avx512=False, configs=()):
         (t / "data" / "mtp" / "rt" / "experts.bin").write_bytes(b"")
         eng = t / "engine"
         eng.mkdir()
+        (eng / setup.EXE).write_text("")               # the run config's exe must exist (the check at start)
+        (eng / setup.EXE).chmod(0o755)
         (eng / "BUILD.json").write_text(json.dumps({"version": "0.1.32", "source": "local", "cuda_dirs": ["<cuda>"]}))
         for name, c in configs:
             (t / name).write_text(json.dumps(c))
@@ -92,6 +97,8 @@ def install(ram, found, argv, answers=None, extra=(), avx512=False, configs=()):
             setup.mark(dst)
 
         patches = [
+            # These fixtures describe PCs, even when the test runner is a Mac.
+            mock.patch.object(setup.sys, "platform", "win32" if setup.WIN else "linux"),
             mock.patch.object(setup, "ROOT", t),
             mock.patch.object(setup, "GPU_PICK", None),
             mock.patch.object(setup, "data_folder", lambda d: (t / "data", [])),
@@ -163,6 +170,9 @@ class Golden(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.golden = json.loads(GOLDEN.read_text(encoding="utf-8"))
+        for entry in cls.golden.values():                    # the baseline was recorded on Windows
+            if entry.get("config"):
+                entry["config"] = normalize(entry["config"], Path("/nonexistent"))
 
     def cases(self):
         for prof, (ram, found) in PROFILES.items():

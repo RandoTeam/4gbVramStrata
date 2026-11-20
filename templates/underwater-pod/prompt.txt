@@ -1,0 +1,80 @@
+Create a single-file browser project called "Underwater Observation Pod Explorer".
+
+The page should show a stylized 3D first-person scene inside a small underwater observation pod. The user should be able to move around inside the pod and look around freely.
+
+Requirements:
+Use Three.js.
+Everything must be in one index.html file.
+The project should run immediately in a modern browser.
+
+Camera and movement:
+Use a first-person viewpoint.
+Allow the user to move only inside the pod interior.
+Movement should support desktop and touch devices.
+Desktop controls:
+- WASD or arrow keys to move,
+- mouse drag or pointer look to look around.
+Touch controls:
+- on-screen joystick or directional pad for movement,
+- on-screen look control or touch drag for looking around.
+Add visible on-screen controls for touch that stay compact and readable.
+Movement should include collision handling.
+The camera should not pass through walls, windows, consoles, seats, lockers, pipes, or other large objects.
+The player should stay within the room and feel grounded at a believable eye height.
+
+Scene:
+The pod should be a small walkable underwater observation room with a clear interior layout.
+The interior should include:
+- curved glass viewing windows,
+- a metal floor,
+- wall or ceiling pipes,
+- cables,
+- control consoles,
+- blinking screens,
+- gauges,
+- warning lights,
+- storage lockers,
+- seats,
+- railings or structural supports,
+- a hatch or door area,
+- and several small props that make the room feel believable.
+
+Outside the pod there should be a rich underwater world with:
+- rocks,
+- coral,
+- sea plants,
+- schools of fish,
+- floating particles,
+- bubbles,
+- and at least one larger distant creature or a passing submarine.
+
+The underwater environment should be visible in multiple directions, not only in front of the user.
+The outside world should feel deep and layered, with clear foreground, midground, and background.
+
+Atmosphere and animation:
+Add underwater fog.
+Add light rays filtering through water.
+Add caustic light patterns.
+Add soft reflections or highlights on the glass.
+Add subtle animation in sea plants, fish, particles, bubbles, and distant creatures.
+The pod interior should also feel alive:
+- small screen animations,
+- blinking lights,
+- subtle ambient motion,
+- slight changes in light from the water outside.
+
+Visual quality:
+The interior should feel dense, polished, and rewarding to inspect while moving around.
+The exterior should feel immersive and visually rich.
+Objects should be grounded and placed with believable scale.
+The scene should feel like one coherent underwater environment rather than separate disconnected decorations.
+
+UI:
+Add a compact UI with:
+- Reset,
+- Pause,
+- Quality.
+The UI should stay small and should not cover the main view.
+
+Evaluation focus:
+Focus on visual atmosphere, depth, composition, lighting, believable first-person exploration, readable touch controls, and reliable collision-based movement inside the pod.

@@ -1,0 +1,493 @@
+[
+ {
+  "name": "anemone-field",
+  "mount": "water",
+  "size": [
+   5,
+   2.4,
+   4
+  ],
+  "tags": [
+   "exterior"
+  ],
+  "desc": "A patch of six waving anemones on a low rock, with two clownfish"
+ },
+ {
+  "name": "bucket-mop",
+  "mount": "floor",
+  "size": [
+   0.55,
+   1.45,
+   0.5
+  ],
+  "tags": [
+   "life"
+  ],
+  "desc": "Bucket, mop, squeegee and a wet-floor sign"
+ },
+ {
+  "name": "cable-loom",
+  "mount": "wall",
+  "size": [
+   1.7,
+   0.6,
+   0.22
+  ],
+  "tags": [
+   "cable",
+   "wall"
+  ],
+  "desc": "Four cables with sag, clamps and a hanging tag"
+ },
+ {
+  "name": "ceiling-fan",
+  "mount": "ceiling",
+  "size": [
+   0.85,
+   0.5,
+   0.85
+  ],
+  "tags": [
+   "vent"
+  ],
+  "desc": "Extractor fan in a housing with a slowly turning four-blade rotor"
+ },
+ {
+  "name": "ceiling-lamp",
+  "mount": "ceiling",
+  "size": [
+   0.55,
+   0.8,
+   0.55
+  ],
+  "tags": [
+   "light"
+  ],
+  "desc": "Cage lamp on a cable with a warm bulb and a soft halo"
+ },
+ {
+  "name": "console-wall",
+  "mount": "wall",
+  "size": [
+   1.3,
+   0.9,
+   0.34
+  ],
+  "tags": [
+   "control",
+   "wall"
+  ],
+  "desc": "Angled wall console: backplate, screen, two gauges, keypad, lamp row"
+ },
+ {
+  "name": "coral-garden",
+  "mount": "water",
+  "size": [
+   7,
+   4,
+   5
+  ],
+  "tags": [
+   "exterior"
+  ],
+  "desc": "Five coral heads in mixed colours on a low rock shelf"
+ },
+ {
+  "name": "crate-stack",
+  "mount": "floor",
+  "size": [
+   1.15,
+   1.2,
+   0.85
+  ],
+  "tags": [
+   "storage"
+  ],
+  "desc": "Three strapped crates, a tarp, stencilled codes and a toolbox on top"
+ },
+ {
+  "name": "dive-gear",
+  "mount": "floor",
+  "size": [
+   0.95,
+   1.9,
+   0.7
+  ],
+  "tags": [
+   "dive"
+  ],
+  "desc": "Diving helmet on a stand, suit on a hook, fins, hose coil and a tank"
+ },
+ {
+  "name": "emergency-station",
+  "mount": "wall",
+  "size": [
+   1.1,
+   1.2,
+   0.24
+  ],
+  "tags": [
+   "safety",
+   "wall"
+  ],
+  "desc": "Extinguisher, axe, blanket roll and a life ring on a red plate"
+ },
+ {
+  "name": "fish-tornado",
+  "mount": "water",
+  "size": [
+   10,
+   7,
+   10
+  ],
+  "tags": [
+   "exterior"
+  ],
+  "desc": "Two fish schools and drifting particles, a living midground"
+ },
+ {
+  "name": "galley",
+  "mount": "floor",
+  "size": [
+   1.35,
+   1.8,
+   0.65
+  ],
+  "tags": [
+   "life"
+  ],
+  "desc": "Galley counter: sink, kettle, mugs, shelf, cupboard and a warm lamp"
+ },
+ {
+  "name": "hatch-station",
+  "mount": "wall",
+  "size": [
+   1.3,
+   1.2,
+   0.24
+  ],
+  "tags": [
+   "safety",
+   "wall"
+  ],
+  "desc": "Hatch side station: two gauges, beacon, wheel key, checklist and a sign"
+ },
+ {
+  "name": "instrument-rack",
+  "mount": "floor",
+  "size": [
+   0.95,
+   1.95,
+   0.65
+  ],
+  "tags": [
+   "control"
+  ],
+  "desc": "Floor rack: four instrument units, LED rows, one screen, cable side, feet"
+ },
+ {
+  "name": "jelly-drift",
+  "mount": "water",
+  "size": [
+   6,
+   4,
+   6
+  ],
+  "tags": [
+   "exterior"
+  ],
+  "desc": "Three jellyfish drifting and pulsing at different depths"
+ },
+ {
+  "name": "kelp-forest",
+  "mount": "water",
+  "size": [
+   8,
+   9,
+   6
+  ],
+  "tags": [
+   "exterior"
+  ],
+  "desc": "Seven kelp stalks in two depths with two rocks and a coral"
+ },
+ {
+  "name": "lab-rack",
+  "mount": "floor",
+  "size": [
+   0.95,
+   1.85,
+   0.6
+  ],
+  "tags": [
+   "lab"
+  ],
+  "desc": "Sample rack: glowing jars, microscope, sample tray, screen and labels"
+ },
+ {
+  "name": "light-shafts",
+  "mount": "water",
+  "size": [
+   10,
+   16,
+   10
+  ],
+  "tags": [
+   "exterior"
+  ],
+  "desc": "Four light shafts from the surface with drifting motes"
+ },
+ {
+  "name": "locker-double",
+  "mount": "floor",
+  "size": [
+   1.5,
+   2.42,
+   0.75
+  ],
+  "tags": [
+   "storage"
+  ],
+  "desc": "Two full-height lockers, vent slats, handles, stencil labels, boots and a helmet on top"
+ },
+ {
+  "name": "locker-gear",
+  "mount": "floor",
+  "size": [
+   0.85,
+   2,
+   0.65
+  ],
+  "tags": [
+   "storage"
+  ],
+  "desc": "One open locker with shelves, gloves, a wetsuit hood and a name plate"
+ },
+ {
+  "name": "med-bay",
+  "mount": "floor",
+  "size": [
+   0.85,
+   1.75,
+   0.55
+  ],
+  "tags": [
+   "medical"
+  ],
+  "desc": "Medical cabinet: cross, drawers, bottles, lamp and a checklist"
+ },
+ {
+  "name": "oxygen-rack",
+  "mount": "floor",
+  "size": [
+   1.1,
+   1.6,
+   0.6
+  ],
+  "tags": [
+   "dive",
+   "safety"
+  ],
+  "desc": "Three oxygen cylinders, manifold, regulator, gauges and a stencil"
+ },
+ {
+  "name": "pipe-manifold",
+  "mount": "wall",
+  "size": [
+   1.4,
+   0.6,
+   0.32
+  ],
+  "tags": [
+   "pipe",
+   "wall"
+  ],
+  "desc": "Horizontal manifold with four valves, two gauges, brackets and a plate"
+ },
+ {
+  "name": "pipe-valve",
+  "mount": "wall",
+  "size": [
+   0.5,
+   1.9,
+   0.34
+  ],
+  "tags": [
+   "pipe",
+   "wall"
+  ],
+  "desc": "Vertical pipe with brackets, a big valve wheel, pressure gauge and drip"
+ },
+ {
+  "name": "plant-pot",
+  "mount": "floor",
+  "size": [
+   0.65,
+   1.3,
+   0.55
+  ],
+  "tags": [
+   "life"
+  ],
+  "desc": "Hydroponic greens under a grow lamp, with a water tank"
+ },
+ {
+  "name": "power-box",
+  "mount": "wall",
+  "size": [
+   0.7,
+   0.8,
+   0.28
+  ],
+  "tags": [
+   "power",
+   "wall"
+  ],
+  "desc": "Breaker box with gauges, labelled switches, warning sticker and conduit"
+ },
+ {
+  "name": "radar-dish",
+  "mount": "ceiling",
+  "size": [
+   0.7,
+   0.65,
+   0.7
+  ],
+  "tags": [
+   "comms"
+  ],
+  "desc": "Small radar dish on a bracket, rotating, with a status lamp"
+ },
+ {
+  "name": "radio-station",
+  "mount": "floor",
+  "size": [
+   1.05,
+   1.55,
+   0.65
+  ],
+  "tags": [
+   "control",
+   "comms"
+  ],
+  "desc": "Comms desk: transceiver, dial, handset, antenna, logbook and a lamp"
+ },
+ {
+  "name": "reef-arch",
+  "mount": "water",
+  "size": [
+   7,
+   6,
+   5
+  ],
+  "tags": [
+   "exterior"
+  ],
+  "desc": "Rock arch with two pillars, coral on the crown and kelp at the base"
+ },
+ {
+  "name": "rock-cluster",
+  "mount": "water",
+  "size": [
+   6,
+   3.2,
+   5
+  ],
+  "tags": [
+   "exterior"
+  ],
+  "desc": "Three boulders with anemones, urchins, a starfish and a small school"
+ },
+ {
+  "name": "rock-spire",
+  "mount": "water",
+  "size": [
+   5,
+   12,
+   5
+  ],
+  "tags": [
+   "exterior"
+  ],
+  "desc": "Tall rock spire with ledges and kelp, a strong vertical silhouette"
+ },
+ {
+  "name": "shelf-unit",
+  "mount": "floor",
+  "size": [
+   1.25,
+   1.9,
+   0.5
+  ],
+  "tags": [
+   "storage"
+  ],
+  "desc": "Four-shelf steel rack with boxes, sample jars, a rope coil and canisters"
+ },
+ {
+  "name": "sub-pass",
+  "mount": "water",
+  "size": [
+   9,
+   4,
+   4
+  ],
+  "tags": [
+   "exterior"
+  ],
+  "desc": "Distant survey submarine with running lights, slowly patrolling"
+ },
+ {
+  "name": "tool-wall",
+  "mount": "wall",
+  "size": [
+   1.2,
+   1,
+   0.16
+  ],
+  "tags": [
+   "work",
+   "wall"
+  ],
+  "desc": "Pegboard with wrench, hammer, screwdrivers, tape, rag and a stencil"
+ },
+ {
+  "name": "vent-field",
+  "mount": "water",
+  "size": [
+   4,
+   6,
+   4
+  ],
+  "tags": [
+   "exterior"
+  ],
+  "desc": "Two hydrothermal chimneys with bubbles, glow and a warm point light"
+ },
+ {
+  "name": "workbench",
+  "mount": "floor",
+  "size": [
+   1.5,
+   1.75,
+   0.7
+  ],
+  "tags": [
+   "work"
+  ],
+  "desc": "Workbench: vise, tool tray, parts, pegboard back, task lamp and a stool"
+ },
+ {
+  "name": "wreck",
+  "mount": "water",
+  "size": [
+   11,
+   5,
+   6
+  ],
+  "tags": [
+   "exterior"
+  ],
+  "desc": "Broken hull section with ribs and portholes, listing on the sand"
+ }
+]

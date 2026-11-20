@@ -145,8 +145,8 @@ class Slots(unittest.TestCase):
         self.assertEqual(self.engine.proc.sent, [])
         self.assertFalse(Path(self.dir.name, "x.bin").exists())
 
-    def test_strata_fourgbvram_is_never_sent_a_session_command(self):
-        # issue 114: strata-fourgbvram keeps no disk sessions, and its answer to SAVE made the server end it
+    def test_a_strata_fourgbvram_without_sessions_is_never_sent_a_session_command(self):
+        # issue 114: strata-fourgbvram kept no disk sessions, and its answer to SAVE made the server end it
         spawn = self.engine.spawn
         self.engine.spawn = ("/opt/fourgbvramstrata/engine-fourgbvram/strata-fourgbvram",) + spawn[1:]
         try:
@@ -158,6 +158,19 @@ class Slots(unittest.TestCase):
             self.assertFalse(self.engine.ended)
         finally:
             self.engine.spawn = spawn
+
+    def test_a_strata_fourgbvram_that_says_it_has_sessions_is_sent_them(self):
+        spawn = self.engine.spawn
+        self.engine.spawn = ("/opt/fourgbvramstrata/engine-fourgbvram/strata-fourgbvram",) + spawn[1:]
+        self.engine.info["sessions"] = 1
+        try:
+            s, b = self.post("/slots/0?action=save", {"filename": "q.bin"})
+            self.assertEqual((s, b.get("n_saved")), (200, 62993), b)
+            s, b = self.post("/slots/0?action=restore", {"filename": "q.bin"})
+            self.assertEqual((s, b.get("n_restored")), (200, 62993), b)
+        finally:
+            self.engine.spawn = spawn
+            del self.engine.info["sessions"]
 
     def test_save_writes_into_the_slot_save_path(self):
         s, b = self.post("/slots/0?action=save", {"filename": "a.bin"})

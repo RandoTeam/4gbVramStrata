@@ -5,7 +5,8 @@ first, then the page that owns the question.
 
 ## 1. This fork's own evidence — measured on the reference laptop
 
-RTX 3050 Laptop 4 GB, Ryzen 5 5500U, 32 GB, Windows 11. Only these pages carry numbers that were measured *here*.
+RTX 3050 Laptop 4 GB, Ryzen 5 5500U, 32 GB. The Windows 11 numbers are history; the Linux (Ubuntu 26.04) section
+of BENCH-4GB.md is this repository's current result. Only these pages carry numbers that were measured *here*.
 
 | Page | What it answers |
 | --- | --- |
@@ -24,6 +25,8 @@ marked as such beside the number that replaced it.
 | Page | What it answers |
 | --- | --- |
 | [INSTALL.md](INSTALL.md) | Every install question, offline installs, other drives |
+| [COMPATIBILITY-LINUX.md](COMPATIBILITY-LINUX.md) | Every official model and quant against this 4 GB Linux PC: starts, starts with a small cache, or does not fit |
+| [HARNESS-SKILLS.md](HARNESS-SKILLS.md) | How harness, tools and focused skills multiply a local model's results, and the concrete setup for Clover |
 | [AI_SETUP.md](AI_SETUP.md) | Handing the install to an AI assistant, step by step |
 | [TROUBLESHOOTING.md](TROUBLESHOOTING.md) | What to do when a start fails |
 | [MCP_SERVER.md](MCP_SERVER.md) | The same setup steps as MCP tools for an assistant |
@@ -31,7 +34,7 @@ marked as such beside the number that replaced it.
 
 ## 3. Inherited from the donors — **not evidence for this laptop**
 
-The rest of `docs/` comes from PolyStrata and Strata. It describes how the engine works, which flags exist and which
+The rest of `docs/` comes from the PolyStrata project and Strata. It describes how the engine works, which flags exist and which
 model families it can run, and its numbers were measured on an RTX 5090 (32 GB), an 8 GB laptop, AMD cards, Intel Arc
 or a Mac. Useful for mechanisms and flags; **never quote its speeds as ours**.
 

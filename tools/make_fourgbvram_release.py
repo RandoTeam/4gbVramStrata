@@ -1,19 +1,20 @@
-"""The ready-made strata-fourgbvram for Windows: strata-fourgbvram.exe and the image encoder strata-vision.exe, built for other
-PCs (STRATA_PORTABLE: ggml's CPU code for AVX2, the MSVC runtime linked in) and for every card from RTX 20 to RTX 50
-with CUDA 13.0, the version of the CUDA libraries setup.py installs from pip.  They are zipped with a BUILD.json under
-the name setup.py asks the latest release for (fourgbvram_asset()), which carries the source_hash() of their source.
+"""The ready-made strata-fourgbvram for Linux: the engine and the image encoder strata-vision, built for other PCs
+(STRATA_PORTABLE: ggml's CPU code for AVX2) and for every card from RTX 20 to RTX 50 with CUDA 13.x.  They are packed
+with a BUILD.json under the name setup.py asks the latest release for (fourgbvram_asset()), which carries the
+source_hash() of their source.
 
 Run it on a clean checkout of the commit the release is made from, with setup's Python:
 
-    .venv\\Scripts\\python.exe tools\\make_fourgbvram_release.py OUT_DIR
+    .venv/bin/python tools/make_fourgbvram_release.py OUT_DIR
 
-and upload OUT_DIR\\strata-fourgbvram-windows-x64-<source>.zip to that release.  setup.py checks the download against the
-SHA-256 GitHub publishes for the asset.  The build folders stay in OUT_DIR, so a second run compiles what changed."""
+and upload OUT_DIR/strata-fourgbvram-linux-x64-<source>.tar.gz to that release.  The build folders stay in OUT_DIR, so
+a second run compiles what changed."""
 import hashlib
+import io
 import json
 import subprocess
 import sys
-import zipfile
+import tarfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -24,7 +25,7 @@ ARCHS = [75, 80, 86, 89, 120]   # RTX 20, A100 and A-series, RTX 30, RTX 40, RTX
 
 
 def main() -> int:
-    if len(sys.argv) != 2 or not setup.WIN:
+    if len(sys.argv) != 2:
         sys.exit(__doc__)
     out = Path(sys.argv[1]).resolve()
     # the hash covers every file under these paths, so a file git does not have would name a source no clone has
@@ -33,9 +34,9 @@ def main() -> int:
     if dirty.strip():
         sys.exit("the engine sources are not those of a commit:\n" + dirty)
     nvcc, cuda_v = setup.find_nvcc()
-    if cuda_v != (13, 0):
-        sys.exit(f"CUDA 13.0's nvcc is needed (pip's libraries are 13.0); found {cuda_v}")
-    vcvars = setup.find_vcvars(cuda_v)
+    if nvcc is None or cuda_v < (13, 0):
+        sys.exit(f"a CUDA 13.x nvcc is needed; found {cuda_v}")
+    vcvars = None
     llama = setup.get_llama_cpp()
     defs = ["-DCMAKE_CUDA_ARCHITECTURES=" + ";".join(f"{a}-real" for a in ARCHS), f"-DCMAKE_CUDA_COMPILER={nvcc}",
             "-DSTRATA_PORTABLE=ON"]
@@ -52,10 +53,14 @@ def main() -> int:
             "src": src, "vision": "gpu", "vision_src": setup.source_hash(setup.VISION_SOURCES)}
     out.mkdir(parents=True, exist_ok=True)
     z = out / setup.fourgbvram_asset()
-    with zipfile.ZipFile(z, "w", zipfile.ZIP_DEFLATED) as f:
-        f.write(fourgbvram / setup.FOURGBVRAM_EXE, setup.FOURGBVRAM_EXE)
-        f.write(vis / "bin" / setup.VEXE, setup.VEXE)
-        f.writestr("BUILD.json", json.dumps(meta, indent=1))
+    with tarfile.open(z, "w:gz") as f:
+        f.add(fourgbvram / setup.FOURGBVRAM_EXE, setup.FOURGBVRAM_EXE, recursive=False)
+        if (vis / "bin" / setup.VEXE).exists():
+            f.add(vis / "bin" / setup.VEXE, setup.VEXE, recursive=False)
+        info = tarfile.TarInfo("BUILD.json")
+        data = json.dumps(meta, indent=1).encode()
+        info.size, info.mode = len(data), 0o644
+        f.addfile(info, io.BytesIO(data))
     print(f"{z}\n  {z.stat().st_size:,} bytes, sha256 {hashlib.sha256(z.read_bytes()).hexdigest()}")
     return 0
 

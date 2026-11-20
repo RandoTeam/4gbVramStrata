@@ -34,6 +34,8 @@ MOVES = [
     ("polystrata.py", "fourgbvramstrata.py"),
     ("tools/make_poly_release.py", "tools/make_fourgbvram_release.py"),
     ("tools/test_poly_prebuilt.py", "tools/test_fourgbvram_prebuilt.py"),
+    ("tools/metal_poly_setup.py", "tools/metal_fourgbvram_setup.py"),
+    ("tools/test_metal_poly_setup.py", "tools/test_metal_fourgbvram_setup.py"),
 ]
 KEEP = "|".join((
     r"VecSzn/PolyStrata",

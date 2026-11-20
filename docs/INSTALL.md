@@ -21,7 +21,7 @@ or Windows, one NVIDIA card and less of everything: [BACKENDS.md](BACKENDS.md#in
 | **RAM** | Enough for the size you pick ([which model](MODELS.md#pick-by-ram)); **64 GB** runs every size. A big GPU makes up for less RAM - the [low-RAM mode](MODELS.md#a-big-graphics-card-and-little-ram). |
 | **CPU** | x86-64 with AVX2 (any Intel/AMD desktop CPU from the last ~8 years). AVX-512 (Ryzen 7000/9000) is a bit faster. Older CPUs without AVX2 are experimental and slow: [Older CPUs](#older-cpus-experimental). |
 | **Disk** | ~70-80 GB free for the model, ~6 GB for the MTP layer (+1 GB with images). **Q2_0 on an AVX-512 CPU** also writes a one-time ~40 GB copy of its experts for the fast CPU kernel. On Linux with an AMD card, ROCm takes ~10 GB more when setup installs it. An NVMe SSD is strongly recommended: it makes the first start much faster. |
-| **OS** | Windows 10/11, or Linux (Ubuntu 22.04/24.04 and Debian 12/13 get everything installed automatically). |
+| **OS** | Linux (Ubuntu 22.04/24.04/26.04 and Debian 12/13 get everything installed automatically). |
 | **Driver** | **NVIDIA:** a current driver, version 580 or newer ([nvidia.com/drivers](https://www.nvidia.com/drivers) or the NVIDIA App). **AMD:** on Linux the kernel's amdgpu driver (no ROCm install needed); on Windows a current AMD Software: Adrenalin Edition driver ([amd.com/support](https://www.amd.com/en/support)). |
 
 The driver is the only thing you install yourself. Everything else - Python, the engine, the model - is set up for
@@ -33,22 +33,18 @@ the engine for your GPU (asks first; 20-40 minutes once). More: [details](DETAIL
 
 ## Windows
 
-1. [Download this project](https://github.com/RandoTeam/4gbVramStrata/archive/refs/heads/main.zip) and unzip it (or
-   `git clone` it).
-2. Double-click **`START-HERE.bat`**.
-3. Answer a few questions - or just press Enter each time for the recommended choice ([the questions](#setups-questions)).
+Download the release zip (or `git clone` the repository) and double-click **`START-HERE.bat`**. It installs Python for
+your user account if needed, then runs `setup.py`. `SETUP.bat` changes the model or settings later, `UPDATE.bat` moves
+to a newer release, `BENCH.bat` measures.
 
-Then it downloads everything (the model is ~70 GB, so the first time takes a while - you can stop and it picks up
-where it left off) and **starts the model**. Your browser opens the 4gbVramStrata app at `http://127.0.0.1:8080`.
+The launchers are thin wrappers around `setup.py`, which is the same file on both platforms: the engine, the installer,
+the models and the settings are identical, and so is the run config the setup writes (`run-<model>.bat` here,
+`run-<model>.sh` on Linux).
 
-> **While the model starts, your PC can be slow or stop responding for 1-3 minutes** (longest the first time): 4gbVramStrata
-> loads 35-55 GB into your RAM and locks part of it for the graphics card. That's normal - wait, and don't close the
-> window. The window tells you what it is doing.
-
-**Next time**, just double-click `START-HERE.bat` again: it starts right away (30-90 s to load the model), nothing is
-downloaded twice. Close its window to stop the model. `SETUP.bat` (the same as `START-HERE.bat --setup`) installs
-another model or changes the settings. Starting 4gbVramStrata from Task Scheduler at logon needs two task settings, or the
-start is 24x slower: [Running it at startup](DETAILS.md#running-it-at-startup-task-scheduler).
+**Windows numbers on this project's pages are from before the poly.10 engine update** and are kept as history; the
+Linux section of [BENCH-4GB.md](BENCH-4GB.md) is the current evidence. Nothing in the Windows code path is
+platform-specific beyond the launcher: it compiles the same `src/fourgbvram/`, whose Windows branches are in the
+engine itself (`_WIN32` in `engine.cpp`, `spill.cpp`, `main.cpp`).
 
 ## Linux
 
@@ -69,7 +65,7 @@ nix develop -c ./setup.sh
 
 ## AMD cards
 
-The steps are the same as with NVIDIA: `START-HERE.bat` on Windows, `./setup.sh` on Linux. Setup finds the Radeon
+The steps are the same as with NVIDIA: `./setup.sh` on Windows, `./setup.sh` on Linux. Setup finds the Radeon
 card and chooses the AMD (HIP) engine by itself on a PC with no NVIDIA card 4gbVramStrata can use; `--backend hip` chooses
 it on a PC that has both. Supported cards: RX 7900 XT / XTX (gfx1100), RX 7800 XT / 7700 XT (gfx1101), RX 9060 XT
 (gfx1200), RX 9070 / 9070 XT and Radeon AI PRO R9700 (gfx1201), and the RX 6800 / 6900 series (gfx1030). Integrated
@@ -85,9 +81,9 @@ build by hand and the tuning tables: [AMD_HIP.md](AMD_HIP.md).
 
 ## Two or three cards
 
-**Two or three NVIDIA cards?** Just run `START-HERE.bat`: it lists your cards, says which ones 4gbVramStrata can use, and
+**Two or three NVIDIA cards?** Just run `./setup.sh`: it lists your cards, says which ones 4gbVramStrata can use, and
 asks whether to share the model across them (recommended when two can). An install made on one card asks once at
-its next start. Or choose yourself: `START-HERE.bat --gpus 0,2` (both, remembered), `--gpus all`, or `--gpu 0` (one
+its next start. Or choose yourself: `./setup.sh --gpus 0,2` (both, remembered), `--gpus all`, or `--gpu 0` (one
 card, this start only). Each card keeps the experts of its own layers, and prompts flow through the cards in a
 pipeline: on an RTX 5080 + RTX 3090 prompts were read 18-20% faster than on the 5080 alone, decoding on par.
 Every card must be an RTX 20 series or newer with 8 GB or more. See [MULTI_GPU.md](MULTI_GPU.md).
@@ -169,7 +165,8 @@ What differs in that build (`STRATA_ISA_FLOOR=avx` or `none`, chosen from the CP
   token as the normal build (ggml-cpu rounds the CPU experts differently, as the AVX2 kernel does from the AVX-512
   one). Contributors ran earlier versions of the same approach on a Xeon E5-2680 (2.87 tok/s with a GTX 1080 Ti)
   and on Xeon E5-2687W / X5690 machines.
-- AMD cards: Linux only (setup compiles the AMD engine there anyway); NVIDIA on Windows and Linux.
+- AMD cards: Linux, and Windows with the ready-made engine (or one compiled there with `--build`) on an AVX2 CPU;
+  the older-CPU engine below is compiled on Linux only. NVIDIA on Windows and Linux.
 - Two-socket Xeons: memory on the other socket is slow; keep the RAM on one CPU if you can.
 
 By hand: `cmake ... -DSTRATA_ISA_FLOOR=avx` (or `none`) builds it; `STRATA_ISA_FLOOR=avx` set for setup builds it on
@@ -177,16 +174,16 @@ any PC (to try it). Problems and results on real hardware are welcome as GitHub 
 
 ## Updating
 
-**`UPDATE.bat`** (Linux: `./update.sh`) updates 4gbVramStrata without starting the model - for when the GPU is busy with
+**`./update.sh`** updates 4gbVramStrata without starting the model - for when the GPU is busy with
 something else, or you just want the new version ready. In a `git clone` it runs `git pull`, then does what
-`START-HERE.bat` does before a start: the engine (a new ready-made one when the new version needs it; on Linux a
+`./setup.sh` does before a start: the engine (a new ready-made one when the new version needs it; on Linux a
 compiled engine is compiled again when its source changed), the Python packages, and each installed model's settings
 and draft subset. The model files are not touched (at most a new engine is downloaded) and no question is asked.
-Close the model's window first (a running engine cannot be replaced); start the model later with `START-HERE.bat` as
+Close the model's window first (a running engine cannot be replaced); start the model later with `./setup.sh` as
 usual. In a copy that was downloaded as a zip it says to download the new zip (below): it cannot fetch new files
 itself.
 
-Or by hand: download the new version and unzip it anywhere (or `git pull`), then run `START-HERE.bat` (Linux:
+Or by hand: download the new version and unzip it anywhere (or `git pull`), then run `./setup.sh` (Linux:
 `./setup.sh`) in it. The model files are kept in a `4gbVramStrata-data` folder next to your 4gbVramStrata folder, so a new copy
 finds them and sets itself up the same way - nothing big is downloaded again. On Linux after a `git pull`, setup
 compiles the engine again when its source changed (a minute or two for the changed files); if that compile fails, it
@@ -231,7 +228,7 @@ With `--yes` setup takes the recommended answer to every question.
 
 ## Tuning for your PC
 
-Every PC is different: `START-HERE.bat --calibrate` (Linux: `./setup.sh --calibrate`) measures a few engine settings
+Every PC is different: `./setup.sh --calibrate` measures a few engine settings
 on yours and keeps the fastest (about 15-30 minutes, longer on a slow card; on an RTX 5070 with a Ryzen 5 7600 it made the Coder 7% faster).
 It keeps a setting only when it is more than 3% faster, and the result is remembered per PC and model, so updates
 keep it. Measuring the CPU worker count needs a fresh engine, so the model is loaded more than once: the PC is
@@ -242,28 +239,28 @@ NVIDIA cards for now. [What it measures](DETAILS.md#double-click-start-herebat).
 ## Options without questions
 
 ```
-START-HERE.bat --setup                          install another model, or change context / images
-SETUP.bat                                       the same (double-click it)
-START-HERE.bat --model IQ2_XS --context 32768 --vision yes --yes     no questions
-START-HERE.bat --gguf-dir D:\models\IQ2_XS       use GGUF files you already have
-START-HERE.bat --custom-gguf D:\models          install one custom GGUF: a file, or a folder of its shards
-START-HERE.bat --inspect D:\models\some.gguf     what a GGUF really holds and whether 4gbVramStrata runs it (no download)
-START-HERE.bat --data-dir E:\4gbVramStrata-data         keep the model files somewhere else
-START-HERE.bat --port 8081                      another port
-START-HERE.bat --gpu 1                          another GPU (setup picks the one with the most VRAM)
-START-HERE.bat --gpus 0,2                       several GPUs sharing the model
-START-HERE.bat --vram-reserve-mib 2048          leave 2 GB of VRAM free for other programs (remembered)
-START-HERE.bat --no-browser                     do not open the chat page when the model is ready (remembered;
+./setup.sh --setup                          install another model, or change context / images
+./setup.sh --setup                                       the same (double-click it)
+./setup.sh --model IQ2_XS --context 32768 --vision yes --yes     no questions
+./setup.sh --gguf-dir /models/IQ2_XS       use GGUF files you already have
+./setup.sh --custom-gguf /models          install one custom GGUF: a file, or a folder of its shards
+./setup.sh --inspect /models/some.gguf     what a GGUF really holds and whether 4gbVramStrata runs it (no download)
+./setup.sh --data-dir /mnt/data/4gbVramStrata-data         keep the model files somewhere else
+./setup.sh --port 8081                      another port
+./setup.sh --gpu 1                          another GPU (setup picks the one with the most VRAM)
+./setup.sh --gpus 0,2                       several GPUs sharing the model
+./setup.sh --vram-reserve-mib 2048          leave 2 GB of VRAM free for other programs (remembered)
+./setup.sh --no-browser                     do not open the chat page when the model is ready (remembered;
                                                 --browser undoes it)
-START-HERE.bat --setup --backend hip            the AMD engine on a PC that also has an NVIDIA card
-START-HERE.bat --setup --host 0.0.0.0 --api-key <secret>     reachable from other devices, with a key
-START-HERE.bat --calibrate                      tune the engine for this PC (about 15-30 minutes, longer on a slow card), then start
-START-HERE.bat --check                          only check this PC
+./setup.sh --setup --backend hip            the AMD engine on a PC that also has an NVIDIA card
+./setup.sh --setup --host 0.0.0.0 --api-key <secret>     reachable from other devices, with a key
+./setup.sh --calibrate                      tune the engine for this PC (about 15-30 minutes, longer on a slow card), then start
+./setup.sh --check                          only check this PC
 ```
 
 **Leaving VRAM for other programs (#493):** 4gbVramStrata fills the graphics card's free VRAM with experts (the expert cache)
 and leaves `--vram-reserve-mib` MiB free: 700 by default. For a game, a 3D program or another model beside it, leave
-more: `START-HERE.bat --vram-reserve-mib 2048` (Linux: `./setup.sh --vram-reserve-mib 2048`) writes it into the
+more: `./setup.sh --vram-reserve-mib 2048` writes it into the
 model's `strata-<model>.json` and starts it; at setup (`--setup --vram-reserve-mib 2048`) it goes into the new config.
 By hand: add `"--vram-reserve-mib", "2048"` to the config's `"args"` list and restart. The expert cache is then that
 much smaller, so answers can be a little slower. The engine sizes its cache from the VRAM free when it starts: what
@@ -288,7 +285,7 @@ reads only its headers (a few MB, also over the network: a file, a folder, a URL
 installs (under any name), stored like one of them, or not one 4gbVramStrata runs (another architecture, or experts in a
 format no 4gbVramStrata kernel reads). A name says little: Unsloth's `UD-IQ3_XXS` stores its routed experts at 3.22 bits per
 weight, `UD-Q4_K_XL` at 5.10, the original `Q2_0` at 2.25 and `IQ3_S` at 3.33. To let setup download from a Hugging Face mirror itself, set `HF_ENDPOINT`
-first (Windows: `set HF_ENDPOINT=https://hf-mirror.com`, Linux: `export HF_ENDPOINT=https://hf-mirror.com`): the same
+first (`export HF_ENDPOINT=https://hf-mirror.com`): the same
 pinned revisions and checks apply, and the MTP draft layer comes from there too.
 
 **From ModelScope (mainland China):** every repository setup downloads from (the GSQ-RCO models, Swift 1.5, the
@@ -301,5 +298,5 @@ pinned checkpoint's own hashes, as from Hugging Face; setup says so when you cho
 China on 2026-10-05: 11-14 MB/s; the Q2_0 and IQ3_S files matched their published SHA-256, and Q2_0's shard 1 matched
 the copy from hf-mirror.com.
 
-On Linux the same options go to `./setup.sh`. `START-HERE.bat --help` lists them all. The server's own settings
+On Linux the same options go to `./setup.sh`. `./setup.sh --help` lists them all. The server's own settings
 (sharing the GPU with games, MCP tools, CORS, API keys, the API itself) are in the [details](DETAILS.md#using-it).
