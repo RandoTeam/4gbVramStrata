@@ -19,7 +19,7 @@ inline half cache_half(device void* raw,device void* codes,device void* scales,u
                 :static_cast<device half*>(raw)[at];
 }
 template<int D>
-kernel void poly_flash(constant Args& a [[buffer(0)]],uint2 tg [[threadgroup_position_in_grid]],
+kernel void fourgbvram_flash(constant Args& a [[buffer(0)]],uint2 tg [[threadgroup_position_in_grid]],
                        ushort tid [[thread_index_in_threadgroup]],ushort sg [[simdgroup_index_in_threadgroup]],
                        ushort lane [[thread_index_in_simdgroup]]) {
     constexpr int NSG=D/64,NTH=NSG*32;
@@ -135,7 +135,7 @@ kernel void poly_flash(constant Args& a [[buffer(0)]],uint2 tg [[threadgroup_pos
             if(r<n) out[(ulong(t0+r)*a.heads+h)*D+d0+ix[0]]=tot[i]/lsum[r];
         }
 }
-typedef decltype(poly_flash<64>) poly_flash_t;
-template [[host_name("poly_flash_64")]] kernel poly_flash_t poly_flash<64>;
-template [[host_name("poly_flash_128")]] kernel poly_flash_t poly_flash<128>;
-template [[host_name("poly_flash_256")]] kernel poly_flash_t poly_flash<256>;
+typedef decltype(fourgbvram_flash<64>) fourgbvram_flash_t;
+template [[host_name("fourgbvram_flash_64")]] kernel fourgbvram_flash_t fourgbvram_flash<64>;
+template [[host_name("fourgbvram_flash_128")]] kernel fourgbvram_flash_t fourgbvram_flash<128>;
+template [[host_name("fourgbvram_flash_256")]] kernel fourgbvram_flash_t fourgbvram_flash<256>;

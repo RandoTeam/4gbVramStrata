@@ -10,13 +10,13 @@
 #include <unistd.h>
 
 namespace g = strata::gpu;
-using strata::poly::Layer;
+using strata::fourgbvram::Layer;
 static void ck(g::Error e) { if (e != g::kSuccess) throw std::runtime_error(g::error_string(e)); }
 static void require(bool ok, const char* what) { if (!ok) throw std::runtime_error(what); }
 
 // Exercise the real engine allocation, sequence and graph machinery without a model or memory-pressure
 // dependency. Only the host-memory reading and architecture-specific operations are replaced.
-class MemoryEngine final : public strata::poly::Engine {
+class MemoryEngine final : public strata::fourgbvram::Engine {
 public:
     std::optional<uint64_t> host = uint64_t(64) << 30;
     bool fail_rebind = false;
@@ -96,10 +96,10 @@ public:
     void legacy_cache_fixture() {
         // A valid empty GGUF supplies only the file-size query in fill_expert_cache(); no weights are loaded.
         const auto path = std::filesystem::temp_directory_path() /
-                          ("poly-metal-memory-growth-" + std::to_string(getpid()) + ".gguf");
+                          ("fourgbvram-metal-memory-growth-" + std::to_string(getpid()) + ".gguf");
         const uint64_t header[] = {(uint64_t(3) << 32) | 0x46554747, 0, 0, 0};
         { std::ofstream out(path, std::ios::binary); out.write(reinterpret_cast<const char*>(header), sizeof(header)); }
-        try { gg_ = std::make_unique<strata::poly::Shards>(path.string()); }
+        try { gg_ = std::make_unique<strata::fourgbvram::Shards>(path.string()); }
         catch (...) { std::filesystem::remove(path); throw; }
         std::filesystem::remove(path);
         opt_.gpu_experts = true; n_moe_ = n_expert_ = cached_ = 1;

@@ -13,7 +13,7 @@ What it does, each step skipped when it is already done:
   7. writes strata-<model>.json and run-<model>.sh with the Metal defaults (--spec 2, the Q8_0 hyper-connection
      read) and starts the server (serve/server.py), the same as on a PC
 
-Smaller families selected with --family use the native strata-poly Metal engine and GGUF files directly.
+Smaller families selected with --family use the native strata-fourgbvram Metal engine and GGUF files directly.
 The existing Qwen3.8 path and defaults stay unchanged.
 
 Everything shared - the model table, the downloader, the config and run-script writers, the server - is setup.py's.
@@ -35,7 +35,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 import setup as S  # noqa: E402
-from tools import metal_poly_setup as P  # noqa: E402
+from tools import metal_fourgbvram_setup as P  # noqa: E402
 
 # Apple's metal-cpp headers for the macOS 26 SDK (https://developer.apple.com/metal/cpp/), pinned by SHA-256
 METAL_CPP_URL = "https://developer.apple.com/metal/cpp/files/metal-cpp_26.zip"
@@ -44,20 +44,20 @@ BUILD_DIR = ROOT / "build-metal"
 EXE = BUILD_DIR / "strata"
 MIN_MACOS = (15, 0)        # MTLResidencySet (the engine keeps every buffer resident through one)
 
-# Smaller architectures use strata-poly, not the fixed Qwen3.8 Metal window.
+# Smaller architectures use strata-fourgbvram, not the fixed Qwen3.8 Metal window.
 # Keep their files, revisions, sizes and checksums in setup.py's single catalog.
 # The native port is opt-in through --family; the existing Qwen3.8 defaults stay unchanged.
-MAC_POLY_FAMILIES = tuple(f for f, d in S.FAMILIES.items() if d.get("engine") == "poly")
+MAC_FOURGBVRAM_FAMILIES = tuple(f for f, d in S.FAMILIES.items() if d.get("engine") == "fourgbvram")
 
 
 def smaller_model_catalog() -> dict:
-    """The small strata-poly families available in the shared installer."""
+    """The small strata-fourgbvram families available in the shared installer."""
     catalog = {}
-    for family in MAC_POLY_FAMILIES:
+    for family in MAC_FOURGBVRAM_FAMILIES:
         fam = S.FAMILIES[family]
         catalog[family] = {
             "title": fam["title"],
-            "engine": "strata-poly",
+            "engine": "strata-fourgbvram",
             "metal_ready": True,
             "model_validated": False,
             "models": {
@@ -96,7 +96,7 @@ def model_catalog() -> dict:
     result = {}
     for family, fam in {**S.FAMILIES, **S.OWN_PATH_FAMILIES}.items():
         engine = "strata-q36" if family in S.OWN_PATH_FAMILIES else (
-            "strata-poly" if fam.get("engine") == "poly" else "strata")
+            "strata-fourgbvram" if fam.get("engine") == "fourgbvram" else "strata")
         models = fam["models"] if family in S.OWN_PATH_FAMILIES else S.family_models(family)
         result[family] = dict(fam, models=models, metal_engine=engine)
     return result
@@ -285,8 +285,8 @@ def tool(name: str) -> str:
     return str(p) if p.exists() else (shutil.which(name) or name)
 
 
-def engine_current(poly: bool = False, *, engine: str | None = None) -> bool:
-    engine = engine or ("strata-poly" if poly else "strata")
+def engine_current(fourgbvram: bool = False, *, engine: str | None = None) -> bool:
+    engine = engine or ("strata-fourgbvram" if fourgbvram else "strata")
     exe = BUILD_DIR / engine
     stamp = "BUILD.json" if engine == "strata" else f"BUILD-{engine.removeprefix('strata-')}.json"
     try:
@@ -308,9 +308,9 @@ def source_digest() -> str:
     return h.hexdigest()
 
 
-def build_engine(llama: Path, jobs: int | None = None, *, poly: bool = False, engine: str | None = None) -> Path:
+def build_engine(llama: Path, jobs: int | None = None, *, fourgbvram: bool = False, engine: str | None = None) -> Path:
     """The Metal engine from source: cmake + ninja (pip's), Apple's clang from the Command Line Tools."""
-    engine = engine or ("strata-poly" if poly else "strata")
+    engine = engine or ("strata-fourgbvram" if fourgbvram else "strata")
     exe = BUILD_DIR / engine
     stamp = "BUILD.json" if engine == "strata" else f"BUILD-{engine.removeprefix('strata-')}.json"
     if engine_current(engine=engine):
@@ -530,8 +530,8 @@ def start(cfg_path: Path, port: int | None, open_browser: bool = True) -> int:
     return subprocess.call(cmd)
 
 
-def setup_poly(a, info: dict, data: Path, elsewhere: list) -> int:
-    """Shared GGUF catalog and server, with native strata-poly Metal kernels."""
+def setup_fourgbvram(a, info: dict, data: Path, elsewhere: list) -> int:
+    """Shared GGUF catalog and server, with native strata-fourgbvram Metal kernels."""
     fam = S.FAMILIES[a.family]
     sizes = S.family_models(a.family)
     if a.model and a.model not in sizes:
@@ -546,7 +546,7 @@ def setup_poly(a, info: dict, data: Path, elsewhere: list) -> int:
         model = names[int(S.ask("Which size?", [str(i) for i in range(1, len(names)+1)],
                                 str(names.index(model)+1), a.yes))-1]
     d = sizes[model]
-    S.warn("strata-poly on Metal is experimental: kernel parity checks pass; broader full-model validation is pending (docs/MAC.md)")
+    S.warn("strata-fourgbvram on Metal is experimental: kernel parity checks pass; broader full-model validation is pending (docs/MAC.md)")
     if d["download_gb"] + OVERHEAD_GB > info["ram_gb"] * GIB_GB:
         S.warn("the model plus working memory may exceed this Mac's unified memory")
     tag = fam["tag"] + model
@@ -566,11 +566,11 @@ def setup_poly(a, info: dict, data: Path, elsewhere: list) -> int:
     S.step(3, "Python packages")
     S.pip_install(S.requirement_lines() if S.REQUIREMENTS.exists() else S.PY_PACKAGES,
                   "numpy, jinja2, regex, cmake, ninja and server packages")
-    S.step(4, "the strata-poly engine (Metal)")
+    S.step(4, "the strata-fourgbvram engine (Metal)")
     llama = S.get_llama_cpp()
     if a.build:
-        (BUILD_DIR / "BUILD-poly.json").unlink(missing_ok=True)
-    exe = build_engine(llama, poly=True)
+        (BUILD_DIR / "BUILD-fourgbvram.json").unlink(missing_ok=True)
+    exe = build_engine(llama, fourgbvram=True)
     if a.update:
         return 0
 
@@ -641,14 +641,14 @@ def setup_poly(a, info: dict, data: Path, elsewhere: list) -> int:
     if vision:
         cfg["vision"] = {"exe": str(vexe), "mmproj": str(mmproj), "model": str(files[0]),
                          "gpu": True, "max_tokens": a.vision_tokens or fam.get("vision_most", 1024)}
-    S.poly_kv_whole(cfg)
+    S.fourgbvram_kv_whole(cfg)
     cfg_path = ROOT / f"strata-{tag.lower()}.json"
     previous = P.read_config(cfg_path)
     P.apply_options(cfg["args"], a, previous)
     headers, why = P.read_headers([*files, *([draft] if draft else [])])
-    if getattr(a, "poly_kv", None) == "q8_0" and (
+    if getattr(a, "fourgbvram_kv", None) == "q8_0" and (
             not headers or headers[0].metadata.get("general.architecture") != "qwen35moe"):
-        S.fail("--poly-kv q8_0 requires a verified Qwen35MoE GGUF header")
+        S.fail("--fourgbvram-kv q8_0 requires a verified Qwen35MoE GGUF header")
     estimate = P.estimate(headers, ctx, kv=P.flag_value(cfg["args"], "--kv", "auto"),
                           memory=P.flag_value(cfg["args"], "--metal-memory", "balanced"),
                           parallel=cfg.get("parallel", previous.get("parallel", 1)))
@@ -774,7 +774,7 @@ def main(argv=None) -> int:
                 S.say(f"  {model}{size}")
         return 0
     try:
-        P.validate(a, MAC_POLY_FAMILIES)
+        P.validate(a, MAC_FOURGBVRAM_FAMILIES)
     except ValueError as e:
         ap.error(str(e))
     if a.host and a.host not in ("127.0.0.1", "localhost", "::1") and not a.api_key:
@@ -811,8 +811,8 @@ def main(argv=None) -> int:
 
     if a.family in S.OWN_PATH_FAMILIES:
         return setup_q36(a, info, data, elsewhere)
-    if a.family in MAC_POLY_FAMILIES:
-        return setup_poly(a, info, data, elsewhere)
+    if a.family in MAC_FOURGBVRAM_FAMILIES:
+        return setup_fourgbvram(a, info, data, elsewhere)
     if a.model and a.model not in MAC_MODELS:
         S.fail(f"{a.model} needs its smaller-model --family; see --list-models")
 

@@ -5,7 +5,7 @@ struct Args {
     int dim,heads,kv,rows,window,ring,whole,stride,rot,sections,kind;
     float scale,eps;
 };
-kernel void poly_store(constant Args& a [[buffer(0)]],uint i [[thread_position_in_grid]],uint lane [[thread_index_in_threadgroup]]) {
+kernel void fourgbvram_store(constant Args& a [[buffer(0)]],uint i [[thread_position_in_grid]],uint lane [[thread_index_in_threadgroup]]) {
     if(i>=uint(a.dim)*a.rows) return;
     long pos=(a.p[3]?*static_cast<device long*>(a.p[3]):a.pos)+i/a.dim;
     if(a.ring) pos%=a.ring;
@@ -18,7 +18,7 @@ kernel void poly_store(constant Args& a [[buffer(0)]],uint i [[thread_position_i
         if(!lane) static_cast<device half*>(a.p[2])[j/32]=half(d);
     }
 }
-kernel void poly_rope(constant Args& a [[buffer(0)]],uint head [[threadgroup_position_in_grid]],uint lane [[thread_index_in_threadgroup]]) {
+kernel void fourgbvram_rope(constant Args& a [[buffer(0)]],uint head [[threadgroup_position_in_grid]],uint lane [[thread_index_in_threadgroup]]) {
     device const float* x=static_cast<device float*>(a.p[0])+ulong(head)*a.stride;
     device const float* w=static_cast<device float*>(a.p[1]);
     device float* y=static_cast<device float*>(a.p[2])+ulong(head)*a.dim;
@@ -51,10 +51,10 @@ inline float cache_value(device void* raw,device void* codes,device void* scales
 // one.  With one SIMD group the keys go in order, as they did before there were more.  PER: a lane's share of a
 // head (head dimension / 32 at most), so a head of up to 256 values keeps 8 floats a lane and not 32.
 // With `stride` splits (p[9] their scratch), threadgroup z takes the z-th of that many runs of the token's keys
-// and leaves its maximum, denominator and unnormalized sums there for poly_attention_join: a SIMD group walks its
+// and leaves its maximum, denominator and unnormalized sums there for fourgbvram_attention_join: a SIMD group walks its
 // keys at about 3 us a key at heads of 256 (M5 Ultra), so a token's keys go to many threadgroups.
 template<int PER>
-kernel void poly_attention(constant Args& a [[buffer(0)]],threadgroup float* part [[threadgroup(0)]],
+kernel void fourgbvram_attention(constant Args& a [[buffer(0)]],threadgroup float* part [[threadgroup(0)]],
                            uint3 group [[threadgroup_position_in_grid]],uint lane [[thread_index_in_simdgroup]],
                            uint sg [[simdgroup_index_in_threadgroup]],uint groups [[simdgroups_per_threadgroup]]) {
     int h=group.x,t=group.y,kh=h/(a.heads/a.kv);
@@ -116,9 +116,9 @@ kernel void poly_attention(constant Args& a [[buffer(0)]],threadgroup float* par
         else out[d]=sum/total;
     }
 }
-// The splits' runs of a head and token (poly_attention with stride splits) into its output; an empty run has a
+// The splits' runs of a head and token (fourgbvram_attention with stride splits) into its output; an empty run has a
 // maximum of -infinity and adds nothing.  grid (heads, rows), 32 threads.
-kernel void poly_attention_join(constant Args& a [[buffer(0)]],uint2 group [[threadgroup_position_in_grid]],
+kernel void fourgbvram_attention_join(constant Args& a [[buffer(0)]],uint2 group [[threadgroup_position_in_grid]],
                                 uint lane [[thread_index_in_simdgroup]]) {
     const int h=group.x,t=group.y,splits=a.stride,n=a.dim+2;
     device const float* run=static_cast<device float*>(a.p[9])+(ulong(t)*a.heads+h)*splits*n;
@@ -132,6 +132,6 @@ kernel void poly_attention_join(constant Args& a [[buffer(0)]],uint2 group [[thr
         out[d]=sum/total;
     }
 }
-typedef decltype(poly_attention<32>) poly_attention_t;
-template [[host_name("poly_attention")]] kernel poly_attention_t poly_attention<32>;
-template [[host_name("poly_attention_256")]] kernel poly_attention_t poly_attention<8>;
+typedef decltype(fourgbvram_attention<32>) fourgbvram_attention_t;
+template [[host_name("fourgbvram_attention")]] kernel fourgbvram_attention_t fourgbvram_attention<32>;
+template [[host_name("fourgbvram_attention_256")]] kernel fourgbvram_attention_t fourgbvram_attention<8>;

@@ -83,44 +83,44 @@ target_include_directories(strata_gpu_metal SYSTEM PUBLIC ${METAL_CPP_DIR})
 target_compile_definitions(strata_gpu_metal PUBLIC STRATA_GPU_METAL=1)
 target_link_libraries(strata_gpu_metal PUBLIC "-framework Metal" "-framework Foundation" "-framework QuartzCore")
 
-# Native strata-poly port, opt-in for the smaller families. This library uses
+# Native strata-fourgbvram port, opt-in for the smaller families. This library uses
 # the same stream and graph runtime as strata. Full-model validation is pending.
-option(STRATA_METAL_POLY "Build the strata-poly Metal kernel port and checks" OFF)
+option(STRATA_METAL_POLY "Build the strata-fourgbvram Metal kernel port and checks" OFF)
 if(STRATA_METAL_POLY)
-  add_library(strata_poly_metal_kernels STATIC src/poly/basic.cpp src/poly/attention.cpp src/poly/recurrent.cpp src/poly/advanced.cpp)
-  target_compile_definitions(strata_poly_metal_kernels PRIVATE
-    STRATA_POLY_BASIC_SOURCE="${CMAKE_CURRENT_SOURCE_DIR}/src/poly/basic.metal"
-    STRATA_POLY_ATTENTION_SOURCE="${CMAKE_CURRENT_SOURCE_DIR}/src/poly/attention.metal"
-    STRATA_POLY_FLASH_SOURCE="${CMAKE_CURRENT_SOURCE_DIR}/src/poly/flash.metal"
-    STRATA_POLY_RECURRENT_SOURCE="${CMAKE_CURRENT_SOURCE_DIR}/src/poly/recurrent.metal"
-    STRATA_POLY_ADVANCED_SOURCE="${CMAKE_CURRENT_SOURCE_DIR}/src/poly/advanced.metal")
-  target_link_libraries(strata_poly_metal_kernels PUBLIC strata_gpu_metal)
-  add_executable(poly_basic_parity poly_tests/basic_parity.cpp)
-  target_link_libraries(poly_basic_parity PRIVATE strata_poly_metal_kernels)
-  set_source_files_properties(${STRATA_ROOT}/src/poly/shortconv_test.cu PROPERTIES LANGUAGE CXX)
-  add_executable(poly_shortconv_metal_test ${STRATA_ROOT}/src/poly/shortconv_test.cu)
-  target_link_libraries(poly_shortconv_metal_test PRIVATE strata_poly_metal_kernels)
-  set_source_files_properties(${STRATA_ROOT}/src/poly/route_test.cu PROPERTIES LANGUAGE CXX)
-  add_executable(poly_route_metal_test ${STRATA_ROOT}/src/poly/route_test.cu)
-  target_link_libraries(poly_route_metal_test PRIVATE strata_poly_metal_kernels)
-  set_source_files_properties(${STRATA_ROOT}/src/poly/dsv4_test.cu PROPERTIES LANGUAGE CXX)
-  add_executable(poly_dsv4_metal_test ${STRATA_ROOT}/src/poly/dsv4_test.cu)
-  target_link_libraries(poly_dsv4_metal_test PRIVATE strata_poly_metal_kernels)
-  add_executable(poly_advanced_parity poly_tests/advanced_parity.cpp)
-  target_link_libraries(poly_advanced_parity PRIVATE strata_poly_metal_kernels)
+  add_library(strata_fourgbvram_metal_kernels STATIC src/fourgbvram/basic.cpp src/fourgbvram/attention.cpp src/fourgbvram/recurrent.cpp src/fourgbvram/advanced.cpp)
+  target_compile_definitions(strata_fourgbvram_metal_kernels PRIVATE
+    STRATA_FOURGBVRAM_BASIC_SOURCE="${CMAKE_CURRENT_SOURCE_DIR}/src/fourgbvram/basic.metal"
+    STRATA_FOURGBVRAM_ATTENTION_SOURCE="${CMAKE_CURRENT_SOURCE_DIR}/src/fourgbvram/attention.metal"
+    STRATA_FOURGBVRAM_FLASH_SOURCE="${CMAKE_CURRENT_SOURCE_DIR}/src/fourgbvram/flash.metal"
+    STRATA_FOURGBVRAM_RECURRENT_SOURCE="${CMAKE_CURRENT_SOURCE_DIR}/src/fourgbvram/recurrent.metal"
+    STRATA_FOURGBVRAM_ADVANCED_SOURCE="${CMAKE_CURRENT_SOURCE_DIR}/src/fourgbvram/advanced.metal")
+  target_link_libraries(strata_fourgbvram_metal_kernels PUBLIC strata_gpu_metal)
+  add_executable(fourgbvram_basic_parity fourgbvram_tests/basic_parity.cpp)
+  target_link_libraries(fourgbvram_basic_parity PRIVATE strata_fourgbvram_metal_kernels)
+  set_source_files_properties(${STRATA_ROOT}/src/fourgbvram/shortconv_test.cu PROPERTIES LANGUAGE CXX)
+  add_executable(fourgbvram_shortconv_metal_test ${STRATA_ROOT}/src/fourgbvram/shortconv_test.cu)
+  target_link_libraries(fourgbvram_shortconv_metal_test PRIVATE strata_fourgbvram_metal_kernels)
+  set_source_files_properties(${STRATA_ROOT}/src/fourgbvram/route_test.cu PROPERTIES LANGUAGE CXX)
+  add_executable(fourgbvram_route_metal_test ${STRATA_ROOT}/src/fourgbvram/route_test.cu)
+  target_link_libraries(fourgbvram_route_metal_test PRIVATE strata_fourgbvram_metal_kernels)
+  set_source_files_properties(${STRATA_ROOT}/src/fourgbvram/dsv4_test.cu PROPERTIES LANGUAGE CXX)
+  add_executable(fourgbvram_dsv4_metal_test ${STRATA_ROOT}/src/fourgbvram/dsv4_test.cu)
+  target_link_libraries(fourgbvram_dsv4_metal_test PRIVATE strata_fourgbvram_metal_kernels)
+  add_executable(fourgbvram_advanced_parity fourgbvram_tests/advanced_parity.cpp)
+  target_link_libraries(fourgbvram_advanced_parity PRIVATE strata_fourgbvram_metal_kernels)
   if(BUILD_TESTING)
-    add_test(NAME poly_advanced_parity COMMAND poly_advanced_parity)
-    set_tests_properties(poly_advanced_parity PROPERTIES LABELS "metal;gpu;poly" RESOURCE_LOCK metal_gpu TIMEOUT 120)
-    add_test(NAME poly_dsv4_metal_test COMMAND poly_dsv4_metal_test)
-    set_tests_properties(poly_dsv4_metal_test PROPERTIES LABELS "metal;gpu;poly" RESOURCE_LOCK metal_gpu TIMEOUT 120)
-    add_test(NAME poly_basic_parity COMMAND poly_basic_parity)
-    set_tests_properties(poly_basic_parity PROPERTIES LABELS "metal;gpu;poly"
+    add_test(NAME fourgbvram_advanced_parity COMMAND fourgbvram_advanced_parity)
+    set_tests_properties(fourgbvram_advanced_parity PROPERTIES LABELS "metal;gpu;fourgbvram" RESOURCE_LOCK metal_gpu TIMEOUT 120)
+    add_test(NAME fourgbvram_dsv4_metal_test COMMAND fourgbvram_dsv4_metal_test)
+    set_tests_properties(fourgbvram_dsv4_metal_test PROPERTIES LABELS "metal;gpu;fourgbvram" RESOURCE_LOCK metal_gpu TIMEOUT 120)
+    add_test(NAME fourgbvram_basic_parity COMMAND fourgbvram_basic_parity)
+    set_tests_properties(fourgbvram_basic_parity PROPERTIES LABELS "metal;gpu;fourgbvram"
                         RESOURCE_LOCK metal_gpu TIMEOUT 120)
-    add_test(NAME poly_shortconv_metal_test COMMAND poly_shortconv_metal_test)
-    set_tests_properties(poly_shortconv_metal_test PROPERTIES LABELS "metal;gpu;poly"
+    add_test(NAME fourgbvram_shortconv_metal_test COMMAND fourgbvram_shortconv_metal_test)
+    set_tests_properties(fourgbvram_shortconv_metal_test PROPERTIES LABELS "metal;gpu;fourgbvram"
                         RESOURCE_LOCK metal_gpu TIMEOUT 120)
-    add_test(NAME poly_route_metal_test COMMAND poly_route_metal_test)
-    set_tests_properties(poly_route_metal_test PROPERTIES LABELS "metal;gpu;poly"
+    add_test(NAME fourgbvram_route_metal_test COMMAND fourgbvram_route_metal_test)
+    set_tests_properties(fourgbvram_route_metal_test PROPERTIES LABELS "metal;gpu;fourgbvram"
                         RESOURCE_LOCK metal_gpu TIMEOUT 120)
   endif()
 endif()
@@ -198,51 +198,51 @@ target_link_libraries(strata PRIVATE strata_metal_kernels strata_metal_host stra
 # The smaller-family engine keeps the shared line protocol, expert cache, CPU
 # experts, batching, conversations and speculative decoding.
 if(STRATA_METAL_POLY)
-  target_sources(strata_poly_metal_kernels PRIVATE src/poly/quantized.cpp src/poly/unported.cpp)
-  target_include_directories(strata_poly_metal_kernels PRIVATE ${S}/poly ${STRATA_GGML_DIR}/ggml/include)
-  target_compile_definitions(strata_poly_metal_kernels PRIVATE
-    STRATA_POLY_GGML_SOURCE="${STRATA_GGML_DIR}/ggml/src"
-    STRATA_POLY_QUANT_SOURCE="${CMAKE_CURRENT_SOURCE_DIR}/src/poly/quantized.metal"
-    STRATA_POLY_MM_SOURCE="${CMAKE_CURRENT_SOURCE_DIR}/src/poly/mm.metal")
-  target_link_libraries(strata_poly_metal_kernels PUBLIC ggml-base)
-  add_executable(strata-poly ${S}/poly/main.cpp ${S}/poly/engine.cpp ${S}/poly/qwen35.cpp
-    ${S}/poly/gemma4.cpp ${S}/poly/lfm2moe.cpp ${S}/poly/glm5next.cpp ${S}/poly/deepseek4.cpp ${S}/poly/flint.cpp
-    ${S}/poly/kolibri1.cpp ${S}/poly/cpu_experts.cpp ${S}/poly/spill.cpp ${S}/platform/memory.cpp
+  target_sources(strata_fourgbvram_metal_kernels PRIVATE src/fourgbvram/quantized.cpp src/fourgbvram/unported.cpp)
+  target_include_directories(strata_fourgbvram_metal_kernels PRIVATE ${S}/fourgbvram ${STRATA_GGML_DIR}/ggml/include)
+  target_compile_definitions(strata_fourgbvram_metal_kernels PRIVATE
+    STRATA_FOURGBVRAM_GGML_SOURCE="${STRATA_GGML_DIR}/ggml/src"
+    STRATA_FOURGBVRAM_QUANT_SOURCE="${CMAKE_CURRENT_SOURCE_DIR}/src/fourgbvram/quantized.metal"
+    STRATA_FOURGBVRAM_MM_SOURCE="${CMAKE_CURRENT_SOURCE_DIR}/src/fourgbvram/mm.metal")
+  target_link_libraries(strata_fourgbvram_metal_kernels PUBLIC ggml-base)
+  add_executable(strata-fourgbvram ${S}/fourgbvram/main.cpp ${S}/fourgbvram/engine.cpp ${S}/fourgbvram/qwen35.cpp
+    ${S}/fourgbvram/gemma4.cpp ${S}/fourgbvram/lfm2moe.cpp ${S}/fourgbvram/glm5next.cpp ${S}/fourgbvram/deepseek4.cpp ${S}/fourgbvram/flint.cpp
+    ${S}/fourgbvram/kolibri1.cpp ${S}/fourgbvram/cpu_experts.cpp ${S}/fourgbvram/spill.cpp ${S}/platform/memory.cpp
     ${S}/core/conversation_memory.cpp ${S}/core/conversation_file.cpp ${S}/spec/draft_policy.cpp
     ${S}/spec/suffix_drafter.cpp)
-  target_include_directories(strata-poly PRIVATE ${STRATA_GGML_DIR}/ggml/include ${STRATA_GGML_DIR}/ggml/src)
-  target_link_libraries(strata-poly PRIVATE strata_poly_metal_kernels ggml-cpu ggml-base)
-  target_compile_definitions(strata-poly PRIVATE STRATA_VERSION="0.1.45-metal-poly")
-  set_source_files_properties(${S}/poly/norm_q8_test.cu PROPERTIES LANGUAGE CXX)
-  add_executable(poly_norm_q8_metal_test ${S}/poly/norm_q8_test.cu)
-  target_link_libraries(poly_norm_q8_metal_test PRIVATE strata_poly_metal_kernels)
+  target_include_directories(strata-fourgbvram PRIVATE ${STRATA_GGML_DIR}/ggml/include ${STRATA_GGML_DIR}/ggml/src)
+  target_link_libraries(strata-fourgbvram PRIVATE strata_fourgbvram_metal_kernels ggml-cpu ggml-base)
+  target_compile_definitions(strata-fourgbvram PRIVATE STRATA_VERSION="0.1.45-metal-fourgbvram")
+  set_source_files_properties(${S}/fourgbvram/norm_q8_test.cu PROPERTIES LANGUAGE CXX)
+  add_executable(fourgbvram_norm_q8_metal_test ${S}/fourgbvram/norm_q8_test.cu)
+  target_link_libraries(fourgbvram_norm_q8_metal_test PRIVATE strata_fourgbvram_metal_kernels)
   if(BUILD_TESTING)
-    add_test(NAME poly_norm_q8_metal_test COMMAND poly_norm_q8_metal_test)
-    set_tests_properties(poly_norm_q8_metal_test PROPERTIES LABELS "metal;gpu;poly" RESOURCE_LOCK metal_gpu TIMEOUT 120)
+    add_test(NAME fourgbvram_norm_q8_metal_test COMMAND fourgbvram_norm_q8_metal_test)
+    set_tests_properties(fourgbvram_norm_q8_metal_test PROPERTIES LABELS "metal;gpu;fourgbvram" RESOURCE_LOCK metal_gpu TIMEOUT 120)
   endif()
 endif()
 
 if(STRATA_METAL_POLY)
   # Mmq::mul's time on a prompt batch's shapes, run by hand
-  add_executable(poly_mm_bench poly_tests/mm_bench.cpp)
-  target_include_directories(poly_mm_bench PRIVATE ${S}/poly)
-  target_link_libraries(poly_mm_bench PRIVATE strata_poly_metal_kernels)
+  add_executable(fourgbvram_mm_bench fourgbvram_tests/mm_bench.cpp)
+  target_include_directories(fourgbvram_mm_bench PRIVATE ${S}/fourgbvram)
+  target_link_libraries(fourgbvram_mm_bench PRIVATE strata_fourgbvram_metal_kernels)
   foreach(t attention quantized recurrent operations)
-    add_executable(poly_${t}_parity poly_tests/${t}_parity.cpp)
-    target_include_directories(poly_${t}_parity PRIVATE ${S}/poly)
-    target_link_libraries(poly_${t}_parity PRIVATE strata_poly_metal_kernels)
+    add_executable(fourgbvram_${t}_parity fourgbvram_tests/${t}_parity.cpp)
+    target_include_directories(fourgbvram_${t}_parity PRIVATE ${S}/fourgbvram)
+    target_link_libraries(fourgbvram_${t}_parity PRIVATE strata_fourgbvram_metal_kernels)
     if(BUILD_TESTING)
-      add_test(NAME poly_${t}_parity COMMAND poly_${t}_parity)
-      set_tests_properties(poly_${t}_parity PROPERTIES LABELS "metal;gpu;poly" RESOURCE_LOCK metal_gpu TIMEOUT 120)
+      add_test(NAME fourgbvram_${t}_parity COMMAND fourgbvram_${t}_parity)
+      set_tests_properties(fourgbvram_${t}_parity PROPERTIES LABELS "metal;gpu;fourgbvram" RESOURCE_LOCK metal_gpu TIMEOUT 120)
     endif()
   endforeach()
 endif()
 
 if(STRATA_METAL_POLY AND BUILD_TESTING)
-  add_executable(poly_tiny_model_fixture poly_tests/tiny_model_fixture.cpp)
-  target_link_libraries(poly_tiny_model_fixture PRIVATE ggml-base)
-  add_test(NAME poly_tiny_lfm_fixture COMMAND poly_tiny_model_fixture ${CMAKE_CURRENT_BINARY_DIR}/tiny-lfm.gguf)
-  set_tests_properties(poly_tiny_lfm_fixture PROPERTIES LABELS "metal;poly;synthetic" FIXTURES_SETUP tiny_lfm)
+  add_executable(fourgbvram_tiny_model_fixture fourgbvram_tests/tiny_model_fixture.cpp)
+  target_link_libraries(fourgbvram_tiny_model_fixture PRIVATE ggml-base)
+  add_test(NAME fourgbvram_tiny_lfm_fixture COMMAND fourgbvram_tiny_model_fixture ${CMAKE_CURRENT_BINARY_DIR}/tiny-lfm.gguf)
+  set_tests_properties(fourgbvram_tiny_lfm_fixture PROPERTIES LABELS "metal;fourgbvram;synthetic" FIXTURES_SETUP tiny_lfm)
   foreach(mode graphs launches cpu_experts)
     set(extra)
     if(mode STREQUAL "launches")
@@ -250,63 +250,63 @@ if(STRATA_METAL_POLY AND BUILD_TESTING)
     elseif(mode STREQUAL "cpu_experts")
       set(extra --no-gpu-experts)
     endif()
-    add_test(NAME poly_tiny_lfm_${mode} COMMAND strata-poly --model ${CMAKE_CURRENT_BINARY_DIR}/tiny-lfm.gguf
+    add_test(NAME fourgbvram_tiny_lfm_${mode} COMMAND strata-fourgbvram --model ${CMAKE_CURRENT_BINARY_DIR}/tiny-lfm.gguf
       --tokens 1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17 --max-new 4 --max-context 128
       --prompt-batch 32 --threads 2 --no-draft ${extra})
-    set_tests_properties(poly_tiny_lfm_${mode} PROPERTIES LABELS "metal;gpu;poly;synthetic"
+    set_tests_properties(fourgbvram_tiny_lfm_${mode} PROPERTIES LABELS "metal;gpu;fourgbvram;synthetic"
       RESOURCE_LOCK metal_gpu TIMEOUT 120 FIXTURES_REQUIRED tiny_lfm)
   endforeach()
 endif()
 
 if(STRATA_METAL_POLY AND BUILD_TESTING)
-  add_executable(poly_memory_test poly_tests/memory_test.cpp ${S}/core/conversation_memory.cpp)
-  target_include_directories(poly_memory_test PRIVATE ${STRATA_ROOT}/include)
-  add_test(NAME poly_memory_test COMMAND poly_memory_test)
-  set_tests_properties(poly_memory_test PROPERTIES LABELS "metal;poly;cpu")
-  add_executable(poly_conversation_memory_test ${S}/core/conversation_memory_test.cpp ${S}/core/conversation_memory.cpp)
-  target_include_directories(poly_conversation_memory_test PRIVATE ${STRATA_ROOT}/include)
-  add_test(NAME poly_conversation_memory_test COMMAND poly_conversation_memory_test)
-  set_tests_properties(poly_conversation_memory_test PROPERTIES LABELS "metal;poly;cpu")
-  add_test(NAME poly_tiny_lfm_batch COMMAND strata-poly --model ${CMAKE_CURRENT_BINARY_DIR}/tiny-lfm.gguf
+  add_executable(fourgbvram_memory_test fourgbvram_tests/memory_test.cpp ${S}/core/conversation_memory.cpp)
+  target_include_directories(fourgbvram_memory_test PRIVATE ${STRATA_ROOT}/include)
+  add_test(NAME fourgbvram_memory_test COMMAND fourgbvram_memory_test)
+  set_tests_properties(fourgbvram_memory_test PROPERTIES LABELS "metal;fourgbvram;cpu")
+  add_executable(fourgbvram_conversation_memory_test ${S}/core/conversation_memory_test.cpp ${S}/core/conversation_memory.cpp)
+  target_include_directories(fourgbvram_conversation_memory_test PRIVATE ${STRATA_ROOT}/include)
+  add_test(NAME fourgbvram_conversation_memory_test COMMAND fourgbvram_conversation_memory_test)
+  set_tests_properties(fourgbvram_conversation_memory_test PROPERTIES LABELS "metal;fourgbvram;cpu")
+  add_test(NAME fourgbvram_tiny_lfm_batch COMMAND strata-fourgbvram --model ${CMAKE_CURRENT_BINARY_DIR}/tiny-lfm.gguf
     --tokens 1,2,3,4,5 --max-new 8 --max-context 128 --prompt-batch 32 --threads 2 --no-draft --batch 2 --check-batch 2)
-  set_tests_properties(poly_tiny_lfm_batch PROPERTIES LABELS "metal;gpu;poly;synthetic"
+  set_tests_properties(fourgbvram_tiny_lfm_batch PROPERTIES LABELS "metal;gpu;fourgbvram;synthetic"
     RESOURCE_LOCK metal_gpu TIMEOUT 120 FIXTURES_REQUIRED tiny_lfm)
   find_package(Python3 COMPONENTS Interpreter REQUIRED)
-  add_test(NAME poly_protocol_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/poly_tests/protocol_test.py
-    $<TARGET_FILE:strata-poly> ${CMAKE_CURRENT_BINARY_DIR}/tiny-lfm.gguf)
-  set_tests_properties(poly_protocol_test PROPERTIES LABELS "metal;gpu;poly;synthetic"
+  add_test(NAME fourgbvram_protocol_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/fourgbvram_tests/protocol_test.py
+    $<TARGET_FILE:strata-fourgbvram> ${CMAKE_CURRENT_BINARY_DIR}/tiny-lfm.gguf)
+  set_tests_properties(fourgbvram_protocol_test PROPERTIES LABELS "metal;gpu;fourgbvram;synthetic"
     RESOURCE_LOCK metal_gpu TIMEOUT 120 FIXTURES_REQUIRED tiny_lfm)
 endif()
 
 if(STRATA_METAL_POLY AND BUILD_TESTING)
   foreach(arch qwen35moe gemma4 glm5-next deepseek4)
-    add_test(NAME poly_tiny_${arch}_fixture COMMAND poly_tiny_model_fixture ${CMAKE_CURRENT_BINARY_DIR}/tiny-${arch}.gguf ${arch})
-    set_tests_properties(poly_tiny_${arch}_fixture PROPERTIES LABELS "metal;poly;synthetic" FIXTURES_SETUP tiny_${arch})
-    add_test(NAME poly_tiny_${arch}_batch COMMAND strata-poly --model ${CMAKE_CURRENT_BINARY_DIR}/tiny-${arch}.gguf
+    add_test(NAME fourgbvram_tiny_${arch}_fixture COMMAND fourgbvram_tiny_model_fixture ${CMAKE_CURRENT_BINARY_DIR}/tiny-${arch}.gguf ${arch})
+    set_tests_properties(fourgbvram_tiny_${arch}_fixture PROPERTIES LABELS "metal;fourgbvram;synthetic" FIXTURES_SETUP tiny_${arch})
+    add_test(NAME fourgbvram_tiny_${arch}_batch COMMAND strata-fourgbvram --model ${CMAKE_CURRENT_BINARY_DIR}/tiny-${arch}.gguf
       --tokens 1,2,3,4,5 --max-new 8 --max-context 128 --prompt-batch 32 --threads 2 --no-draft --batch 2 --check-batch 2)
-    set_tests_properties(poly_tiny_${arch}_batch PROPERTIES LABELS "metal;gpu;poly;synthetic"
+    set_tests_properties(fourgbvram_tiny_${arch}_batch PROPERTIES LABELS "metal;gpu;fourgbvram;synthetic"
       RESOURCE_LOCK metal_gpu TIMEOUT 120 FIXTURES_REQUIRED tiny_${arch})
-    add_test(NAME poly_tiny_${arch}_protocol COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/poly_tests/protocol_test.py
-      $<TARGET_FILE:strata-poly> ${CMAKE_CURRENT_BINARY_DIR}/tiny-${arch}.gguf)
-    set_tests_properties(poly_tiny_${arch}_protocol PROPERTIES LABELS "metal;gpu;poly;synthetic"
+    add_test(NAME fourgbvram_tiny_${arch}_protocol COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/fourgbvram_tests/protocol_test.py
+      $<TARGET_FILE:strata-fourgbvram> ${CMAKE_CURRENT_BINARY_DIR}/tiny-${arch}.gguf)
+    set_tests_properties(fourgbvram_tiny_${arch}_protocol PROPERTIES LABELS "metal;gpu;fourgbvram;synthetic"
       RESOURCE_LOCK metal_gpu TIMEOUT 120 FIXTURES_REQUIRED tiny_${arch})
   endforeach()
-  add_test(NAME poly_tiny_qwen_q8 COMMAND strata-poly --model ${CMAKE_CURRENT_BINARY_DIR}/tiny-qwen35moe.gguf
+  add_test(NAME fourgbvram_tiny_qwen_q8 COMMAND strata-fourgbvram --model ${CMAKE_CURRENT_BINARY_DIR}/tiny-qwen35moe.gguf
     --tokens 1,2,3,4,5 --max-new 8 --max-context 128 --prompt-batch 32 --threads 2 --no-draft --batch 2 --check-batch 2 --kv q8_0)
-  set_tests_properties(poly_tiny_qwen_q8 PROPERTIES LABELS "metal;gpu;poly;synthetic"
+  set_tests_properties(fourgbvram_tiny_qwen_q8 PROPERTIES LABELS "metal;gpu;fourgbvram;synthetic"
     RESOURCE_LOCK metal_gpu TIMEOUT 120 FIXTURES_REQUIRED tiny_qwen35moe)
   # each sequence's draft block guesses in the batch, and the answers are still each one's alone
-  add_test(NAME poly_tiny_qwen_batch_mtp COMMAND strata-poly --model ${CMAKE_CURRENT_BINARY_DIR}/tiny-qwen35moe.gguf
+  add_test(NAME fourgbvram_tiny_qwen_batch_mtp COMMAND strata-fourgbvram --model ${CMAKE_CURRENT_BINARY_DIR}/tiny-qwen35moe.gguf
     --tokens 1,2,3,4,5 --max-new 8 --max-context 128 --prompt-batch 32 --threads 2 --window 2 --batch 2 --check-batch 2
     --batch-mtp)
-  set_tests_properties(poly_tiny_qwen_batch_mtp PROPERTIES LABELS "metal;gpu;poly;synthetic"
+  set_tests_properties(fourgbvram_tiny_qwen_batch_mtp PROPERTIES LABELS "metal;gpu;fourgbvram;synthetic"
     RESOURCE_LOCK metal_gpu TIMEOUT 120 FIXTURES_REQUIRED tiny_qwen35moe)
 endif()
 
 if(STRATA_METAL_POLY AND BUILD_TESTING)
-  add_test(NAME poly_tiny_qwen_draft COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/poly_tests/protocol_test.py
-    $<TARGET_FILE:strata-poly> ${CMAKE_CURRENT_BINARY_DIR}/tiny-qwen35moe.gguf --window 4)
-  set_tests_properties(poly_tiny_qwen_draft PROPERTIES LABELS "metal;gpu;poly;synthetic"
+  add_test(NAME fourgbvram_tiny_qwen_draft COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/fourgbvram_tests/protocol_test.py
+    $<TARGET_FILE:strata-fourgbvram> ${CMAKE_CURRENT_BINARY_DIR}/tiny-qwen35moe.gguf --window 4)
+  set_tests_properties(fourgbvram_tiny_qwen_draft PROPERTIES LABELS "metal;gpu;fourgbvram;synthetic"
     RESOURCE_LOCK metal_gpu TIMEOUT 120 FIXTURES_REQUIRED tiny_qwen35moe)
 endif()
 
@@ -319,43 +319,43 @@ if(STRATA_METAL_POLY)
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/q36_host.py ${S}/qwen35/q36_engine.cu ${Q36_GENERATED}
     DEPENDS ${S}/qwen35/q36_engine.cu tools/q36_host.py VERBATIM)
   add_executable(strata-q36 ${Q36_GENERATED}/q36_host.cpp ${S}/qwen35/q36_main.cpp src/q36/bindings.cpp src/q36/cpu_compat.cpp)
-  target_include_directories(strata-q36 PRIVATE ${Q36_GENERATED} src/q36 ${S}/poly ${STRATA_GGML_DIR}/ggml/include)
+  target_include_directories(strata-q36 PRIVATE ${Q36_GENERATED} src/q36 ${S}/fourgbvram ${STRATA_GGML_DIR}/ggml/include)
   target_compile_definitions(strata-q36 PRIVATE STRATA_Q36_CPU_POOL=1 STRATA_Q36_METAL_SOURCE="${Q36_GENERATED}/q36.metal")
-  target_link_libraries(strata-q36 PRIVATE strata_metal_host strata_poly_metal_kernels ggml-cpu ggml-base)
+  target_link_libraries(strata-q36 PRIVATE strata_metal_host strata_fourgbvram_metal_kernels ggml-cpu ggml-base)
 endif()
 if(STRATA_METAL_POLY AND BUILD_TESTING)
-  add_executable(q36_metal_parity poly_tests/q36_parity.cpp ${Q36_GENERATED}/q36_launch.hpp src/q36/bindings.cpp)
-  target_include_directories(q36_metal_parity PRIVATE ${Q36_GENERATED} src/q36 ${S}/poly)
+  add_executable(q36_metal_parity fourgbvram_tests/q36_parity.cpp ${Q36_GENERATED}/q36_launch.hpp src/q36/bindings.cpp)
+  target_include_directories(q36_metal_parity PRIVATE ${Q36_GENERATED} src/q36 ${S}/fourgbvram)
   target_compile_definitions(q36_metal_parity PRIVATE STRATA_Q36_METAL_SOURCE="${Q36_GENERATED}/q36.metal")
-  target_link_libraries(q36_metal_parity PRIVATE strata_poly_metal_kernels ggml-cpu ggml-base)
+  target_link_libraries(q36_metal_parity PRIVATE strata_fourgbvram_metal_kernels ggml-cpu ggml-base)
   add_test(NAME q36_metal_parity COMMAND q36_metal_parity)
   set_tests_properties(q36_metal_parity PROPERTIES LABELS "metal;gpu;parity;q36" RESOURCE_LOCK metal_gpu TIMEOUT 120)
 endif()
 if(STRATA_METAL_POLY AND BUILD_TESTING)
-  add_executable(q36_metal_fixture poly_tests/q36_fixture.cpp)
+  add_executable(q36_metal_fixture fourgbvram_tests/q36_fixture.cpp)
   target_include_directories(q36_metal_fixture PRIVATE ${STRATA_ROOT}/include)
   target_link_libraries(q36_metal_fixture PRIVATE ggml-base)
   add_test(NAME q36_metal_fixture COMMAND q36_metal_fixture ${CMAKE_CURRENT_BINARY_DIR}/tiny-q36.gguf)
   set_tests_properties(q36_metal_fixture PROPERTIES LABELS "metal;synthetic;q36" FIXTURES_SETUP tiny_q36)
 endif()
 if(STRATA_METAL_POLY AND BUILD_TESTING)
-  add_test(NAME q36_metal_protocol COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/poly_tests/q36_protocol_test.py
+  add_test(NAME q36_metal_protocol COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/fourgbvram_tests/q36_protocol_test.py
     $<TARGET_FILE:strata-q36> ${CMAKE_CURRENT_BINARY_DIR}/tiny-q36.gguf)
   set_tests_properties(q36_metal_protocol PROPERTIES LABELS "metal;gpu;synthetic;q36" RESOURCE_LOCK metal_gpu TIMEOUT 180 FIXTURES_REQUIRED tiny_q36)
 endif()
 if(STRATA_METAL_POLY AND BUILD_TESTING)
-  add_test(NAME poly_tiny_glm_draft COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/poly_tests/protocol_test.py
-    $<TARGET_FILE:strata-poly> ${CMAKE_CURRENT_BINARY_DIR}/tiny-glm5-next.gguf --window 4)
-  set_tests_properties(poly_tiny_glm_draft PROPERTIES LABELS "metal;gpu;poly;synthetic" RESOURCE_LOCK metal_gpu TIMEOUT 120 FIXTURES_REQUIRED tiny_glm5-next)
-  add_test(NAME poly_tiny_deepseek_compression COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/poly_tests/protocol_test.py
-    $<TARGET_FILE:strata-poly> ${CMAKE_CURRENT_BINARY_DIR}/tiny-deepseek4.gguf --long-prompt)
-  set_tests_properties(poly_tiny_deepseek_compression PROPERTIES LABELS "metal;gpu;poly;synthetic" RESOURCE_LOCK metal_gpu TIMEOUT 120 FIXTURES_REQUIRED tiny_deepseek4)
+  add_test(NAME fourgbvram_tiny_glm_draft COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/fourgbvram_tests/protocol_test.py
+    $<TARGET_FILE:strata-fourgbvram> ${CMAKE_CURRENT_BINARY_DIR}/tiny-glm5-next.gguf --window 4)
+  set_tests_properties(fourgbvram_tiny_glm_draft PROPERTIES LABELS "metal;gpu;fourgbvram;synthetic" RESOURCE_LOCK metal_gpu TIMEOUT 120 FIXTURES_REQUIRED tiny_glm5-next)
+  add_test(NAME fourgbvram_tiny_deepseek_compression COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/fourgbvram_tests/protocol_test.py
+    $<TARGET_FILE:strata-fourgbvram> ${CMAKE_CURRENT_BINARY_DIR}/tiny-deepseek4.gguf --long-prompt)
+  set_tests_properties(fourgbvram_tiny_deepseek_compression PROPERTIES LABELS "metal;gpu;fourgbvram;synthetic" RESOURCE_LOCK metal_gpu TIMEOUT 120 FIXTURES_REQUIRED tiny_deepseek4)
 endif()
 if(STRATA_METAL_POLY AND BUILD_TESTING)
   foreach(quant q4 q6)
     add_test(NAME q36_metal_fixture_${quant} COMMAND q36_metal_fixture ${CMAKE_CURRENT_BINARY_DIR}/tiny-q36-${quant}.gguf ${quant})
     set_tests_properties(q36_metal_fixture_${quant} PROPERTIES LABELS "metal;synthetic;q36" FIXTURES_SETUP tiny_q36_${quant})
-    add_test(NAME q36_metal_protocol_${quant} COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/poly_tests/q36_protocol_test.py
+    add_test(NAME q36_metal_protocol_${quant} COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/fourgbvram_tests/q36_protocol_test.py
       $<TARGET_FILE:strata-q36> ${CMAKE_CURRENT_BINARY_DIR}/tiny-q36-${quant}.gguf)
     set_tests_properties(q36_metal_protocol_${quant} PROPERTIES LABELS "metal;gpu;synthetic;q36" RESOURCE_LOCK metal_gpu TIMEOUT 180 FIXTURES_REQUIRED tiny_q36_${quant})
   endforeach()
@@ -363,53 +363,53 @@ endif()
 
 if(STRATA_METAL_POLY AND BUILD_TESTING)
   target_compile_definitions(strata_gpu_metal PRIVATE STRATA_METAL_TESTING=1)
-  add_executable(poly_runtime_safety poly_tests/runtime_safety.cpp)
-  target_compile_definitions(poly_runtime_safety PRIVATE STRATA_METAL_TESTING=1)
-  target_link_libraries(poly_runtime_safety PRIVATE strata_gpu_metal)
-  add_test(NAME poly_runtime_failure COMMAND poly_runtime_safety failure)
-  set_tests_properties(poly_runtime_failure PROPERTIES RESOURCE_LOCK metal_gpu TIMEOUT 30 LABELS "metal;gpu;poly")
-  add_test(NAME poly_runtime_safety COMMAND poly_runtime_safety)
-  set_tests_properties(poly_runtime_safety PROPERTIES RESOURCE_LOCK metal_gpu TIMEOUT 60 LABELS "metal;gpu;poly")
+  add_executable(fourgbvram_runtime_safety fourgbvram_tests/runtime_safety.cpp)
+  target_compile_definitions(fourgbvram_runtime_safety PRIVATE STRATA_METAL_TESTING=1)
+  target_link_libraries(fourgbvram_runtime_safety PRIVATE strata_gpu_metal)
+  add_test(NAME fourgbvram_runtime_failure COMMAND fourgbvram_runtime_safety failure)
+  set_tests_properties(fourgbvram_runtime_failure PROPERTIES RESOURCE_LOCK metal_gpu TIMEOUT 30 LABELS "metal;gpu;fourgbvram")
+  add_test(NAME fourgbvram_runtime_safety COMMAND fourgbvram_runtime_safety)
+  set_tests_properties(fourgbvram_runtime_safety PROPERTIES RESOURCE_LOCK metal_gpu TIMEOUT 60 LABELS "metal;gpu;fourgbvram")
 endif()
 
 if(STRATA_METAL_POLY AND BUILD_TESTING)
-  get_target_property(poly_engine_test_sources strata-poly SOURCES)
-  list(REMOVE_ITEM poly_engine_test_sources ${S}/poly/main.cpp)
-  add_library(poly_engine_test_host STATIC ${poly_engine_test_sources})
-  target_include_directories(poly_engine_test_host PUBLIC ${S}/poly ${STRATA_GGML_DIR}/ggml/include ${STRATA_GGML_DIR}/ggml/src)
-  target_link_libraries(poly_engine_test_host PUBLIC strata_poly_metal_kernels ggml-cpu ggml-base)
-  add_executable(poly_memory_growth poly_tests/memory_growth.cpp)
-  target_compile_definitions(poly_memory_growth PRIVATE STRATA_METAL_TESTING=1)
-  target_link_libraries(poly_memory_growth PRIVATE poly_engine_test_host)
-  add_test(NAME poly_memory_growth COMMAND poly_memory_growth)
-  set_tests_properties(poly_memory_growth PROPERTIES RESOURCE_LOCK metal_gpu TIMEOUT 60 LABELS "metal;gpu;poly")
+  get_target_property(fourgbvram_engine_test_sources strata-fourgbvram SOURCES)
+  list(REMOVE_ITEM fourgbvram_engine_test_sources ${S}/fourgbvram/main.cpp)
+  add_library(fourgbvram_engine_test_host STATIC ${fourgbvram_engine_test_sources})
+  target_include_directories(fourgbvram_engine_test_host PUBLIC ${S}/fourgbvram ${STRATA_GGML_DIR}/ggml/include ${STRATA_GGML_DIR}/ggml/src)
+  target_link_libraries(fourgbvram_engine_test_host PUBLIC strata_fourgbvram_metal_kernels ggml-cpu ggml-base)
+  add_executable(fourgbvram_memory_growth fourgbvram_tests/memory_growth.cpp)
+  target_compile_definitions(fourgbvram_memory_growth PRIVATE STRATA_METAL_TESTING=1)
+  target_link_libraries(fourgbvram_memory_growth PRIVATE fourgbvram_engine_test_host)
+  add_test(NAME fourgbvram_memory_growth COMMAND fourgbvram_memory_growth)
+  set_tests_properties(fourgbvram_memory_growth PROPERTIES RESOURCE_LOCK metal_gpu TIMEOUT 60 LABELS "metal;gpu;fourgbvram")
   foreach(arch qwen35moe gemma4 glm5-next deepseek4)
-    add_test(NAME poly_balanced_${arch}_protocol COMMAND ${Python3_EXECUTABLE}
-      ${CMAKE_CURRENT_SOURCE_DIR}/poly_tests/protocol_test.py $<TARGET_FILE:strata-poly>
+    add_test(NAME fourgbvram_balanced_${arch}_protocol COMMAND ${Python3_EXECUTABLE}
+      ${CMAKE_CURRENT_SOURCE_DIR}/fourgbvram_tests/protocol_test.py $<TARGET_FILE:strata-fourgbvram>
       ${CMAKE_CURRENT_BINARY_DIR}/tiny-${arch}.gguf --metal-optimize --metal-memory balanced --no-draft)
-    set_tests_properties(poly_balanced_${arch}_protocol PROPERTIES RESOURCE_LOCK metal_gpu TIMEOUT 120
-      LABELS "metal;gpu;poly;synthetic" FIXTURES_REQUIRED tiny_${arch})
+    set_tests_properties(fourgbvram_balanced_${arch}_protocol PROPERTIES RESOURCE_LOCK metal_gpu TIMEOUT 120
+      LABELS "metal;gpu;fourgbvram;synthetic" FIXTURES_REQUIRED tiny_${arch})
   endforeach()
-  add_test(NAME poly_balanced_qwen_q8_protocol COMMAND ${Python3_EXECUTABLE}
-    ${CMAKE_CURRENT_SOURCE_DIR}/poly_tests/protocol_test.py $<TARGET_FILE:strata-poly>
+  add_test(NAME fourgbvram_balanced_qwen_q8_protocol COMMAND ${Python3_EXECUTABLE}
+    ${CMAKE_CURRENT_SOURCE_DIR}/fourgbvram_tests/protocol_test.py $<TARGET_FILE:strata-fourgbvram>
     ${CMAKE_CURRENT_BINARY_DIR}/tiny-qwen35moe.gguf --metal-optimize --metal-memory balanced --kv q8_0)
-  set_tests_properties(poly_balanced_qwen_q8_protocol PROPERTIES RESOURCE_LOCK metal_gpu TIMEOUT 120
-    LABELS "metal;gpu;poly;synthetic" FIXTURES_REQUIRED tiny_qwen35moe)
+  set_tests_properties(fourgbvram_balanced_qwen_q8_protocol PROPERTIES RESOURCE_LOCK metal_gpu TIMEOUT 120
+    LABELS "metal;gpu;fourgbvram;synthetic" FIXTURES_REQUIRED tiny_qwen35moe)
 endif()
 
 if(STRATA_METAL_POLY AND BUILD_TESTING)
-  add_test(NAME poly_tiny_qwen_fp16_fixture COMMAND poly_tiny_model_fixture
+  add_test(NAME fourgbvram_tiny_qwen_fp16_fixture COMMAND fourgbvram_tiny_model_fixture
     ${CMAKE_CURRENT_BINARY_DIR}/tiny-qwen35moe-fp16.gguf qwen35moe-fp16)
-  set_tests_properties(poly_tiny_qwen_fp16_fixture PROPERTIES LABELS "metal;poly;synthetic"
+  set_tests_properties(fourgbvram_tiny_qwen_fp16_fixture PROPERTIES LABELS "metal;fourgbvram;synthetic"
     FIXTURES_SETUP tiny_qwen_fp16)
-  add_test(NAME poly_metal_defaults COMMAND ${Python3_EXECUTABLE}
-    ${CMAKE_CURRENT_SOURCE_DIR}/poly_tests/defaults_test.py $<TARGET_FILE:strata-poly> ${CMAKE_CURRENT_BINARY_DIR})
-  set_tests_properties(poly_metal_defaults PROPERTIES RESOURCE_LOCK metal_gpu TIMEOUT 180
-    LABELS "metal;gpu;poly;synthetic"
+  add_test(NAME fourgbvram_metal_defaults COMMAND ${Python3_EXECUTABLE}
+    ${CMAKE_CURRENT_SOURCE_DIR}/fourgbvram_tests/defaults_test.py $<TARGET_FILE:strata-fourgbvram> ${CMAKE_CURRENT_BINARY_DIR})
+  set_tests_properties(fourgbvram_metal_defaults PROPERTIES RESOURCE_LOCK metal_gpu TIMEOUT 180
+    LABELS "metal;gpu;fourgbvram;synthetic"
     FIXTURES_REQUIRED "tiny_lfm;tiny_qwen35moe;tiny_gemma4;tiny_glm5-next;tiny_deepseek4;tiny_qwen_fp16")
-  add_test(NAME poly_legacy_qwen_protocol COMMAND ${Python3_EXECUTABLE}
-    ${CMAKE_CURRENT_SOURCE_DIR}/poly_tests/protocol_test.py $<TARGET_FILE:strata-poly>
+  add_test(NAME fourgbvram_legacy_qwen_protocol COMMAND ${Python3_EXECUTABLE}
+    ${CMAKE_CURRENT_SOURCE_DIR}/fourgbvram_tests/protocol_test.py $<TARGET_FILE:strata-fourgbvram>
     ${CMAKE_CURRENT_BINARY_DIR}/tiny-qwen35moe.gguf --no-metal-optimize --metal-memory legacy --kv fp16)
-  set_tests_properties(poly_legacy_qwen_protocol PROPERTIES RESOURCE_LOCK metal_gpu TIMEOUT 120
-    LABELS "metal;gpu;poly;synthetic" FIXTURES_REQUIRED tiny_qwen35moe)
+  set_tests_properties(fourgbvram_legacy_qwen_protocol PROPERTIES RESOURCE_LOCK metal_gpu TIMEOUT 120
+    LABELS "metal;gpu;fourgbvram;synthetic" FIXTURES_REQUIRED tiny_qwen35moe)
 endif()

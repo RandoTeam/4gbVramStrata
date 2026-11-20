@@ -1,5 +1,5 @@
 // Metal buffers have stable GPU addresses but no CUDA driver VMM. Advertise no
-// VMM support so strata-poly uses its existing ordinary-allocation cache path.
+// VMM support so strata-fourgbvram uses its existing ordinary-allocation cache path.
 #pragma once
 #include <cstddef>
 using CUresult=int;

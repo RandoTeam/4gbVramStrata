@@ -1,13 +1,13 @@
 #include "test_utils.hpp"
 #include "strata/kernels/native_mmvq.hpp"
-#include "strata/poly/kernels.hpp"
+#include "strata/fourgbvram/kernels.hpp"
 #include "mmq.hpp"
-#include "../src/poly/quantized.hpp"
+#include "../src/fourgbvram/quantized.hpp"
 #include "ggml.h"
 #include "strata/gpu/metal.hpp"
 #include <cstring>
 namespace k=strata::kernels;
-namespace p=strata::poly;
+namespace p=strata::fourgbvram;
 // The rows' values as Mmq::mul() saw them: q8_1 decoded, or fp16 on the matrix-unit path
 std::vector<float> mmq_rows(Buffer& q,const std::vector<float>& x,int ni,int rows){
     std::vector<float> v(x.size());
@@ -22,7 +22,7 @@ int main(){
     Buffer dx(x),q(p::Mmq::q8_bytes(rows,ni)),y(rows*no*4);k::native_quantize_q8_1(dx.as(),q.ptr,ni,rows,stream);ck(g::stream_synchronize(stream));
     auto qb=q.read<unsigned char>(k::native_q8_1_bytes(ni,rows));std::vector<float> xq(x.size());
     for(size_t i=0;i<x.size();++i){_Float16 d;std::memcpy(&d,qb.data()+(i/32)*36,2);xq[i]=float(d)*reinterpret_cast<int8_t*>(qb.data())[(i/32)*36+4+i%32];}
-    // (optimized, matrix units): plain, the compact dispatch of poly_mul, and mm.metal where matmul2d compiles
+    // (optimized, matrix units): plain, the compact dispatch of fourgbvram_mul, and mm.metal where matmul2d compiles
     for(auto [optimized,units]:{std::pair{false,false},{true,false},{true,true}}) { g::metal::set_optimize(optimized);p::metal_detail::allow_mm_rows(units);
     for(int type:{2,3,6,7,8,10,11,12,13,14,16,17,18,19,20,21,22,23,29,39,42}){
         auto t=ggml_type(type);ggml_quantize_init(t);size_t size=k::native_mmvq_weight_bytes(type,ni,no);
@@ -61,7 +61,7 @@ int main(){
     }
     }
     // Empty first expert and nonzero bounds: the untouched row and columns stay as they were, the global gather and
-    // scatter indices hold, and the plain and compact poly_mul agree to the bit.
+    // scatter indices hold, and the plain and compact fourgbvram_mul agree to the bit.
     for(int type:{12,13,14}) {
         const int ni2=512,no2=7,rows2=5,stride=11;
         auto w=values(2*no2*ni2), x2=values(rows2*ni2);std::vector<float> imp(ni2,1);
@@ -114,7 +114,7 @@ int main(){
             bad+=compare(got,ref,units_used?"70 rows a matrix, matrix units":"70 rows a matrix",1e-4f);
         }
     }
-    // A dense call of 200 rows: on the matrix units the matrix goes to fp16 once (poly_dq) and poly_gemm multiplies;
+    // A dense call of 200 rows: on the matrix units the matrix goes to fp16 once (fourgbvram_dq) and fourgbvram_gemm multiplies;
     // 100 outputs, so the last tile of them is partly past the matrix
     for(int type:{2,3,6,7,8,10,11,12,13,14,16,17,18,19,20,21,22,23,29,39,42}) {
         const int ni4=512,no4=100,rows4=200;

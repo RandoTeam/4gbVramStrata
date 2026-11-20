@@ -1,8 +1,8 @@
 #include "test_utils.hpp"
-#include "strata/poly/kernels.hpp"
+#include "strata/fourgbvram/kernels.hpp"
 #include <algorithm>
 #include <cstring>
-namespace p=strata::poly;
+namespace p=strata::fourgbvram;
 int main(){
     int bad=0;g::Stream s;ck(g::stream_create(&s));
     const int n=73,rows=3;auto gu=values(rows*2*n,3);Buffer input(gu),out(rows*n*4);

@@ -3,7 +3,7 @@ struct QArgs {
     device void* p[24]; ulong stride,xstride,ystride,offset;
     int ni,no,rows,count,every,kind;
 };
-kernel void poly_quantize(constant QArgs& a [[buffer(0)]],uint2 group [[threadgroup_position_in_grid]],
+kernel void fourgbvram_quantize(constant QArgs& a [[buffer(0)]],uint2 group [[threadgroup_position_in_grid]],
                           uint lane [[thread_index_in_threadgroup]],uint2 shape [[threads_per_threadgroup]]) {
     int row=a.p[2]?static_cast<device int*>(a.p[2])[group.y]:int(group.y);
     float v=static_cast<device float*>(a.p[0])[ulong(row)*a.xstride+group.x*32+lane];
@@ -16,7 +16,7 @@ kernel void poly_quantize(constant QArgs& a [[buffer(0)]],uint2 group [[threadgr
 }
 // Mmq::quantize() on the matrix-unit path (mm.metal): the rows in fp16, row i from row ids[i] of x; four values a
 // thread (a row is whole 64-value steps), a threadgroup row of them to each row
-kernel void poly_tohalf(constant QArgs& a [[buffer(0)]],uint2 tg [[threadgroup_position_in_grid]],
+kernel void fourgbvram_tohalf(constant QArgs& a [[buffer(0)]],uint2 tg [[threadgroup_position_in_grid]],
                         uint tid [[thread_index_in_threadgroup]],uint2 shape [[threads_per_threadgroup]]) {
     const uint k=(tg.x*shape.x+tid)*4,row=tg.y;
     if(k>=uint(a.ni)) return;
@@ -26,7 +26,7 @@ kernel void poly_tohalf(constant QArgs& a [[buffer(0)]],uint2 tg [[threadgroup_p
     *reinterpret_cast<device half4*>(static_cast<device half*>(a.p[1])+ulong(row)*a.ni+k)=half4(v);
 }
 template<typename Block,int QK,void Deq(device const Block*,short,thread float4x4&)>
-kernel void poly_mul(constant QArgs& a [[buffer(0)]],uint3 group [[threadgroup_position_in_grid]],
+kernel void fourgbvram_mul(constant QArgs& a [[buffer(0)]],uint3 group [[threadgroup_position_in_grid]],
                      uint lane [[thread_index_in_threadgroup]],uint3 shape [[threads_per_threadgroup]]) {
     uint row=group.y; ulong yrow=row;
     device const uchar* w=static_cast<device uchar*>(a.p[0]);
@@ -84,7 +84,7 @@ kernel void poly_mul(constant QArgs& a [[buffer(0)]],uint3 group [[threadgroup_p
     acc=simd_sum(acc);
     if(!lane) out_y[yrow*a.ystride+group.x]=acc;
 }
-#define MUL(name,QK) template [[host_name("poly_mul_" #name)]] kernel decltype(poly_mul<block_##name,QK,dequantize_##name<float4x4>>) poly_mul<block_##name,QK,dequantize_##name<float4x4>>;
+#define MUL(name,QK) template [[host_name("fourgbvram_mul_" #name)]] kernel decltype(fourgbvram_mul<block_##name,QK,dequantize_##name<float4x4>>) fourgbvram_mul<block_##name,QK,dequantize_##name<float4x4>>;
 MUL(q4_0,32) MUL(q4_1,32) MUL(q5_0,32) MUL(q5_1,32) MUL(q8_0,32) MUL(q2_0,64) MUL(mxfp4,32)
 MUL(q2_K,256) MUL(q3_K,256) MUL(q4_K,256) MUL(q5_K,256) MUL(q6_K,256)
 MUL(iq2_xxs,256) MUL(iq2_xs,256) MUL(iq3_xxs,256) MUL(iq1_s,256) MUL(iq4_nl,32)

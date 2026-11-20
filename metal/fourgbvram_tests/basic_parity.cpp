@@ -1,4 +1,4 @@
-#include "strata/poly/kernels.hpp"
+#include "strata/fourgbvram/kernels.hpp"
 #include "strata/gpu/runtime.hpp"
 #include <cmath>
 #include <cstdio>
@@ -6,7 +6,7 @@
 #include <stdexcept>
 #include <vector>
 namespace g = strata::gpu;
-namespace p = strata::poly;
+namespace p = strata::fourgbvram;
 void ck(g::Error e) { if(e != g::kSuccess) throw std::runtime_error(g::error_string(e)); }
 struct Dev {
     void* ptr;
@@ -58,6 +58,6 @@ int main() {
         for(int i=0;i<n;++i) fails+=!near(y[i],2*std::tanh((.75*x[i]+bias[i])/2));
     }
     ck(g::stream_destroy(stream));
-    std::printf("poly basic CPU-reference mismatches: %d\n",fails);
+    std::printf("fourgbvram basic CPU-reference mismatches: %d\n",fails);
     return fails ? 1 : 0;
 }

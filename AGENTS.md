@@ -2,7 +2,7 @@
 
 **`RandoTeam/4gbVramStrata`**, public, a fork of [Strata](https://github.com/Niko1221/Strata). It runs large
 mixture-of-experts models on a 4 GB laptop. The engine is [PolyStrata](https://github.com/VecSzn/PolyStrata)'s
-`v0.1.45-poly.7`, built for CUDA 13 (`sm_75`–`sm_120`). The plan is `.local/ROADMAP.md` (git-ignored, never published);
+`v0.1.45-poly.10`, built for CUDA 13 (`sm_75`–`sm_120`). The plan is `.local/ROADMAP.md` (git-ignored, never published);
 this file is the contract.
 
 ## The machine, and the two models this fork is about
@@ -14,13 +14,15 @@ keeps the Windows launchers and the prebuilt Windows engine; do not add `.bat` e
 
 | Model | File | Chat, tokens/s | Reads the prompt | What setup writes |
 | --- | ---: | ---: | ---: | --- |
-| Clover-35B-A3B-Preview APEX-I-NANOPLUS | 12.6 GB | **38.1** Windows / **36.1** Linux | 449 Windows / 543 Linux tokens/s | `--tail-skip 6 --no-graphs`, `--kv q8_0` on cards of 6 GB or less |
+| Clover-35B-A3B-Preview APEX-I-NANOPLUS | 12.6 GB | **38.1** Windows / **43.2** Linux | 449 Windows / 546 Linux tokens/s | `--tail-skip 6 --no-graphs`, `--kv q8_0` on cards of 6 GB or less |
 | Flint 40B-A2.5B UD-Q3_K_XL | 17.2 GB | **21.9** Windows | 331 tokens/s | `--prompt-batch 512 --expert-swaps 32 --no-graphs` |
 
 Windows numbers measured 2026-11-03 on the saved prompt `bench/speed/prompt.txt` (about 1,900 tokens, a question at the
-end), 8 runs, quiet machine, engine `a37654f5f940047f…`. The Linux Clover row is the same task on 2026-11-12 with a
-locally compiled engine (`285f20e579b6bc19…`); the full 32K suite is `bench/results/`. The marginal cost of a token is
-32.9 ms (Clover) and 46.2 ms (Flint) — that is what a long answer pays.
+end), 8 runs, quiet machine, engine `a37654f5f940047f…`. The Linux Clover row is the same task on 2026-11-20 with the
+poly.10 engine (`cf0e29415ce7b486…`), 8 runs; the poly.7 binary beside it (`285f20e579b6bc19…`) wrote 44.5 over 11
+runs, so the 36.1 of 2026-11-12 is marked not reproduced beside it in `docs/BENCH-4GB.md`; the full 32K suite is
+`bench/results/`. The marginal cost of a token is 32.9 ms (Clover) and 46.2 ms (Flint) — that is what a long answer
+pays.
 
 **A 32K context is not a 32K prompt.** The headline chat row uses a ~1,900-token prompt with the context set to 32768;
 the depth test is `./bench.sh --long`, which reads ~32,000 tokens and answers 24. Never call the first one a 32K test.

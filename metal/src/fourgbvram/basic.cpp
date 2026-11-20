@@ -1,5 +1,5 @@
-// strata-poly's basic forward-pass operations on the native Metal stream runtime.
-#include "strata/poly/kernels.hpp"
+// strata-fourgbvram's basic forward-pass operations on the native Metal stream runtime.
+#include "strata/fourgbvram/kernels.hpp"
 #include "strata/gpu/metal.hpp"
 #include "quantized.hpp"
 #include <algorithm>
@@ -10,7 +10,7 @@
 #include <type_traits>
 #include <vector>
 
-namespace strata::poly {
+namespace strata::fourgbvram {
 namespace {
 struct BasicArgs {
     const void* p[4]{};
@@ -31,12 +31,12 @@ void launch(const char* name, const Args& input, void* stream, gpu::metal::Grid 
         }
     }
     static const std::string source = [] {
-        std::ifstream f(STRATA_POLY_BASIC_SOURCE);
-        if (!f) throw std::runtime_error("cannot read strata-poly Metal kernels");
+        std::ifstream f(STRATA_FOURGBVRAM_BASIC_SOURCE);
+        if (!f) throw std::runtime_error("cannot read strata-fourgbvram Metal kernels");
         return std::string(std::istreambuf_iterator<char>(f), {});
     }();
     std::string error;
-    auto* pipeline = gpu::metal::pipeline("poly_basic", source.c_str(), name, error);
+    auto* pipeline = gpu::metal::pipeline("fourgbvram_basic", source.c_str(), name, error);
     if (!pipeline) throw std::runtime_error(error);
     if constexpr (std::is_same_v<Args, BasicArgs>) resources = {args.p,4,true};
     auto rc = gpu::metal::dispatch(static_cast<gpu::Stream>(stream), pipeline, &args, sizeof(args), groups,
@@ -45,7 +45,7 @@ void launch(const char* name, const Args& input, void* stream, gpu::metal::Grid 
 }
 void element(const BasicArgs& a, void* stream) {
     if (!a.count) return;
-    launch("poly_elementwise", a, stream, {uint32_t((a.count + 255) / 256), 1, 1}, 256);
+    launch("fourgbvram_elementwise", a, stream, {uint32_t((a.count + 255) / 256), 1, 1}, 256);
 }
 }
 
@@ -58,19 +58,19 @@ void rms_norm(const float* x, const float* w, float* y, int n, int rows, float e
     if (n <= 0 || rows <= 0) return;
     BasicArgs a{{x, w, y, nullptr}};
     a.n = n; a.stride = stride; a.eps = eps;
-    launch("poly_norm", a, stream, {uint32_t(rows), 1, 1}, sum_threads(n));
+    launch("fourgbvram_norm", a, stream, {uint32_t(rows), 1, 1}, sum_threads(n));
 }
 void layer_norm(const float* x, const float* w, const float* b, float* y, int n, int rows, float eps, void* stream) {
     if (n <= 0 || rows <= 0) return;
     BasicArgs a{{x, w, y, b}};
     a.n = n; a.eps = eps; a.kind = 1;
-    launch("poly_norm", a, stream, {uint32_t(rows), 1, 1}, sum_threads(n));
+    launch("fourgbvram_norm", a, stream, {uint32_t(rows), 1, 1}, sum_threads(n));
 }
 static void gemv(const void* w, const float* x, float* y, int ni, int no, int group, int rows, int kind, void* stream) {
     if (ni <= 0 || no <= 0 || rows <= 0 || group <= 0 || no % group) throw std::invalid_argument("invalid Metal GEMV shape");
     BasicArgs a{{w, x, y, nullptr}};
     a.n = ni; a.rows = no; a.stride = group; a.kind = kind;
-    launch("poly_gemv", a, stream, {uint32_t(no), uint32_t(rows), 1}, ni < 128 ? 32 : sum_threads(ni));
+    launch("fourgbvram_gemv", a, stream, {uint32_t(no), uint32_t(rows), 1}, ni < 128 ? 32 : sum_threads(ni));
 }
 void gemv_f32(const float* w, const float* x, float* y, int ni, int no, int group, int rows, void* stream) {
     gemv(w, x, y, ni, no, group, rows, 0, stream);
@@ -104,8 +104,8 @@ void convolution(const float* x, float* state, const float* w, float* out, int c
     if (rows <= 0 || channels <= 0) return;
     ConvArgs a{x,state,w,out,snap,stride,channels,rows,kind,snaps};
     const void* refs[]={x,state,w,out,snap};
-    launch("poly_conv", a, stream, {uint32_t((channels+255)/256),uint32_t(rows),1}, 256,{refs,5,true});
-    launch("poly_conv_state", a, stream, {uint32_t((channels+255)/256),1,1}, 256,{refs,5,true});
+    launch("fourgbvram_conv", a, stream, {uint32_t((channels+255)/256),uint32_t(rows),1}, 256,{refs,5,true});
+    launch("fourgbvram_conv_state", a, stream, {uint32_t((channels+255)/256),1,1}, 256,{refs,5,true});
 }
 }
 void shortconv(const float* x, float* state, const float* w, float* out, int channels, int rows,
@@ -129,7 +129,7 @@ void route_rows(const float* logits, int experts, int used, int rows, int gate, 
     } a{logits,bias,escale,ids,weights,experts,used,rows,gate,in_scale,w_scale,norm};
     static_assert(sizeof(Args) == 72);
     const void* refs[]={logits,bias,escale,ids,weights};
-    launch("poly_route",a,stream,{uint32_t(rows),1,1},32,{refs,5,true});
+    launch("fourgbvram_route",a,stream,{uint32_t(rows),1,1},32,{refs,5,true});
 }
 void* blas_create(void* stream) { return new void*(stream); }
 void blas_destroy(void* blas) { delete static_cast<void**>(blas); }
@@ -180,10 +180,10 @@ void add_scaled(const ScaledRows& rows,int count,int n,void* s) {
     }
     std::vector<const void*> refs;
     for(int i=0;i<count;++i){refs.push_back(a.rows.x[i]);refs.push_back(a.rows.acc[i]);}
-    launch("poly_scaled",a,s,{uint32_t((n+255)/256),1,1},256,{refs.data(),refs.size(),true});
+    launch("fourgbvram_scaled",a,s,{uint32_t((n+255)/256),1,1},256,{refs.data(),refs.size(),true});
 }
 void likeliest(const float* logits,int n,Likeliest* out,void* s) {
     BasicArgs a{{logits,out}}; a.n=n;
-    launch("poly_likeliest",a,s,{1,1,1},uint32_t(std::clamp((n+31)/32*32,32,1024)));
+    launch("fourgbvram_likeliest",a,s,{1,1,1},uint32_t(std::clamp((n+31)/32*32,32,1024)));
 }
-} // namespace strata::poly
+} // namespace strata::fourgbvram

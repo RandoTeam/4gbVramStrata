@@ -1,7 +1,7 @@
-#include "strata/poly/kernels.hpp"
+#include "strata/fourgbvram/kernels.hpp"
 #include "launch.hpp"
 #include <algorithm>
-namespace strata::poly {
+namespace strata::fourgbvram {
 namespace {
 struct Args {
     const void* p[10]{};
@@ -11,14 +11,14 @@ struct Args {
 };
 static_assert(sizeof(Args)==144);
 void run(const char* name,const Args& a,void* stream,gpu::metal::Grid groups,uint32_t threads=32,size_t shared=0) {
-    static const auto source=metal_detail::read_source(STRATA_POLY_ATTENTION_SOURCE);
-    metal_detail::dispatch("poly_attention",source,name,a,stream,groups,threads,{},shared);
+    static const auto source=metal_detail::read_source(STRATA_FOURGBVRAM_ATTENTION_SOURCE);
+    metal_detail::dispatch("fourgbvram_attention",source,name,a,stream,groups,threads,{},shared);
 }
 void store(const float* x,void* cache,void* scales,int n,int64_t pos,const long long* at,int rows,int ring,int kind,void* s) {
     if(n<=0 || rows<=0) return;
     if(kind && n%32) throw std::invalid_argument("Q8 KV rows must be a multiple of 32");
     Args a; a.p[0]=x;a.p[1]=cache;a.p[2]=scales;a.p[3]=at;a.dim=n;a.pos=pos;a.rows=rows;a.ring=ring;a.kind=kind;
-    run("poly_store",a,s,{uint32_t((uint64_t(n)*rows+31)/32),1,1});
+    run("fourgbvram_store",a,s,{uint32_t((uint64_t(n)*rows+31)/32),1,1});
 }
 }
 void head_norm_rope(const float* x,int stride,const float* w,float* y,int dim,int heads,int rot,float theta,
@@ -26,7 +26,7 @@ void head_norm_rope(const float* x,int stride,const float* w,float* y,int dim,in
     if(dim<=0 || dim>1024 || rot<0 || rot>dim || rot%2 || sections<=0) throw std::invalid_argument("Metal head norm/rope shape");
     Args a; a.p[0]=x;a.p[1]=w;a.p[2]=y;a.p[3]=freq;a.p[4]=axes;a.p[5]=at;
     a.dim=dim;a.stride=stride;a.heads=heads;a.rot=rot;a.scale=theta;a.pos=pos;a.rows=rows;a.eps=eps;a.sections=sections;
-    run("poly_rope",a,s,{uint32_t(rows*heads),1,1});
+    run("fourgbvram_rope",a,s,{uint32_t(rows*heads),1,1});
 }
 void store_f16(const float* x,uint16_t* cache,int n,int64_t pos,int rows,void* s) { store(x,cache,nullptr,n,pos,nullptr,rows,0,0,s); }
 void store_f16_at(const float* x,uint16_t* cache,int n,const long long* at,int rows,int ring,void* s) { store(x,cache,nullptr,n,0,at,rows,ring,0,s); }
@@ -49,7 +49,7 @@ void attend(const float* q,const uint16_t* k,const uint16_t* v,int64_t pos,int r
     int64_t keys=at?std::max<int64_t>(room/2,rows):pos+rows;
     if(window>0) keys=std::min<int64_t>(keys,int64_t(window)+rows);
     // A token's keys among up to 32 threadgroups of 4 SIMD groups, about 16 keys a group, when there are 64 or
-    // more: a SIMD group walks keys slowly (poly_attention), and a head and token was one threadgroup on a GPU of
+    // more: a SIMD group walks keys slowly (fourgbvram_attention), and a head and token was one threadgroup on a GPU of
     // 80 cores.  The runs meet in a scratch of its own (never freed: recorded launches keep its address).
     static void* scratch=nullptr;
     static bool tried=false;
@@ -67,9 +67,9 @@ void attend(const float* q,const uint16_t* k,const uint16_t* v,int64_t pos,int r
     else while(rows<32 && groups<16 && keys>=int64_t(groups)*256 && size_t(groups)*2*(dim+2)*4<=16640) groups*=2;
     const size_t shared=(size_t(groups)*(dim+2)*4+15)/16*16;
     if(splits>1) { a.stride=splits;a.p[9]=scratch; }
-    run(dim<=256?"poly_attention_256":"poly_attention",a,s,{uint32_t(heads),uint32_t(rows),uint32_t(splits)},
+    run(dim<=256?"fourgbvram_attention_256":"fourgbvram_attention",a,s,{uint32_t(heads),uint32_t(rows),uint32_t(splits)},
         uint32_t(32*groups),shared);
-    if(splits>1) run("poly_attention_join",a,s,{uint32_t(heads),uint32_t(rows),1});
+    if(splits>1) run("fourgbvram_attention_join",a,s,{uint32_t(heads),uint32_t(rows),1});
 }
 size_t attend_split_floats(int,int,int,int) { return 0; } // online softmax has no score workspace
 // flash.metal on the matrix units (Metal 4's matmul2d) with --metal-optimize, for heads of 64, 128 and 256 values;
@@ -77,10 +77,10 @@ size_t attend_split_floats(int,int,int,int) { return 0; } // online softmax has 
 void attend_batch(void*,const float* q,const uint16_t* k,const uint16_t* v,int64_t pos,int rows,float* score,
                   size_t score_n,float*,float* out,int dim,int heads,int kv,float scale,void* s,int window,int ring,
                   bool whole,Kvq8 kq,Kvq8 vq,uint16_t*,uint16_t*,size_t,const float* sinks) {
-    static const std::string source=metal_detail::read_source(STRATA_POLY_FLASH_SOURCE);
+    static const std::string source=metal_detail::read_source(STRATA_FOURGBVRAM_FLASH_SOURCE);
     static const bool ready=[] {
         std::string error;
-        return gpu::metal::pipeline("poly_flash",source.c_str(),"poly_flash_64",error)!=nullptr;
+        return gpu::metal::pipeline("fourgbvram_flash",source.c_str(),"fourgbvram_flash_64",error)!=nullptr;
     }();
     const bool flash=(dim==64 || dim==128 || dim==256) && !sinks && kv>0 && heads%kv==0 && gpu::metal::optimize() &&
                      ready;
@@ -91,8 +91,8 @@ void attend_batch(void*,const float* q,const uint16_t* k,const uint16_t* v,int64
     Args a;a.p[0]=q;a.p[1]=k;a.p[2]=v;a.p[3]=out;
     a.p[5]=kq.codes;a.p[6]=kq.scales;a.p[7]=vq.codes;a.p[8]=vq.scales;
     a.dim=dim;a.heads=heads;a.kv=kv;a.pos=pos;a.rows=rows;a.scale=scale;a.window=window;a.ring=ring;a.whole=whole;
-    const std::string name="poly_flash_"+std::to_string(dim);
-    metal_detail::dispatch("poly_flash",source,name.c_str(),a,s,{uint32_t(heads),uint32_t((rows+15)/16),1},
+    const std::string name="fourgbvram_flash_"+std::to_string(dim);
+    metal_detail::dispatch("fourgbvram_flash",source,name.c_str(),a,s,{uint32_t(heads),uint32_t((rows+15)/16),1},
                            uint32_t(32*(dim/64)));
 }
 }

@@ -35,8 +35,14 @@ runs on a quiet machine. Median, with the range:
 | Model | File | Reads the prompt | Answers | Experts in VRAM |
 | --- | ---: | ---: | ---: | ---: |
 | Clover-35B-A3B-Preview APEX-I-NANOPLUS, Windows 11 | 11.7 GB | 449 tokens/s | **38.1 tokens/s** (32.6-39.1) | 529 of 10,240 |
-| Clover-35B-A3B-Preview APEX-I-NANOPLUS, Ubuntu 26.04 | 12.6 GB | **543 tokens/s** | **36.1 tokens/s** (34.2-44.3) | 784 of 10,240 |
+| Clover-35B-A3B-Preview APEX-I-NANOPLUS, Ubuntu 26.04, engine poly.10 | 12.6 GB | **546 tokens/s** | **43.2 tokens/s** (38.9-45.3) | 791 to 895 of 10,240 |
+| Clover-35B-A3B-Preview APEX-I-NANOPLUS, Ubuntu 26.04, engine poly.7 | 12.6 GB | **543 tokens/s** | *36.1 tokens/s* (34.2-44.3) — **not reproduced: the same binary writes 44.5 today** | 804 of 10,240 |
 | Flint 40B-A2.5B UD-Q3_K_XL, Windows 11 | 17.2 GB | 331 tokens/s | **21.9 tokens/s** (20.5-22.4) | 518 of 12,032 |
+
+The two Clover Linux rows were measured one after the other on 2026-11-20, the old binary beside the new one: the
+engine update to the donor's poly.10 costs nothing measurable here (44.5 against 43.2 tokens/s, inside the range, and
+32K prefill 668.0 against 668.5 tokens/s) and the 36.1 of 2026-11-12 was the machine, not the engine
+([the pairs](docs/BENCH-4GB.md#poly7--poly10-2026-11-20-the-engine-updated-the-numbers-did-not-move)).
 
 This table is a ~1,900-token prompt with a **32K context setting**, not a 32K-deep prompt. The depth test is
 `./bench.sh --long`: it reads about 32,000 tokens at 4K, 16K and 32K and answers 24 tokens at each depth

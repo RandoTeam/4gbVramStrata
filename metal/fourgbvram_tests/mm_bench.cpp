@@ -1,11 +1,11 @@
-// metal/poly_tests/mm_bench.cpp - Mmq::mul's time on the shapes of a prompt batch of LFM2.5-24B-A2B (64 experts of
+// metal/fourgbvram_tests/mm_bench.cpp - Mmq::mul's time on the shapes of a prompt batch of LFM2.5-24B-A2B (64 experts of
 // 2,048 x 1,536, 4 a token): the dense projection, the experts' gate|up and down, for each of mm.metal's tiles and
-// for poly_mul.  The dense one takes poly_dq and poly_gemm whatever the tile.  Not a test: run by hand.
-//   poly_mm_bench [reps [tokens, default 1,024]]
+// for fourgbvram_mul.  The dense one takes fourgbvram_dq and fourgbvram_gemm whatever the tile.  Not a test: run by hand.
+//   fourgbvram_mm_bench [reps [tokens, default 1,024]]
 #include "test_utils.hpp"
 #include "strata/kernels/native_mmvq.hpp"
 #include "mmq.hpp"
-#include "../src/poly/quantized.hpp"
+#include "../src/fourgbvram/quantized.hpp"
 #include "ggml.h"
 #include "strata/gpu/metal.hpp"
 #include <algorithm>
@@ -13,7 +13,7 @@
 #include <random>
 #include <vector>
 namespace k=strata::kernels;
-namespace p=strata::poly;
+namespace p=strata::fourgbvram;
 int main(int argc,char** argv){
     const int reps=argc>1?std::atoi(argv[1]):20;
     g::Stream s;ck(g::stream_create(&s));g::metal::set_optimize(true);
@@ -49,7 +49,7 @@ int main(int argc,char** argv){
             best[v]=std::min(best[v],std::chrono::duration<double,std::micro>(std::chrono::steady_clock::now()-t0).count()/reps);
         }
         for(size_t v=0;v<=tiles.size();++v)
-            std::printf("%-40s %-14s %9.1f us  %6.2f TFLOP/s\n",sh.name,v==tiles.size()?"poly_mul":tiles[v]?tiles[v]:"default",
+            std::printf("%-40s %-14s %9.1f us  %6.2f TFLOP/s\n",sh.name,v==tiles.size()?"fourgbvram_mul":tiles[v]?tiles[v]:"default",
                         best[v],flop/best[v]*1e-6);
     }
     p::metal_detail::allow_mm_rows(true);p::metal_detail::set_mm_tile(nullptr);

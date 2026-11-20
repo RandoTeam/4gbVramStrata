@@ -1,4 +1,4 @@
-// metal/src/poly/unported.cpp - the entry points of the shared strata-poly host code that have no Metal kernel yet.
+// metal/src/fourgbvram/unported.cpp - the entry points of the shared strata-fourgbvram host code that have no Metal kernel yet.
 // None of them is on a Mac family's default path: llama.cpp's flash attention (which falls back to attend() and
 // attend_batch() by its own contract), Gemma 4's opt-in int8 attention caches, Clover's block guesses and coreset
 // routing, and the half-sum guard of Flint's MMQ.  A call that would need a kernel says what is missing instead of
@@ -6,12 +6,12 @@
 #include "fattn.hpp"
 #include "mmq.hpp"
 #include "strata/kernels/native_mmvq.hpp"
-#include "strata/poly/kernels.hpp"
+#include "strata/fourgbvram/kernels.hpp"
 
 #include <stdexcept>
 #include <string>
 
-namespace strata::poly {
+namespace strata::fourgbvram {
 namespace {
 
 [[noreturn]] void unported(const char* what) { throw std::invalid_argument(std::string("Metal has no ") + what); }
@@ -70,7 +70,7 @@ void scale_rows(float*, int64_t, int, int, const int32_t*, const float*, bool, v
     unported("half-sum guard (Flint)");
 }
 
-}  // namespace strata::poly
+}  // namespace strata::fourgbvram
 
 namespace strata::kernels {
 

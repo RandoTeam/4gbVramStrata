@@ -5,7 +5,8 @@ is decided by how many bytes of a model each token has to pull through them. Thi
 models measured here, from their own GGUF metadata and from runs on the laptop.
 
 The machine: RTX 3050 Laptop (4 GB, `sm_86`), Ryzen 5 5500U, 32 GB DDR4-3200, Windows 11. Engine: `strata-fourgbvram`
-at [PolyStrata](https://github.com/VecSzn/PolyStrata) v0.1.45-poly.7, CUDA 13.
+at [PolyStrata](https://github.com/VecSzn/PolyStrata) v0.1.45-poly.10, CUDA 13 (the byte accounting below
+was taken on poly.7; the two engines hold the same experts on this card, docs/BENCH-4GB.md).
 
 ## The tiers
 

@@ -1,7 +1,7 @@
 #include "test_utils.hpp"
-#include "strata/poly/kernels.hpp"
+#include "strata/fourgbvram/kernels.hpp"
 #include <algorithm>
-namespace p=strata::poly;
+namespace p=strata::fourgbvram;
 int main(){
     int bad=0; g::Stream s;ck(g::stream_create(&s));
     // One attend() call against a CPU reference over the cache as store wrote it: `total` rows, the last `rows` of

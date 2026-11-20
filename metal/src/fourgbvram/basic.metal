@@ -19,7 +19,7 @@ inline float block_sum(float v, threadgroup float* partial, uint tid, uint nt) {
     return sum;
 }
 
-kernel void poly_norm(constant BasicArgs& a [[buffer(0)]], uint row [[threadgroup_position_in_grid]],
+kernel void fourgbvram_norm(constant BasicArgs& a [[buffer(0)]], uint row [[threadgroup_position_in_grid]],
                       uint tid [[thread_index_in_threadgroup]], uint nt [[threads_per_threadgroup]]) {
     threadgroup float partial[32];
     device const float* x = a.p[0] + ulong(row) * a.n;
@@ -37,7 +37,7 @@ kernel void poly_norm(constant BasicArgs& a [[buffer(0)]], uint row [[threadgrou
         y[i] = (x[i] - mean) * inv * (a.p[1] ? a.p[1][i] : 1.0f) + (a.p[3] ? a.p[3][i] : 0.0f);
 }
 
-kernel void poly_gemv(constant BasicArgs& a [[buffer(0)]], uint2 group [[threadgroup_position_in_grid]],
+kernel void fourgbvram_gemv(constant BasicArgs& a [[buffer(0)]], uint2 group [[threadgroup_position_in_grid]],
                       uint tid [[thread_index_in_threadgroup]], uint2 shape [[threads_per_threadgroup]]) {
     const uint nt = shape.x;
     threadgroup float partial[32];
@@ -53,7 +53,7 @@ kernel void poly_gemv(constant BasicArgs& a [[buffer(0)]], uint2 group [[threadg
     if (tid == 0) a.p[2][token * a.rows + o] = sum;
 }
 
-kernel void poly_elementwise(constant BasicArgs& a [[buffer(0)]], uint i [[thread_position_in_grid]]) {
+kernel void fourgbvram_elementwise(constant BasicArgs& a [[buffer(0)]], uint i [[thread_position_in_grid]]) {
     if (i >= a.count) return;
     if (a.kind == 0) a.p[1][i] = as_type<float>(uint(reinterpret_cast<device ushort*>(a.p[0])[i]) << 16);
     else if (a.kind == 1) a.p[1][i] = a.p[0][i] * a.scale;
@@ -95,8 +95,8 @@ inline float conv_in(constant ConvArgs& a, uint c, int r, int past) {
     return a.kind ? x[c] : x[c] * x[2 * a.channels + c];
 }
 // A thread to each channel of each row: a row reads the inputs of the `past` rows before it, so the rows need not
-// go in order.  poly_conv_state then moves the state on (here a row's thread could still read the old one).
-kernel void poly_conv(constant ConvArgs& a [[buffer(0)]], uint2 tg [[threadgroup_position_in_grid]],
+// go in order.  fourgbvram_conv_state then moves the state on (here a row's thread could still read the old one).
+kernel void fourgbvram_conv(constant ConvArgs& a [[buffer(0)]], uint2 tg [[threadgroup_position_in_grid]],
                       uint tid [[thread_index_in_threadgroup]], uint2 shape [[threads_per_threadgroup]]) {
     const uint c = tg.x * shape.x + tid;
     const int row = int(tg.y);
@@ -121,7 +121,7 @@ kernel void poly_conv(constant ConvArgs& a [[buffer(0)]], uint2 tg [[threadgroup
 }
 // The state after the call's last row: the last `past` inputs, the old state's where the call has fewer rows (read
 // before they are written over: state[i] takes old state[rows + i])
-kernel void poly_conv_state(constant ConvArgs& a [[buffer(0)]], uint c [[thread_position_in_grid]]) {
+kernel void fourgbvram_conv_state(constant ConvArgs& a [[buffer(0)]], uint c [[thread_position_in_grid]]) {
     if (c >= uint(a.channels)) return;
     const int past = a.kind ? 3 : 2;
     for (int i = 0; i < past; ++i) a.state[ulong(c) * past + i] = conv_in(a, c, a.rows - past + i, past);
@@ -137,7 +137,7 @@ struct RouteArgs {
     float in_scale, w_scale;
     int norm;
 };
-kernel void poly_route(constant RouteArgs& a [[buffer(0)]], uint row [[threadgroup_position_in_grid]],
+kernel void fourgbvram_route(constant RouteArgs& a [[buffer(0)]], uint row [[threadgroup_position_in_grid]],
                        uint lane [[thread_index_in_simdgroup]]) {
     float p[16], pick[16], mx=-INFINITY;
     const int per = a.experts <= 64 ? 2 : a.experts <= 128 ? 4 : a.experts <= 256 ? 8 : 16;
@@ -190,13 +190,13 @@ kernel void poly_route(constant RouteArgs& a [[buffer(0)]], uint row [[threadgro
 }
 
 struct ScaledArgs { device const float* x[32]; device float* acc[32]; float w[32]; int count,n; };
-kernel void poly_scaled(constant ScaledArgs& a [[buffer(0)]],uint i [[thread_position_in_grid]]) {
+kernel void fourgbvram_scaled(constant ScaledArgs& a [[buffer(0)]],uint i [[thread_position_in_grid]]) {
     if(i>=uint(a.n)) return;
     for(int k=0;k<a.count;++k) a.acc[k][i]+=a.x[k][i]*a.w[k];
 }
 // The likeliest token and its probability: one threadgroup (up to 1,024 threads), its SIMD groups' results joined
 // through threadgroup memory; a vocabulary of 248K was 1.8 ms on 32 threads
-kernel void poly_likeliest(constant BasicArgs& a [[buffer(0)]],uint tid [[thread_index_in_threadgroup]],
+kernel void fourgbvram_likeliest(constant BasicArgs& a [[buffer(0)]],uint tid [[thread_index_in_threadgroup]],
                            uint nt [[threads_per_threadgroup]],uint sg [[simdgroup_index_in_threadgroup]],
                            uint lane [[thread_index_in_simdgroup]]) {
     threadgroup float tm[32],ts[32];

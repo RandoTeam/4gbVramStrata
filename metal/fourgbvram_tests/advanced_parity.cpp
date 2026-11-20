@@ -1,8 +1,8 @@
 #include "test_utils.hpp"
-#include "strata/poly/kernels.hpp"
+#include "strata/fourgbvram/kernels.hpp"
 #include <algorithm>
 #include <numeric>
-using namespace strata::poly;
+using namespace strata::fourgbvram;
 float sigmoid(float x){return 1/(1+std::exp(-x));}
 int hyper(){
     constexpr int n=96,rows=3;auto r=values(rows*4*n),fn=values(24*4*n,.02f),scale=std::vector<float>{.7f,.8f,.9f},base=values(24,.3f);

@@ -270,7 +270,7 @@ lines above.
 
 | Model | Result |
 |---|---|
-| **Clover-35B-A3B-Preview APEX-I-NANOPLUS** | **Works** on this PC. 32K: 784 experts in VRAM, chat 36.1 tok/s (34.2–44.3), prefill 543 tok/s. 64K: 674 experts, 57,897-token prompt read at 634 tok/s, decode 8.2 tok/s at depth. |
+| **Clover-35B-A3B-Preview APEX-I-NANOPLUS** | **Works** on this PC. 32K: 791 to 895 experts in VRAM, chat 43.2 tok/s (38.9–45.3) on engine poly.10 and 44.5 (41.6–46.2) on poly.7 measured beside it, prefill 543–546 tok/s, 32K prompt read 673 tok/s; 22 of 22 on the quality gate. The 36.1 tok/s of 2026-11-12 did not reproduce. 64K: 674 experts, 57,897-token prompt read at 634 tok/s, decode 8.2 tok/s at depth. |
 | **Qwen3.8-Flash-Next Q2_0** | **Native Linux: does not start** on 4 GB. Low-RAM mode, 31 GB RAM. At 32K/16K/8K it fails at the native output head or prompt scratch; MTP needs 675 MiB for its 512 experts and cannot fit. **Windows 10: the owner ran Q2_0 on this same laptop** via WDDM sysmem fallback. Linux files were removed after the test. |
 | **Gemma 4 26B-A4B QAT-UD-Q4_K_XL** | **Windows 10: the owner ran it on this laptop.** Native Linux: 4.1 GB VRAM before any expert at 32K, and 64K is worse; not downloaded or tested here. |
 | **Qwen3.8-Flash-Next Coder IQ1_M** | **Windows 10: the owner ran it on this laptop.** Native Linux: not yet reproduced; the main-engine output head is the expected blocker. |

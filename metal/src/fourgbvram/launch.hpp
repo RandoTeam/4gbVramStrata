@@ -4,7 +4,7 @@
 #include <iterator>
 #include <stdexcept>
 #include <string>
-namespace strata::poly::metal_detail {
+namespace strata::fourgbvram::metal_detail {
 inline std::string read_source(const char* path) {
     std::ifstream f(path);
     if (!f) throw std::runtime_error(std::string("cannot read Metal kernel: ") + path);

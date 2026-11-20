@@ -2,7 +2,7 @@
 using namespace metal;
 struct Args { device float* p[10]; ulong stride; int dim,heads,keys,rows; float eps; uint snaps; };
 inline float warp_sum(float v) { for(uint k=16;k;k>>=1) v+=simd_shuffle_xor(v,k);return v; }
-kernel void poly_gdn_norm(constant Args& a [[buffer(0)]],uint head [[threadgroup_position_in_grid]],uint lane [[thread_index_in_threadgroup]]) {
+kernel void fourgbvram_gdn_norm(constant Args& a [[buffer(0)]],uint head [[threadgroup_position_in_grid]],uint lane [[thread_index_in_threadgroup]]) {
     ulong row_n=ulong(2*a.keys+a.heads)*a.dim;
     device float* q=a.p[0]+(head/a.keys)*row_n+(head%a.keys)*a.dim;
     device float* k=q+a.keys*a.dim;
@@ -11,13 +11,13 @@ kernel void poly_gdn_norm(constant Args& a [[buffer(0)]],uint head [[threadgroup
     float qi=rsqrt(warp_sum(qs)+a.eps)*rsqrt(float(a.dim)),ki=rsqrt(warp_sum(ks)+a.eps);
     for(int i=lane;i<a.dim;i+=32) { q[i]*=qi;k[i]*=ki; }
 }
-kernel void poly_gdn_gates(constant Args& a [[buffer(0)]],uint i [[thread_position_in_grid]]) {
+kernel void fourgbvram_gdn_gates(constant Args& a [[buffer(0)]],uint i [[thread_position_in_grid]]) {
     if(i>=uint(a.rows*a.heads)) return;
     float g=a.p[1][i]+a.p[3][i%a.heads];
     a.p[1][i]=exp((g>20?g:log(1.0f+exp(g)))*a.p[4][i%a.heads]);
     a.p[2][i]=1.0f/(1.0f+exp(-a.p[2][i]));
 }
-kernel void poly_gdn_state(constant Args& a [[buffer(0)]],uint col [[threadgroup_position_in_grid]],uint lane [[thread_index_in_threadgroup]]) {
+kernel void fourgbvram_gdn_state(constant Args& a [[buffer(0)]],uint col [[threadgroup_position_in_grid]],uint lane [[thread_index_in_threadgroup]]) {
     int h=col/a.dim,j=col%a.dim,hk=h%a.keys;
     ulong keys=ulong(a.keys)*a.dim,inner=ulong(a.heads)*a.dim,mine=ulong(col)*a.dim;
     float state[8];
@@ -38,14 +38,14 @@ kernel void poly_gdn_state(constant Args& a [[buffer(0)]],uint col [[threadgroup
     }
     for(int i=lane;i<a.dim;i+=32) a.p[5][mine+i]=state[i/32];
 }
-// poly_gdn_state for a prompt batch, heads of D values (after metal/kernels/gdn_prompt.metal's gdn_scan_r): a lane to
+// fourgbvram_gdn_state for a prompt batch, heads of D values (after metal/kernels/gdn_prompt.metal's gdn_scan_r): a lane to
 // each column of a head's state and IB SIMD groups to its rows, D / IB of them in each lane's registers.  A row's
 // three dots (S k, S q of the old state, and k q) are summed over the groups through threadgroup memory, double
 // buffered so that a row takes one barrier; the output is decay (S q) + delta (k q), which is S_new q.  The rows' q, k
 // (the head's key head's), v, decay and beta are staged TB rows at a time instead of read again by every column.
 // grid: heads * D / 32 threadgroups of IB * 32 (a threadgroup's 32 columns lie in one head).
 template<int D,int IB,int TB>
-kernel void poly_gdn_scan(constant Args& a [[buffer(0)]],uint tg [[threadgroup_position_in_grid]],
+kernel void fourgbvram_gdn_scan(constant Args& a [[buffer(0)]],uint tg [[threadgroup_position_in_grid]],
                           uint tid [[thread_index_in_threadgroup]],uint sg [[simdgroup_index_in_threadgroup]],
                           uint lane [[thread_index_in_simdgroup]]) {
     constexpr int R=D/IB,R4=R/4;
@@ -106,9 +106,9 @@ kernel void poly_gdn_scan(constant Args& a [[buffer(0)]],uint tg [[threadgroup_p
 #pragma clang loop unroll(full)
     for(int i=0;i<R;++i) a.p[5][mine+i]=st[i];
 }
-template [[host_name("poly_gdn_scan_128")]] kernel decltype(poly_gdn_scan<128,4,16>) poly_gdn_scan<128,4,16>;
-template [[host_name("poly_gdn_scan_64")]] kernel decltype(poly_gdn_scan<64,2,16>) poly_gdn_scan<64,2,16>;
-kernel void poly_gdn_out(constant Args& a [[buffer(0)]],uint head [[threadgroup_position_in_grid]],uint lane [[thread_index_in_threadgroup]]) {
+template [[host_name("fourgbvram_gdn_scan_128")]] kernel decltype(fourgbvram_gdn_scan<128,4,16>) fourgbvram_gdn_scan<128,4,16>;
+template [[host_name("fourgbvram_gdn_scan_64")]] kernel decltype(fourgbvram_gdn_scan<64,2,16>) fourgbvram_gdn_scan<64,2,16>;
+kernel void fourgbvram_gdn_out(constant Args& a [[buffer(0)]],uint head [[threadgroup_position_in_grid]],uint lane [[thread_index_in_threadgroup]]) {
     ulong base=ulong(head)*a.dim;float ss=0;
     for(int i=lane;i<a.dim;i+=32) {float v=a.p[8][base+i];ss+=v*v;}
     float inv=rsqrt(warp_sum(ss)/a.dim+a.eps);

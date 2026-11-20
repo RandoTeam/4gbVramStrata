@@ -10,7 +10,8 @@ is about making **Clover** better, not about another download.
   launch data). It is not a weak tool user; the banking score is the weak spot.
 - **Coding/reasoning:** SWE-bench Verified 73.6, Terminal-Bench 2.1 51.7, GPQA 83.8, MMLU-Pro 84.8,
   ZebraLogic 95.8.
-- **On this laptop:** 32K APEX works at 36.1 tok/s chat / 543 tok/s prefill; 64K starts with 674
+- **On this laptop:** 32K APEX works at 43.2 tok/s chat / 546 tok/s prefill on engine poly.10 (44.5 / 543 on poly.7,
+  measured beside it; the earlier 36.1 did not reproduce); 64K starts with 674
   experts, 634 tok/s prefill on a 57,897-token prompt, 8.2 tok/s decode at depth.
 - **Shape:** 40-layer hybrid GDN/full-attention diffusion MoE, 256 experts top-8, 35B/3B, 128K
   context, text only. It has no MTP/draft block.

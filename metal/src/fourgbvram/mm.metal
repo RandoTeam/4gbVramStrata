@@ -16,7 +16,7 @@ struct MmArgs {
 };
 
 template<typename Block,int QK,void Deq(device const Block*,short,thread half4x4&),int TM,int TN,int TK,int SG>
-kernel void poly_mm(constant MmArgs& a [[buffer(0)]],uint3 tg [[threadgroup_position_in_grid]],
+kernel void fourgbvram_mm(constant MmArgs& a [[buffer(0)]],uint3 tg [[threadgroup_position_in_grid]],
                     ushort tid [[thread_index_in_threadgroup]]) {
     constexpr int NTH=SG*32;
     threadgroup half wb[TN*TK];
@@ -58,11 +58,11 @@ kernel void poly_mm(constant MmArgs& a [[buffer(0)]],uint3 tg [[threadgroup_posi
         }
 }
 
-// A dense matrix's product decodes it once more for each TM rows in poly_mm; instead (dense_mm.metal's dq_f16 and
-// gemm_f16): poly_dq writes the matrix in fp16 (p[0] -> p[1], a thread to each 16 values), and poly_gemm multiplies
+// A dense matrix's product decodes it once more for each TM rows in fourgbvram_mm; instead (dense_mm.metal's dq_f16 and
+// gemm_f16): fourgbvram_dq writes the matrix in fp16 (p[0] -> p[1], a thread to each 16 values), and fourgbvram_gemm multiplies
 // rows by it with the whole K in one matmul2d, both operands where they lie.
 template<typename Block,int QK,void Deq(device const Block*,short,thread half4x4&)>
-kernel void poly_dq(constant MmArgs& a [[buffer(0)]],uint i [[thread_position_in_grid]]) {
+kernel void fourgbvram_dq(constant MmArgs& a [[buffer(0)]],uint i [[thread_position_in_grid]]) {
     const uint per=uint(a.ni)/16,r=i/per,k=(i%per)*16;
     if(r>=uint(a.no)) return;
     half4x4 v;
@@ -73,7 +73,7 @@ kernel void poly_dq(constant MmArgs& a [[buffer(0)]],uint i [[thread_position_in
 }
 struct GemmArgs { device void* p[3]; int m,n,k,pad; };   // A (m rows), B (n rows), Y (m rows of n floats); k values
 template<typename T,int TM,int TN,int SG>
-kernel void poly_gemm(constant GemmArgs& a [[buffer(0)]],uint3 tg [[threadgroup_position_in_grid]]) {
+kernel void fourgbvram_gemm(constant GemmArgs& a [[buffer(0)]],uint3 tg [[threadgroup_position_in_grid]]) {
     tensor<device T,dextents<int32_t,2>,tensor_inline> tA(static_cast<device T*>(a.p[0]),dextents<int32_t,2>(a.k,a.m));
     tensor<device T,dextents<int32_t,2>,tensor_inline> tB(static_cast<device T*>(a.p[1]),dextents<int32_t,2>(a.k,a.n));
     tensor<device float,dextents<int32_t,2>,tensor_inline> tY(static_cast<device float*>(a.p[2]),
@@ -85,13 +85,13 @@ kernel void poly_gemm(constant GemmArgs& a [[buffer(0)]],uint3 tg [[threadgroup_
     auto mY=tY.slice(int(tg.x)*TN,int(tg.y)*TM);   // rows and outputs past m and n are not written
     op.run(mA,mB,mY);
 }
-#define GEMM(T,TM,TN,SG) template [[host_name("poly_gemm_" #T "_" #TM "_" #TN "_" #SG)]] kernel decltype(poly_gemm<T,TM,TN,SG>) poly_gemm<T,TM,TN,SG>;
+#define GEMM(T,TM,TN,SG) template [[host_name("fourgbvram_gemm_" #T "_" #TM "_" #TN "_" #SG)]] kernel decltype(fourgbvram_gemm<T,TM,TN,SG>) fourgbvram_gemm<T,TM,TN,SG>;
 GEMM(half,64,64,4) GEMM(half,64,32,4) GEMM(float,64,64,4) GEMM(float,64,32,4)
 
-// poly_mm_<type>_<TM>_<TN>_<TK>_<SG>: TM rows of a matrix, TN outputs, TK values a step, SG SIMD groups.  Every type
-// has the default tile; the others are for poly_mm_bench, on the expert types of LFM2.5 and Qwen3.6.
-#define MM_(name,QK,TM,TN,TK,SG) template [[host_name("poly_mm_" #name "_" #TM "_" #TN "_" #TK "_" #SG)]] kernel decltype(poly_mm<block_##name,QK,dequantize_##name<half4x4>,TM,TN,TK,SG>) poly_mm<block_##name,QK,dequantize_##name<half4x4>,TM,TN,TK,SG>;
-#define MM(name,QK) MM_(name,QK,64,64,64,4) template [[host_name("poly_dq_" #name)]] kernel decltype(poly_dq<block_##name,QK,dequantize_##name<half4x4>>) poly_dq<block_##name,QK,dequantize_##name<half4x4>>;
+// fourgbvram_mm_<type>_<TM>_<TN>_<TK>_<SG>: TM rows of a matrix, TN outputs, TK values a step, SG SIMD groups.  Every type
+// has the default tile; the others are for fourgbvram_mm_bench, on the expert types of LFM2.5 and Qwen3.6.
+#define MM_(name,QK,TM,TN,TK,SG) template [[host_name("fourgbvram_mm_" #name "_" #TM "_" #TN "_" #TK "_" #SG)]] kernel decltype(fourgbvram_mm<block_##name,QK,dequantize_##name<half4x4>,TM,TN,TK,SG>) fourgbvram_mm<block_##name,QK,dequantize_##name<half4x4>,TM,TN,TK,SG>;
+#define MM(name,QK) MM_(name,QK,64,64,64,4) template [[host_name("fourgbvram_dq_" #name)]] kernel decltype(fourgbvram_dq<block_##name,QK,dequantize_##name<half4x4>>) fourgbvram_dq<block_##name,QK,dequantize_##name<half4x4>>;
 #define MM_TRY(name,QK) MM_(name,QK,32,64,64,4) MM_(name,QK,64,64,32,4) MM_(name,QK,128,64,64,4)
 MM(q4_0,32) MM(q4_1,32) MM(q5_0,32) MM(q5_1,32) MM(q8_0,32) MM(q2_0,64) MM(mxfp4,32)
 MM(q2_K,256) MM(q3_K,256) MM(q4_K,256) MM(q5_K,256) MM(q6_K,256)

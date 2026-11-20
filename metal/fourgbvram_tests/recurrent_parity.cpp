@@ -1,9 +1,9 @@
 #include "test_utils.hpp"
-#include "strata/poly/kernels.hpp"
-namespace p=strata::poly;
+#include "strata/fourgbvram/kernels.hpp"
+namespace p=strata::fourgbvram;
 int main(){
     int bad=0;g::Stream stream;ck(g::stream_create(&stream));
-    // 5 rows: a SIMD group to each state column; 40: a lane to each (poly_gdn_scan, heads of 64 and 128), q and k
+    // 5 rows: a SIMD group to each state column; 40: a lane to each (fourgbvram_gdn_scan, heads of 64 and 128), q and k
     // staged in blocks the 40 rows cross
     for(int rows:{5,40})for(int dim:{32,64,128,256}){
         const int heads=4,keys=2;const size_t row_n=(2*keys+heads)*dim,state_n=heads*dim*dim,stride=state_n+17;const unsigned snaps=0x15;
