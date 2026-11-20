@@ -6198,6 +6198,10 @@ def make_handler(svc: Service):
                 body = (ROOT / "serve" / "web" / ("monitor.html" if path else "index.html")).read_bytes()
                 self.send_response(200)
                 self.send_header("Content-Type", "text/html; charset=utf-8")
+                # no-cache as for every other file of the page: without it a browser may show a page it kept from
+                # whatever else served 127.0.0.1:8080 before this server (llama.cpp's WebUI was found in one), and
+                # the tab then looks like the wrong program's even though the chat underneath is this one's.
+                self.send_header("Cache-Control", "no-cache")
                 self.send_header("Content-Length", str(len(body)))
                 self.end_headers()
                 self.wfile.write(body)
