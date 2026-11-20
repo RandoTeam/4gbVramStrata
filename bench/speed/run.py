@@ -101,7 +101,11 @@ def run_chat(cfg: dict, ids: list[int], text: str, max_new: int) -> dict:
         if os.name != "nt":                       # the engine is the server's child; end one the server outlived
             subprocess.run(["pkill", "-f", Path(cfg["exe"]).name], check=False)
         time.sleep(3)
-    fresh = log.read_text(encoding="utf-8", errors="replace")[start:] if log.exists() else ""
+    fresh = ""
+    if log.exists():                              # `start` is a byte offset: read bytes, not characters (a path with
+        with open(log, "rb") as fh:               # non-ASCII in it made the two differ and cut the line away)
+            fh.seek(start)
+            fresh = fh.read().decode("utf-8", "replace")
     found = SERVER_LINE.findall(fresh)
     if not found:
         raise RuntimeError("no serve line in " + str(log))
