@@ -212,6 +212,30 @@ because of them — if you can fund one project, fund the upstream first:
 - **[PolyStrata](https://github.com/VecSzn/PolyStrata)** by [VecSzn](https://github.com/VecSzn) — the engine line this
   fork follows
 
+## Legal and fair use
+
+**This is an independent, non-commercial fork, and it is not affiliated with any vendor whose model it runs.**
+
+- **No model weights are distributed here.** This repository contains code and documentation only. Every GGUF is
+  downloaded on first run from its author's repository — Google's, Unsloth's, DiffuSpace's, ornith-ai's — under that
+  author's own licence. Nothing is mirrored, repackaged or re-licenced.
+- **Trademarks are their owners'.** "Gemma", "Qwen", "Clover", "Ornith", "Flint", "LFM", "GLM", "DeepSeek",
+  "MiniCPM", "Kolibri" and every other model name are trademarks or registered trademarks of their respective owners.
+  They appear here only to say which file the software runs, which is nominative use. No vendor has endorsed,
+  sponsored or authorised this project.
+- **The engine's licence is inherited, not claimed.** `strata-fourgbvram` comes from
+  [PolyStrata](https://github.com/VecSzn/PolyStrata) and [Strata](https://github.com/Niko1221/Strata) under MIT; this
+  fork's changes are MIT as well ([LICENSE](LICENSE) names all three copyright holders). The bundled build inputs keep
+  their own licences: `third_party/llama.cpp` and `third_party/ggml` are MIT, and their licence files ship with them.
+- **What the software does with your machine.** It runs a language model locally, stores the model files you download,
+  and serves an HTTP API bound to `127.0.0.1` by default. It sends no telemetry. Images you send to a vision model stay
+  in that process. Opening the API to other devices (`--host`) is your choice and your responsibility.
+- **No warranty, and no advice.** The software is provided "as is", without warranty of any kind, as the MIT licence
+  says. Model output can be wrong, and a model's licence can restrict commercial use — check the model's page before
+  you ship anything built on it.
+- **Donations are gifts.** They are voluntary, non-refundable, and buy nothing: no feature, no priority, no licence.
+  See [DONATION.md](DONATION.md).
+
 ## Credits and license
 
 **This fork stands on two projects, and neither is a dependency to be hidden:**
@@ -227,6 +251,21 @@ because of them — if you can fund one project, fund the upstream first:
 Without those two projects this fork would be a wish. What this fork adds is the part they do not do: **a 4 GB target,
 and the measurement discipline to prove it** — a saved prompt, eight runs, an append-only log, a 22-prompt gate before
 any speed claim, and a page that says which numbers were measured here and which were inherited.
+
+**What these two projects gave this fork, said concretely**, because "built on" is easy to write and means nothing:
+
+- The **MoE execution model that makes 4 GB possible at all** — dense weights and the attention caches in VRAM, one
+  slot per cached expert, the rest read from the file through the OS page cache, experts swapped in while the answer
+  is written. That idea is [PolyStrata](https://github.com/VecSzn/PolyStrata)'s and Strata's; nothing here invented
+  it.
+- The **expert-cache ranking** (which experts to keep) and the **route tail skip**, which alone is worth 13–16% of
+  decode on a small card.
+- The **installer and the server** — one script that checks the PC, picks a model, writes the config and starts it;
+  an HTTP layer that speaks OpenAI and Anthropic at once, so a coding agent works by changing one address.
+- The **patience to maintain it**: both projects ship releases weekly, and this fork's only job is to keep up and
+  re-measure. When their new engine did not help here, this fork said so
+  ([the pairs](docs/BENCH-4GB.md#poly7--poly10-2026-11-20-the-engine-updated-the-numbers-did-not-move)) — which is
+  what a good fork owes its upstream.
 
 **Models keep their own licenses, and this repository redistributes none of them.** Setup downloads each file from its
 author on first run. The licences as stated by the authors, checked on 2026-11-20:
