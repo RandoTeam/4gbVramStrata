@@ -33,8 +33,18 @@ the engine for your GPU (asks first; 20-40 minutes once). More: [details](DETAIL
 
 ## Windows
 
-This repository is Linux-only. The Windows launchers and the prebuilt Windows engine live in the original public
-fork: [RandoTeam/4gbVramStrata](https://github.com/RandoTeam/4gbVramStrata).
+Download the release zip (or `git clone` the repository) and double-click **`START-HERE.bat`**. It installs Python for
+your user account if needed, then runs `setup.py`. `SETUP.bat` changes the model or settings later, `UPDATE.bat` moves
+to a newer release, `BENCH.bat` measures.
+
+The launchers are thin wrappers around `setup.py`, which is the same file on both platforms: the engine, the installer,
+the models and the settings are identical, and so is the run config the setup writes (`run-<model>.bat` here,
+`run-<model>.sh` on Linux).
+
+**Windows numbers on this project's pages are from before the poly.10 engine update** and are kept as history; the
+Linux section of [BENCH-4GB.md](BENCH-4GB.md) is the current evidence. Nothing in the Windows code path is
+platform-specific beyond the launcher: it compiles the same `src/fourgbvram/`, whose Windows branches are in the
+engine itself (`_WIN32` in `engine.cpp`, `spill.cpp`, `main.cpp`).
 
 ## Linux
 

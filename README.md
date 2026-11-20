@@ -89,6 +89,43 @@ This table is a ~1,900-token prompt with a **32K context setting**, not a 32K-de
 Every number, its log, the settings measured one at a time, what a conversation costs as it grows to 32K, and what was
 **not** measured: **[docs/BENCH-4GB.md](docs/BENCH-4GB.md)**.
 
+## Who this is for: 4 GB, and the 6 GB card next door
+
+**This project is built for the card class the donors do not serve.** The upstream engine project,
+[PolyStrata](https://github.com/VecSzn/PolyStrata), states 8 GB or more for its mixture-of-experts models and 12 GB for
+Qwen3.8-Flash-Next; [Strata](https://github.com/Niko1221/Strata) was measured on 12 GB and larger. Everything here is
+tuned, broken and fixed on a **4 GB** laptop — and the same settings are the ones a **6 GB** card wants.
+
+| Your card | Usable VRAM | What this project says |
+| --- | ---: | --- |
+| **GTX 1650, RTX 3050 Laptop, RTX 2050** (4 GB) | ≈3.68 GiB | **Measured here.** Clover 43.2 tokens/s, Gemma 4 39.0 at 32K. The reference machine is one of these. |
+| **RTX 3050 6 GB, RTX 2060, GTX 1660 Ti, RTX 4050 Laptop** (6 GB) | ≈5.68 GiB | **Same engine, same config, a bigger cache.** Setup already writes 8-bit attention caches on a card of 6 GB or less, and about 2 GiB more VRAM goes straight into experts ([the arithmetic](#what-a-6-gb-card-changes)). |
+| 8 GB and up | 7.5 GiB+ | Works, and is where the donors' own numbers start. Nothing here is tuned for it, and this project makes no claim about being faster there. |
+
+**Why 4 GB is the interesting number.** It is not a smaller 8 GB card — it is the point where a 35B model cannot be
+held anywhere near VRAM, so the whole design has to change: the model lives in RAM and on the SSD, the card holds only
+the dense part and a rotating slice of experts, and every token pays a PCIe copy. Getting that to 43 tokens/s is the
+work this fork did. A 6 GB card sits on the same curve with more headroom, which is why the same settings apply.
+
+### What a 6 GB card changes
+
+Not a guess: the same engine, the same flags, more VRAM. Measured on the reference laptop, Clover keeps **895 of its
+10,240 experts** in 0.9 GiB at 32K — **1.03 MiB an expert**. A 6 GB card has about **2.0 GiB more usable VRAM** (5.68
+against 3.68 GiB, with the same driver overhead), of which the reserve takes a little more on a bigger card. Call it
+**1,700 to 2,000 more experts**, so **≈2,600 to 2,900 of 10,240** before the attention caches grow with the context,
+which they do. More experts in VRAM means fewer PCIe copies per token, and that is where a small card's time goes.
+
+**What is measured and what is estimated, stated plainly:** the 4 GB rows are measured here, with logs. The 6 GB row is
+an arithmetic consequence of the same engine on the same model — **this project has not measured a 6 GB card**, and the
+estimate above is derived from the measured per-expert size, not from a run. A community report on an **RTX 2060**
+(its VRAM is not stated in the report) does exist: Gemma 4 26B-A4B QAT at 18K context, **555 experts in VRAM**, 30
+tokens/s writing and 900 reading, with `--vram-reserve-mib 120` — against llama.cpp on the same PC at 16 writing and
+470 reading ([recorded here](docs/COMMUNITY_BENCHMARKS.md)).
+
+If you have a 4 or 6 GB card and run this, a report is worth more than a star: it is the only way this table stops
+being an estimate. [Open an issue](https://github.com/RandoTeam/4gbVramStrata/issues) with the model, the settings and
+`strata-<model>.log`.
+
 ## The models
 
 Twelve models, each from the vendor's own GGUF or a well-known quantizer's. **Three are measured on 4 GB here**; the
@@ -118,6 +155,16 @@ version, with every official quant of every model against this exact PC, is
 
 ## Install
 
+**Both platforms, one tree.** Windows and Linux run the same engine, the same installer and the same models; only the
+launcher differs.
+
+**Windows 10/11:**
+
+1. Install the NVIDIA (or AMD) driver. Nothing else is needed to start — the launcher installs Python for your user
+   account if it is missing, no administrator rights.
+2. Download the release zip, or `git clone https://github.com/RandoTeam/4gbVramStrata.git`.
+3. Double-click **`START-HERE.bat`**. `SETUP.bat` changes the model or the settings later, `BENCH.bat` measures.
+
 **Linux:** Ubuntu 22.04 / 24.04 / 26.04 or Debian 12 / 13, 64-bit. An NVIDIA RTX 20 series card or newer, driver 580
 or newer. 16 GB of RAM runs the smaller models, 32 GB the ones measured above. Python 3.10 or newer: `./setup.sh`
 installs what is missing, including the CUDA Toolkit when it has to compile the engine.
@@ -128,18 +175,18 @@ cd 4gbVramStrata
 ./setup.sh
 ```
 
-1. On the first run `./setup.sh` checks the PC, offers the models that fit, downloads one, writes its run config and
+1. On the first run the launcher checks the PC, offers the models that fit, downloads one, writes its run config and
    starts the server.
-2. Later runs start what is installed. `./setup.sh --setup` asks again — another model, another size, another context.
-   Setup writes a `run-<model>.sh` per installed model: one command, no questions.
-3. For a start with no questions: `./run-clover-apex-i-nanoplus.sh`.
+2. Later runs start what is installed. `--setup` asks again — another model, another size, another context.
+   A `run-<model>.bat` or `run-<model>.sh` per installed model is a start with no questions.
+3. For a start with no questions now: `./run-clover-apex-i-nanoplus.sh` (Linux) or `run-clover-apex-i-nanoplus.bat`.
 
-Unlike the Windows release there is no prebuilt Linux engine: setup compiles `strata-fourgbvram` once for your card
-(5–20 minutes). Nothing else needs a compiler.
+**The engine.** Windows downloads a ready-made `strata-fourgbvram.exe` for the release; if none fits your card, setup
+offers to install Visual Studio Build Tools and the CUDA Toolkit and compiles it (20–40 minutes, once). Linux always
+compiles it (5–20 minutes). Nothing else needs a compiler.
 
-This repository is **Linux-only**. The original public fork,
-[RandoTeam/4gbVramStrata](https://github.com/RandoTeam/4gbVramStrata), keeps the Windows launchers and the prebuilt
-Windows engine.
+*Windows has not been re-measured since the engine update to poly.10 — the Windows rows on this page are from the
+poly.7 era, kept as history. The code path is the same one; only the numbers are older.*
 
 ## Use it
 

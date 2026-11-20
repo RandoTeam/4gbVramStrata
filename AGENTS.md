@@ -5,12 +5,18 @@ mixture-of-experts models on a 4 GB laptop. The engine is [PolyStrata](https://g
 `v0.1.45-poly.10`, built for CUDA 13 (`sm_75`–`sm_120`). The plan is `.local/ROADMAP.md` (git-ignored, never published);
 this file is the contract.
 
-## The machine, and the two models this fork is about
+## The machine, and the models this fork is about
 
-**This repository is the Linux fork** (Ubuntu 26.04, CUDA 13.3, driver 595), on the same laptop that produced the
-Windows numbers below: RTX 3050 Laptop 4 GB (`sm_86`), Ryzen 5 5500U (6 cores, 12 threads), 30 GB usable RAM. Every
-command in this file is the Linux one. The public [RandoTeam/4gbVramStrata](https://github.com/RandoTeam/4gbVramStrata)
-keeps the Windows launchers and the prebuilt Windows engine; do not add `.bat` entry points here.
+**This repository runs on both platforms from one tree** (Ubuntu 26.04, CUDA 13.3, driver 595 here; Windows 10/11 on
+the same laptop when it was the reference). The hardware is the same either way: RTX 3050 Laptop 4 GB (`sm_86`),
+Ryzen 5 5500U (6 cores, 12 threads), 30 GB usable RAM. Commands in this file are the Linux ones; the Windows entry
+point is `START-HERE.bat`, which runs the same `setup.py` (the launcher is the only platform-specific file).
+
+The engine is cross-platform in its own source, not through a shim: `_WIN32` branches in `engine.cpp` (page locking,
+`/proc` and cgroup reads, the NUMA probe), `spill.cpp` (the SSD expert tier) and `main.cpp`, and MSVC in `CMakeLists.txt`.
+This fork's own patches use CUDA and the C++ standard library only. What is Windows-specific is the launcher, the
+ready-made `.exe` in a release, and the fact that **Windows has not been re-measured since the poly.10 update** — say so
+rather than implying parity.
 
 | Model | File | Chat, tokens/s | Reads the prompt | What setup writes |
 | --- | ---: | ---: | ---: | --- |
