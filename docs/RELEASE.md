@@ -91,9 +91,12 @@ log. That is not bureaucracy — it is the only way "works on Linux and Windows"
 
 - **No CI that builds engines.** A hosted runner has no 4 GB card, so it cannot produce a number; and a CUDA build
   for `sm_86` on a shared runner proves only that it compiles, which `tools/build_131k.sh` proves locally in less
-  time. What CI is for here is the part that does catch bugs without a card: the 784 `test_setup_*` tests, the brand
-  and rename checks, and `package_release_131k.py --check`. That is a `linux.yml` this fork can add without pretending
-  to measure anything — see the next section.
+  time. What CI is for here is the part that does catch bugs without a card, and `.github/workflows/checks.yml` is
+  that: the 784 `test_setup_*` tests, the brand and rename checks, the release sources, and the links in the pages a
+  user reads. On 2026-11-21 it ran green on **Ubuntu 24.04 (Python 3.10 and 3.12) and on Windows 3.12** — the first
+  time this fork's suite ran on Windows, and the reason to trust that the tree really is one tree.
+  It does not run `package_release_131k.py --check` in full: that requires the compiled engine, so CI uses its
+  `--no-engine` form and a release runs the full one.
 - **No signed feeds, no `.sig`.** Strata signs its assets; this fork does not. `setup.py` checks a downloaded engine
   against the size and SHA-256 GitHub's release API publishes for that asset, and `verify_engine_archive` states what
   that does not cover in its own docstring: a digest proves the bytes are the ones GitHub released, not that they are

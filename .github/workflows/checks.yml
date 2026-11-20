@@ -32,8 +32,6 @@ jobs:
     name: Checks on ${{ matrix.os }} / Python ${{ matrix.python }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
-    # A provisional row reports without failing the run (see the matrix's comment).
-    continue-on-error: ${{ matrix.provisional || false }}
     strategy:
       fail-fast: false
       matrix:
@@ -42,9 +40,9 @@ jobs:
           # one that has never had a second pair of eyes. A 3.10 row keeps the floor honest: setup.sh accepts it.
           - { os: ubuntu-24.04, python: '3.12' }
           - { os: ubuntu-24.04, python: '3.10' }
-          # Provisional: this suite has never run on Windows (the fork's work was on Linux, and the tests that exercise
-          # the Windows path mock WIN on Linux). The first run reports; drop continue-on-error when it is green.
-          - { os: windows-latest, python: '3.12', provisional: true }
+          # Green on 2026-11-21, run 44833069415: the 784 setup tests and both name checks pass on windows-latest with
+          # Python 3.12, which is the first time this fork's suite ran on Windows at all. Now a gate, not a report.
+          - { os: windows-latest, python: '3.12' }
     steps:
       - uses: actions/checkout@v5
         with:
