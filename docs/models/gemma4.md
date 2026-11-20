@@ -34,11 +34,19 @@ A prompt of 10,000 tokens is read at 2,130 tokens/s on the laptop and at 6,800 o
 measured later, with the engine of v0.1.45-poly.4; UD-Q4_K_M measured beside it with that engine wrote 333-353 tokens/s
 and read 8,510-8,570. On the laptop, with other programs open and RAM short, it was run in turn with UD-Q4_K_M: it wrote 50-62 tokens/s in a chat against 47-48, read the long prompt at 1,680-1,730 against 1,660-1,670, and wrote 65-68 after it against 48-49.
 
+**On the 4 GB laptop (RTX 3050, 2026-11-20): QAT-UD-Q4_K_XL runs at 32K.** Engine `cf0e29415ce7b486…`
+(v0.1.45-poly.10, `sm_86`), the saved prompt (1,921 tokens, 128 new), eight runs:
+**39.0 written tokens/s** (38.4-39.8) and **524 tokens/s** read, with its draft model and 178 of 3,840 experts in VRAM
+(0.6 GiB). `--kv int8` wrote 39.5, `--no-draft` 32.2. Setup's "does not fit" is wrong for this file: its 25
+sliding-window layers keep 1,024 rows, so the caches take 840 MiB at 32K rather than the 5.5 GiB a dense count gives
+([the arithmetic](../MEMORY-4GB.md)). 64K is a hard no (`--kv-whole`: `no VRAM for scratch (552 MiB)`). Pictures were
+not tried there; the encoder wants 2.4 GB of VRAM.
+
 ## What you need
 
 | | |
 | --- | --- |
-| **Graphics card** | One **NVIDIA** GeForce RTX 20 series card or newer with **8 GB of VRAM or more**. About 6 GB are taken before any expert. It has run on a 32 GB card, on that card held to 8 GB, and on a laptop's 8 GB card. On an AMD card it can run as a beta on Linux and under Windows: setup compiles the engine on your PC; users have run Gemma 4 on an RX 6700 XT (12 GB) under Linux. |
+| **Graphics card** | One **NVIDIA** GeForce RTX 20 series card or newer with **8 GB of VRAM or more**. About 6 GB are taken before any expert. It has run on a 32 GB card, on that card held to 8 GB, and on a laptop's 8 GB card — **and on a 4 GB RTX 3050 Laptop, QAT-UD-Q4_K_XL at 32K with its draft model (2026-11-20, see above)**. On an AMD card it can run as a beta on Linux and under Windows: setup compiles the engine on your PC; users have run Gemma 4 on an RX 6700 XT (12 GB) under Linux. |
 | **RAM** | About **15, 18, 19 or 21 GB** beside an 8 GB card for the four sizes, the installer's estimate. By the same estimate a card with 16 GB holds the two smaller sizes and the QAT file whole. All four sizes have run on a laptop with 32 GB. |
 | **Disk** | 11, 13, 15 or 17 GB for the model file and its draft model, 1 GB more to read pictures. |
 | **System** | Linux or Windows 10 / 11, and a current NVIDIA driver. |

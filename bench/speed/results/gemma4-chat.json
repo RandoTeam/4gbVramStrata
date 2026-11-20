@@ -1,0 +1,79 @@
+{
+ "model": "gemma4",
+ "task": "chat",
+ "when": "2026-11-20 15:23",
+ "runs": 8,
+ "prompt": "bench/speed/prompt.txt",
+ "prompt_tokens": 1921,
+ "max_new": 128,
+ "engine_sha256": "cf0e29415ce7b4860cbe2b74d2850cab2a7eb20549eaa46646c8616e513cf4b6",
+ "config": "/home/ilia/\u0414\u043e\u043a\u0443\u043c\u0435\u043d\u0442\u044b/OpenCode/4gbVramStrata/strata-gemma4-qat-ud-q4_k_xl.json",
+ "settings": {
+  "--model": "/home/ilia/\u0414\u043e\u043a\u0443\u043c\u0435\u043d\u0442\u044b/OpenCode/4gbVramStrata-data/models/gemma4-QAT-UD-Q4_K_XL/gemma-4-26B-A4B-it-qat-UD-Q4_K_XL.gguf",
+  "--max-context": "32768",
+  "--expert-profile": "/home/ilia/\u0414\u043e\u043a\u0443\u043c\u0435\u043d\u0442\u044b/OpenCode/4gbVramStrata-data/packs/gemma4-qat-ud-q4_k_xl/expert-profile.txt",
+  "--draft-model": "/home/ilia/\u0414\u043e\u043a\u0443\u043c\u0435\u043d\u0442\u044b/OpenCode/4gbVramStrata-data/models/gemma4-QAT-UD-Q4_K_XL/mtp-gemma-4-26B-A4B-it-Q8_0.gguf"
+ },
+ "median_decode": 39.05,
+ "min_decode": 38.4,
+ "max_decode": 39.8,
+ "median_prefill": 523.6,
+ "rows": [
+  {
+   "prompt_tokens": 1921,
+   "prefill": 521.7,
+   "generated": 128,
+   "decode": 38.7,
+   "drafts": "92/108"
+  },
+  {
+   "prompt_tokens": 1921,
+   "prefill": 524.2,
+   "generated": 128,
+   "decode": 39.0,
+   "drafts": "92/108"
+  },
+  {
+   "prompt_tokens": 1921,
+   "prefill": 523.7,
+   "generated": 128,
+   "decode": 39.4,
+   "drafts": "92/108"
+  },
+  {
+   "prompt_tokens": 1921,
+   "prefill": 524.0,
+   "generated": 128,
+   "decode": 39.8,
+   "drafts": "92/106"
+  },
+  {
+   "prompt_tokens": 1921,
+   "prefill": 523.4,
+   "generated": 128,
+   "decode": 39.2,
+   "drafts": "92/108"
+  },
+  {
+   "prompt_tokens": 1921,
+   "prefill": 524.0,
+   "generated": 128,
+   "decode": 39.1,
+   "drafts": "92/108"
+  },
+  {
+   "prompt_tokens": 1921,
+   "prefill": 523.5,
+   "generated": 128,
+   "decode": 38.4,
+   "drafts": "92/110"
+  },
+  {
+   "prompt_tokens": 1921,
+   "prefill": 523.0,
+   "generated": 128,
+   "decode": 39.0,
+   "drafts": "92/108"
+  }
+ ]
+}

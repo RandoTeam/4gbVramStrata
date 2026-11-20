@@ -37,7 +37,14 @@ runs on a quiet machine. Median, with the range:
 | Clover-35B-A3B-Preview APEX-I-NANOPLUS, Windows 11 | 11.7 GB | 449 tokens/s | **38.1 tokens/s** (32.6-39.1) | 529 of 10,240 |
 | Clover-35B-A3B-Preview APEX-I-NANOPLUS, Ubuntu 26.04, engine poly.10 | 12.6 GB | **546 tokens/s** | **43.2 tokens/s** (38.9-45.3) | 791 to 895 of 10,240 |
 | Clover-35B-A3B-Preview APEX-I-NANOPLUS, Ubuntu 26.04, engine poly.7 | 12.6 GB | **543 tokens/s** | *36.1 tokens/s* (34.2-44.3) — **not reproduced: the same binary writes 44.5 today** | 804 of 10,240 |
+| Gemma 4 26B-A4B QAT-UD-Q4_K_XL, Ubuntu 26.04 | 14.7 GB | **524 tokens/s** | **39.0 tokens/s** (38.4-39.8) | 178 of 3,840 |
 | Flint 40B-A2.5B UD-Q3_K_XL, Windows 11 | 17.2 GB | 331 tokens/s | **21.9 tokens/s** (20.5-22.4) | 518 of 12,032 |
+
+**Gemma 4 is the newest row and the one setup calls "does not fit"**: it starts at 32K on this card with its draft
+model, because 25 of its 30 attention layers keep a 1,024-token sliding window and its caches cost 0.84 GiB at 32K
+rather than the 5.5 GiB a dense count gives. It answers 11% slower than Clover and, at a 32K-deep prompt, four times
+slower to read (286 against 668 tokens/s) — a 26B model that caches a tenth as many experts does not survive depth
+here ([why](docs/BENCH-4GB.md#gemma-4-26b-a4b-qat-ud-q4-k-xl-2026-11-20-the-third-model-and-the-one-setup-said-was-too-big)).
 
 The two Clover Linux rows were measured one after the other on 2026-11-20, the old binary beside the new one: the
 engine update to the donor's poly.10 costs nothing measurable here (44.5 against 43.2 tokens/s, inside the range, and
@@ -71,7 +78,7 @@ was **not** measured: **[docs/BENCH-4GB.md](docs/BENCH-4GB.md)**.
 
 ## The models
 
-Twelve models, each from the vendor's own GGUF or a well-known quantizer's. Two are measured on 4 GB here; the rest
+Twelve models, each from the vendor's own GGUF or a well-known quantizer's. Three are measured on 4 GB here; the rest
 are listed with what the installer estimates for this card. Sizes are the smallest download; details, quant sizes,
 vendor scores and sources: **[docs/MODELS-4GB.md](docs/MODELS-4GB.md)**.
 
@@ -79,11 +86,11 @@ vendor scores and sources: **[docs/MODELS-4GB.md](docs/MODELS-4GB.md)**.
 | --- | --- | ---: | --- |
 | **Clover-35B-A3B-Preview** (DiffuSpace) | 35B / 3B active | 13 GB | **measured**, 38.1 tokens/s |
 | **Flint 40B-A2.5B** (Recursive) | 40B / 2.5B active | 18 GB | **measured**, 21.9 tokens/s |
+| **Gemma 4 26B-A4B QAT** (Google) | 26B / 3.8B active | 15 GB | **measured**, 39.0 tokens/s at 32K |
 | **LFM2.5-24B-A2B** (Liquid AI) | 24B / 2B active | 11 GB | should start; not run here |
 | **Qwen3.6-35B-A3B** (Qwen) | 35B / 3B active | 13 GB | no: 4.2 GB before any expert |
 | **Ornith 1.5-35B-A3B** (ornith-ai) | 35B / 3B active | 14 GB | the smallest size should start; not run here |
 | **Tiel Coder 35B-A3B** (peculiar-ragdoll) | 35B / 3B active | 14 GB | no: 4.4 GB before any expert |
-| **Gemma 4 26B-A4B** (Google) | 26B / 3.8B active | 11 GB | no: 4.1 GB before any expert |
 | **MiniCPM-V 4.7 35B-A3B** (OpenBMB) | 35B / 3B active | 16 GB | should start; not run here |
 | **Kolibri 1** (Aleph Alpha) | 78B / 3.5B active | 29 GB | no: 4.1 GB before any expert |
 | **GLM 5.3 Flash** (Zhipu) | 320B / 18B active | 79 GB | no: needs a 32 GB card |

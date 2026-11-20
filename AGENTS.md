@@ -15,6 +15,7 @@ keeps the Windows launchers and the prebuilt Windows engine; do not add `.bat` e
 | Model | File | Chat, tokens/s | Reads the prompt | What setup writes |
 | --- | ---: | ---: | ---: | --- |
 | Clover-35B-A3B-Preview APEX-I-NANOPLUS | 12.6 GB | **38.1** Windows / **43.2** Linux | 449 Windows / 546 Linux tokens/s | `--tail-skip 6 --no-graphs`, `--kv q8_0` on cards of 6 GB or less |
+| Gemma 4 26B-A4B QAT-UD-Q4_K_XL | 14.7 GB | **39.0** Linux | 524 tokens/s | `--max-context 32768 --draft-model`, no `--no-graphs` |
 | Flint 40B-A2.5B UD-Q3_K_XL | 17.2 GB | **21.9** Windows | 331 tokens/s | `--prompt-batch 512 --expert-swaps 32 --no-graphs` |
 
 Windows numbers measured 2026-11-03 on the saved prompt `bench/speed/prompt.txt` (about 1,900 tokens, a question at the
@@ -79,7 +80,9 @@ The release notes' table moves with `docs/BENCH-4GB.md`, and the tarball is rebu
 A speed change goes out only with the 22-prompt gate (`bench/quality/`): arithmetic, logic, code that must run, a
 three-call tool loop, Russian/German/Spanish, instruction-following, and three facts across about 18K tokens. Current:
 **Clover 22/22, Flint 21/22** — the one failure is the Russian instruction, which is unstable in Flint itself (four
-different behaviours across four runs, recorded in `docs/QUALITY-4GB.md`).
+different behaviours across four runs, recorded in `docs/QUALITY-4GB.md`). **Gemma 4 QAT-UD-Q4_K_XL 21/22** on
+2026-11-20: the one failure is `tool_loop`, where it folds `read_file` into `grep` and returns two calls instead of
+the three the prompt asks for.
 
 ## The work, in order
 

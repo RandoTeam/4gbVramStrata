@@ -45,6 +45,33 @@ The shipped settings (`--tail-skip 6 --no-graphs --kv q8_0` on Clover, `--prompt
 **22 of 22** again (every prompt passed both attempts; `bench/quality/results/local.json`). The engine update moved no
 answer the gate can see.
 
+### Gemma 4 26B-A4B QAT-UD-Q4_K_XL, 2026-11-20: 21 of 22
+
+The same gate, the config setup wrote (`--max-context 32768 --expert-profile … --draft-model
+mtp-gemma-4-26B-A4B-it-Q8_0.gguf`), two attempts per prompt, on the poly.10 engine:
+**21 of 22** (`bench/quality/results/gemma-qat-q4-k-xl.json`).
+
+| Prompt | Result |
+| --- | ---: |
+| 21 prompts — arithmetic, logic, JSON, code that runs, Russian, German, Spanish, the three facts across ~18K tokens | ok 2/2 |
+| `tool_loop` | **0/2** |
+
+The one failure is the model and not the engine: asked to *read* `src/main.c`, then `grep` it, then `write_file` the
+result — three calls in order — Gemma answers with **two** calls, `grep` and `write_file`, both attempts:
+
+```json
+{"name": "grep", "arguments": {"pattern": "TODO", "path": "src/main.c"}}
+{"name": "write_file", "arguments": {"path": "notes/todo.md", "text": "result_of_grep"}}
+```
+
+It folded the read into the grep, which is a legitimate plan for a human and not the call sequence the prompt asked
+for. Clover, on the same gate, emits all three. This is the fourth family to lose a prompt here and the first whose
+failure is a planning choice rather than an instruction it could not follow.
+
+**The long-context prompt is why the engine fix in this session mattered.** Before it, `needle_3facts` (about 18,000
+tokens) ended the request with `cudaGraphInstantiate: out of memory` — the 400 that stopped the first gate run at
+prompt 22 of 22. With the recording falling back to plain launches it passes 2/2.
+
 **The one failure is real and it is Flint's.** Asked in Russian to list three reasons a laptop can run slowly, Flint
 repeated the instruction back (both attempts that run). The same request at temperature 0 in other runs gave a correct
 numbered list once, a greeting ("Привет, дорогой, друг!") once, and a short story about an author's pseudonym once —

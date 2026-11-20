@@ -44,6 +44,30 @@ Two consequences, and they are the whole story of this machine:
 2. **One token's expert set is 320 or 282 slots, and the card holds 421 or 712.** So VRAM holds *one to two tokens'
    worth* of experts, no more; the next token routes to a different set, and most of it comes from RAM.
 
+**The same table for Gemma 4 26B-A4B (QAT-UD-Q4_K_XL), measured from its own GGUF header on 2026-11-20** — it is the
+third model this laptop now runs, and its numbers are shaped differently enough to be worth their own column:
+
+| | Gemma 4 26B-A4B |
+| --- | ---: |
+| layers | 30 — 25 sliding-window (window 1,024), 5 global |
+| experts per layer / used per token | 128 / **8** |
+| routed experts a token touches | **240** |
+| bytes per expert | 3.19 MiB |
+| **routed-expert bytes per token** | **766 MiB** |
+| dense weights, head included (the head is `token_embd`, tied) | **1.29 GiB** |
+| attention cache per token past the window, fp16 | 20 KiB (the 5 global layers only) |
+| the same at 4K | 280 MiB |
+| the same at 32K | **840 MiB** — the sliding window caps 25 of 30 layers at 1,024 rows |
+| the same with `--kv int8` at 32K | **420 MiB** |
+
+The point of that column: **Gemma's attention cache is not what a 30-layer model's would be.** 25 of its layers keep
+only 1,024 rows, so 32K costs 840 MiB where a dense estimate says 5.5 GiB. That is why the model starts at 32K with
+0.6 GiB of experts in VRAM on a card `setup.py --check` calls too small for it.
+
+**Its experts are heavier per token than either model above** — 766 MiB against Clover's 338 MB — because its 8 of 128
+experts are bigger (3.19 MiB each). Its dense part is smaller (1.29 against 1.75 GiB), and the draft block keeps 92 of
+108 guesses, so the two costs nearly cancel: 39.0 written tokens/s against Clover's 44.3 (`docs/BENCH-4GB.md`).
+
 ## The VRAM budget, by context length
 
 The card is 4 GB. Subtract what is not expert cache on Clover:

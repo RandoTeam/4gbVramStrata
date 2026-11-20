@@ -197,6 +197,77 @@ What it says:
 The first request's 13-token read took 938 ms, which is the engine warming up rather than a read speed: at 13 tokens
 there is nothing to measure.
 
+## Gemma 4 26B-A4B QAT-UD-Q4_K_XL (2026-11-20): the third model, and the one setup said was too big
+
+`gemma-4-26B-A4B-it-qat-UD-Q4_K_XL.gguf`, 14.25 GB, with its own draft model `mtp-gemma-4-26B-A4B-it-Q8_0.gguf`
+(461 MB). The run config is the one setup wrote: `--max-context 32768 --expert-profile … --draft-model …`, and
+nothing else. Engine `cf0e29415ce7b486…` (poly.10, `sm_86`), rebuilt for this session.
+
+`setup.sh --check` says **"does not fit: it takes about 4.1 GB of VRAM before any expert, and this card has 4 GB"**.
+That is wrong for this file, and the reason is worth knowing before any other 26B model is judged:
+
+| What | Bytes | Why |
+| --- | ---: | --- |
+| dense weights, head included | 1.29 GiB | 658 tensors from the header; the head is `token_embd` (Q4_0, 396 MiB), there is no `output.weight` |
+| attention caches at 32K, fp16 | **0.84 GiB** | 25 of its 30 layers are sliding-window with a 1,024-row ring and 8 KV heads; only 5 are global (512 wide, 2 KV heads) |
+| draft model | 0.44 GiB | Q8_0, 461 MB |
+| **sum** | **≈2.6 GiB** | against 3.68 GiB usable — so **~1.0 GiB is left for experts**, and 178 of 3,840 fit (0.6 GiB) |
+
+A dense 30-layer estimate would put the caches at 5.5 GiB and the model out of reach. The sliding window is the whole
+difference, and `vram_beside_gb` (measured on an RTX 5090 at 32K, with the draft included and nothing subtracted) does
+not see it.
+
+**The saved-prompt chat task** (`bench/speed/prompt.txt`, 1,921 tokens, 128 new, eight runs, 32K context):
+
+| Setting | Written tokens/s, median (range) | Prompt read | What it shows |
+| --- | ---: | ---: | --- |
+| setup's config | **39.0 (38.4-39.8)** | 524 tok/s | the honest headline |
+| `--kv int8` | 39.5 (37.6-43.5) | 536 tok/s | +0.5 tok/s at a short prompt; wins 3 of 3 interleaved rounds |
+| `--kv int8k` | 38.8 (36.9-39.9) | 524 tok/s | no gain over fp16 |
+| `--no-draft` | **32.2 (30.9-33.8)** | 525 tok/s | the draft block is worth **+21%** |
+| `--threads 12` | 34.3 | 506 tok/s | 8 threads (setup's 70%) is better here |
+| `--expert-swaps 0` | 34.8 | 502 tok/s | swapping pays |
+
+The draft block keeps **92 of ~108** guesses — the opposite of Flint, whose draft keeps almost none on this same
+prompt. That is most of why a 26B model with a tenth of Clover's cached experts answers only 11% slower than Clover
+(39.0 against 44.3 tokens/s) while reading 4% slower (524 against 546).
+
+**Depth is where it gives up.** `./bench.sh --long --runs 3`, three fresh prompts at each depth:
+
+| Test | Gemma 4 QAT | Clover APEX, same session |
+| --- | ---: | ---: |
+| 4K prompt | 692.2 tok/s | 731.2 tok/s |
+| 16K prompt | **501.4 tok/s** | 709.8 tok/s |
+| **32K prompt, 32,006 tokens** | **286.4 tok/s** | **668.5 tok/s** |
+| 32K first token | 111.8 s | 46.8 s |
+| chat decode (9 short answers) | 35.2 tok/s | 46.0 tok/s |
+| agent turn decode | 16.2 tok/s | 34.7 tok/s |
+
+The engine's own log says why: as the context grows the caches take VRAM back from the experts, and Gemma's cache
+falls from **178 to 100 experts** (0.6 → 0.31 GiB) while Clover's *grows* to 1,019. Gemma routes 8 of 128 experts a
+layer, so 240 expert slots a token against a cache of 100 — most of every token's experts come from RAM. Clover routes
+8 of 256 and caches 1,019, so the same read finds most of them already there. **A 26B model with a tenth of the
+cache does not survive a long prompt on this card**, and that, not raw speed, is the finding.
+
+Neither of the two obvious remedies helps at depth, and both were measured:
+
+| Remedy | 4K | 16K | 32K | Verdict |
+| --- | ---: | ---: | ---: | --- |
+| `--kv int8` | **724.9** (better) | 425.4 (worse) | 243.6 (worse) | more experts (200 against 100) but the 8-bit read costs more than they win |
+| `--no-graphs` | 705.0 | 504.1 | 287.3 | level at 32K, 40.9 tok/s chat decode against 35.2 — the better daily setting |
+
+The reports are `bench/results/2026-11-20-community-rtx-3050-laptop-gpu-gemma-4-26b-a4b-qat-ud-q4-k-xl/` (setup's
+config), `…-2/` (`--kv int8`) and `…-3/` (`--no-graphs`).
+
+**An engine defect this model found.** A 13,335-token prompt with 700 new tokens ended the request with
+`cudaGraphInstantiate: out of memory`: the CUDA graph for that row count did not fit the 128 MiB the reserve leaves
+after the first request. Both binaries did it, the poly.7 one included, so it was an engine defect and not the merge's.
+`Engine::record()` now returns null instead of throwing and the kernels launch one by one; the case generates all 700
+tokens at 14.6 tok/s with one line on stderr. See the commit `7aa47611`.
+
+**Pictures were not tried.** The image encoder is 1.19 GB and needs 2.4 GB of VRAM warm, which this configuration does
+not have; `--vision cpu` is the option and it is unmeasured here.
+
 ## Flint 40B-A2.5B UD-Q3_K_XL
 
 `flint-UD-Q3_K_XL.gguf`, 17.22 GB, 32K context. The log of the first start, 2026-10-31:

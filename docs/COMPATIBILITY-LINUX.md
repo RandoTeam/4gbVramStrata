@@ -20,7 +20,7 @@ expert cache" means it starts, but most experts run on the CPU and it is slow.
 |---|---|---|
 | Qwen3.8-Flash-Next Coder | **ran** (owner) | not tested; the main-engine output head is the expected blocker |
 | Qwen3.8-Flash-Next Q2_0 | **ran** (owner) | did not start: native head / MTP allocation |
-| Gemma 4 26B-A4B QAT-UD-Q4_K_XL | **ran** (owner) | not downloaded/tested; estimate 4.1 GB before experts |
+| Gemma 4 26B-A4B QAT-UD-Q4_K_XL | **ran** (owner) | **runs too, 2026-11-20**: 32K with its draft model, 39.0 tokens/s (docs/BENCH-4GB.md) |
 | Qwen3.6-35B-A3B UD-Q4_K_XL | **ran** (owner) | not tested; estimate 4.7 GB before experts |
 
 The reason is the driver model, not the model file: Windows can oversubscribe VRAM into system RAM;
@@ -33,8 +33,8 @@ allocations) in the engine. Until then, a Windows run is valid evidence for Wind
 ## Summary
 
 - **ДА**: 1
-- **ДА, малый кэш**: 11
-- **НЕТ**: 43
+- **ДА, малый кэш**: 12
+- **НЕТ**: 42
 - **НЕ ПРОВЕРЯЛОСЬ**: 3
 
 Every **НЕТ** below means "does not fit dedicated VRAM on native Linux"; it is **not** a claim
@@ -87,7 +87,7 @@ that the model cannot run on Windows. See the platform table above.
 | Gemma 4 26B-A4B | Gemma 4 26B-A4B UD-Q3_K_M | 13.2 | `fourgbvram` | does not fit: it takes about 5.8 GB of VRAM before any expert, and this card has 4 GB | **НЕТ** |
 | Gemma 4 26B-A4B | Gemma 4 26B-A4B UD-Q2_K_XL | 11.0 | `fourgbvram` | does not fit: it takes about 4.6 GB of VRAM before any expert, and this card has 4 GB | **НЕТ** |
 | Gemma 4 26B-A4B | Gemma 4 26B-A4B UD-Q4_K_M | 17.4 | `fourgbvram` | does not fit: it takes about 5.3 GB of VRAM before any expert, and this card has 4 GB | **НЕТ** |
-| Gemma 4 26B-A4B | Gemma 4 26B-A4B QAT-UD-Q4_K_XL | 14.7 | `fourgbvram` | does not fit: it takes about 4.1 GB of VRAM before any expert, and this card has 4 GB | **НЕТ** |
+| Gemma 4 26B-A4B | Gemma 4 26B-A4B QAT-UD-Q4_K_XL | 14.7 | `fourgbvram` | **starts, measured 2026-11-20: 32K with its draft model and 178 of 3,840 experts in VRAM (0.6 GiB); 64K does not** (setup's 4.1 GB is a 32K figure measured on an RTX 5090; this file's sliding window makes its caches 840 MiB at 32K, not 5.5 GiB — docs/BENCH-4GB.md) | **ДА, малый кэш** |
 | Tiel Coder 35B-A3B | Tiel Coder 35B-A3B UD-Q3_K_XL | 17.2 | `fourgbvram` | does not fit: it takes about 4.7 GB of VRAM before any expert, and this card has 4 GB | **НЕТ** |
 | Tiel Coder 35B-A3B | Tiel Coder 35B-A3B UD-IQ3_XXS | 13.6 | `fourgbvram` | does not fit: it takes about 4.4 GB of VRAM before any expert, and this card has 4 GB | **НЕТ** |
 | Tiel Coder 35B-A3B | Tiel Coder 35B-A3B UD-Q4_K_XL | 22.7 | `fourgbvram` | does not fit: it takes about 4.8 GB of VRAM before any expert, and this card has 4 GB | **НЕТ** |
@@ -264,7 +264,8 @@ independent Three.js tests; treat the order as a judgement, not a single score.
 
 On **Windows 10**, where WDDM supplies the system-RAM fallback, Qwen3.8 Coder, Qwen3.8 Q2_0,
 Gemma 4 QAT-Q4 and Qwen3.6 UD-Q4 are all valid options despite the native-Linux "does not fit"
-lines above.
+lines above. **Gemma 4 QAT-Q4 is no longer one of them: it runs on native Linux as well** (measured
+2026-11-20, see below), so its "does not fit" line is now the measured row in the table above.
 
 ## What was actually run, not just estimated
 
@@ -272,7 +273,7 @@ lines above.
 |---|---|
 | **Clover-35B-A3B-Preview APEX-I-NANOPLUS** | **Works** on this PC. 32K: 791 to 895 experts in VRAM, chat 43.2 tok/s (38.9–45.3) on engine poly.10 and 44.5 (41.6–46.2) on poly.7 measured beside it, prefill 543–546 tok/s, 32K prompt read 673 tok/s; 22 of 22 on the quality gate. The 36.1 tok/s of 2026-11-12 did not reproduce. 64K: 674 experts, 57,897-token prompt read at 634 tok/s, decode 8.2 tok/s at depth. |
 | **Qwen3.8-Flash-Next Q2_0** | **Native Linux: does not start** on 4 GB. Low-RAM mode, 31 GB RAM. At 32K/16K/8K it fails at the native output head or prompt scratch; MTP needs 675 MiB for its 512 experts and cannot fit. **Windows 10: the owner ran Q2_0 on this same laptop** via WDDM sysmem fallback. Linux files were removed after the test. |
-| **Gemma 4 26B-A4B QAT-UD-Q4_K_XL** | **Windows 10: the owner ran it on this laptop.** Native Linux: 4.1 GB VRAM before any expert at 32K, and 64K is worse; not downloaded or tested here. |
+| **Gemma 4 26B-A4B QAT-UD-Q4_K_XL** | **Works on native Linux too, measured 2026-11-20** (engine poly.10, `cf0e29415ce7b486…`): 32K with its draft model, 178 of 3,840 experts in VRAM (0.6 GiB), **39.0 written tokens/s** (38.4–39.8, 8 runs) and 524 tokens/s prompt read. `--kv int8` 39.5, `--no-draft` 32.2. `--kv-whole` says 32K is the ceiling: 64K fails (`no VRAM for scratch (552 MiB)`). |
 | **Qwen3.8-Flash-Next Coder IQ1_M** | **Windows 10: the owner ran it on this laptop.** Native Linux: not yet reproduced; the main-engine output head is the expected blocker. |
 | **Qwen3.6-35B-A3B UD-Q4_K_XL** | **Windows 10: the owner ran it on this laptop.** Native Linux: estimate 4.7 GB before any expert; not tested here. |
 
