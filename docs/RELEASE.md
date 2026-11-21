@@ -111,6 +111,9 @@ log. That is not bureaucracy — it is the only way "works on Linux and Windows"
 - **No distribution for a platform nothing has run on.** Reachable today and deliberately not shipped: Linux aarch64
   (compiles, 5m50s in CI, no ARM machine here) and Linux HIP (compiles, no AMD card here). A tarball is a promise that
   somebody started it; a "build from source" line is the truth.
-- **No cross-compilation.** A Windows engine is built on Windows. `tools/build_131k.bat` used to exist here and was
+- **No cross-compilation.** A Windows engine is built on Windows by `setup.py`, and that stays manual - GitHub's
+  images carry no CUDA toolkit and no MSVC+nvcc container exists. What is **not** manual anymore since 2026-11-21: the
+  Windows source paths, built and run in CI (`windows` job: 40 executables, 36 tests passing, 4 skipping for a missing
+  AVX-512), and every other backend, compiled in five jobs. `tools/build_131k.bat` used to exist here and was
   removed as stale; when a Windows asset is rebuilt, it is rebuilt with `setup.py` on a Windows PC, by the same
   configure line, and its `BUILD.json` names the commit.

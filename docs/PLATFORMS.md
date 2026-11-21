@@ -14,7 +14,8 @@ has one machine: an RTX 3050 Laptop, 4 GB, x86-64 Linux. Everything else is a co
 | **Linux x86-64** | CUDA 13 | ✅ `cuda13` job, 16m | ✅ **measured on this laptop** | ✅ |
 | **Linux x86-64** | CUDA 12 (Pascal/Volta) | ✅ `cuda12` job, 14m — *first ever on 2026-11-21* | ❌ no such card here | ❌ |
 | **Linux x86-64** | HIP (gfx1100, gfx1201) | ✅ `hip` job, 7m — *first ever* | ❌ no AMD card here | ❌ |
-| **Windows x86-64** | CUDA 13 | ❌ **impossible on GitHub's runners** (no CUDA toolkit in the images, see below) | ⚠️ measured before poly.10 | ✅ (prebuilt `.exe` per release) |
+| **Windows x86-64** | CUDA 13 | ❌ the CUDA kernel build needs a toolkit the images lack; ✅ the **host build** does: see the `windows` row below | ⚠️ measured before poly.10 | ✅ (prebuilt `.exe` per release) |
+| **Windows x86-64** | none (MSVC, host) | ✅ `windows` job, 2m55s — 40 targets built, **36 tests run, 4 skipped for a missing ISA** | ✅ this is real Windows CI since 2026-11-21 | — |
 | **Windows x86-64** | HIP | ❌ same reason | ❌ | ❌ |
 | **macOS arm64** | Metal | ✅ `metal` job on macos-26, 1m — *first ever* | ❌ no Mac here | ❌ |
 | **Linux aarch64** | CUDA 13 | ✅ `aarch64` job on `ubuntu-24.04-arm`, 5m50s — *first ever on 2026-11-21* | ❌ no ARM machine here | ❌ |
@@ -42,12 +43,19 @@ compiling.
 
 GitHub's `windows-2025` image has Visual Studio 2022 and no CUDA toolkit (checked in its own published
 `Windows2025-Readme.md`: no NVIDIA entry). Unlike Ubuntu, there is no container that supplies MSVC + `nvcc` on Windows
-the way `nvidia/cuda` does on Linux, so a Windows CUDA job cannot exist here. **What Windows does cover** is the setup
-suite: 784 tests green on `windows-latest` (`.github/workflows/checks.yml`). The Windows engine itself is built on the
-maintainer's PC with `setup.py`, as `docs/RELEASE.md` says. And a CUDA-less Windows build is not an alternative:
-`strata-fourgbvram` is registered only under `STRATA_ENABLE_CUDA OR STRATA_ENABLE_HIP` (CMakeLists.txt:2054), so such a
-configure produces `strata_kernels_cpu` and `strata_spec` and **not the engine** - it would report green for
-compiling nothing. Both were tried in the first draft of the workflow and removed.
+the way `nvidia/cuda` does on Linux, so **the CUDA kernel build for Windows stays the maintainer's PC** - that is the
+one thing this project cannot delegate to CI.
+
+**Everything else about Windows IS in CI**, and it is not a compromise but the same shape Strata's own `check.yml` uses
+for its Windows matrix: the `windows` job configures with MSVC and `STRATA_ENABLE_CUDA=OFF`
+`STRATA_BUILD_TESTS=ON STRATA_BUILD_CONVERSATION_TESTS=ON`, builds all 40 test executables, and runs them. Measured on
+run 44906001051: **36 pass, 4 skip, 0 fail**. The four need an ISA the runner lacks - they link `strata_kernels_cpu`,
+whose `expert.cpp` is compiled with `/arch:AVX512` unconditionally, so they die before `main` on a CPU without it -
+which is reported as a skip and capped at four, so a real regression cannot hide there.
+
+A CUDA-less configure builds `strata_kernels_cpu` and `strata_spec` but **not `strata-fourgbvram`** (registered only
+under `STRATA_ENABLE_CUDA OR STRATA_ENABLE_HIP`, CMakeLists.txt:2054) - so this job proves the Windows *source paths*
+(the `_WIN32` branches, the conversation cache, the expert tier, the CPU pool, the platform layer) and not a kernel.
 
 ## Linux aarch64: three lines away, and honest about it
 
