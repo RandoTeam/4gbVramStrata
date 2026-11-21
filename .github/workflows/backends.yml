@@ -1,0 +1,177 @@
+# Compile checks: every backend this engine supports, configured and built with the release's own flags.
+#
+# The point is not speed and not a number: nothing runs a model here. The point is that a call into a kernel that only
+# exists for another backend, an API a toolkit version dropped, or a source that slipped out of the target's list fails
+# HERE instead of on a user's machine - and that a 4 GB card, which is what all of this is for, never has to pay for the
+# discovery. Built after the shape of Strata's `.github/workflows/backends.yml`, which does the same for its engine.
+#
+# What each job proves, and what it does not:
+#   CUDA 13 (container)      the release's exact configure line, sm_86 measured on the reference laptop and the other
+#                            architectures the release names. Compiles; the card lives in AGENTS.md, not here.
+#   CUDA 12 (container)      `--cuda 12` and -DSTRATA_EXPERIMENTAL_SM60=ON, the Pascal/Volta path. Never built by this
+#                            fork before: this job is the first time it exists at all.
+#   HIP (ROCm container)     -DSTRATA_ENABLE_HIP=ON -DSTRATA_ENABLE_CUDA=OFF for gfx1100;gfx1201. Also never built by
+#                            this fork. It does not replace a card: a model has to start on one to claim HIP works.
+#   macOS (Metal)            the Metal kernels and their parity tests, which are Metal-only code.
+#
+# What is NOT here, and why - both are honest gaps rather than oversights:
+#   Windows CUDA.  The GitHub Windows images carry no CUDA toolkit (checked in Windows2025-Readme.md: Visual Studio yes,
+#                  no NVIDIA entry), and a container cannot supply MSVC + Nsight-incompatible `nvcc` on Windows the way
+#                  `nvidia/cuda` does on Ubuntu. A CUDA build for Windows therefore stays the maintainer's PC, as
+#                  docs/RELEASE.md says. What Windows DOES cover is the setup suite (checks.yml: 784 tests, green there).
+#   A CPU-only Windows build is impossible for a second reason worth knowing: `strata-fourgbvram` is registered only
+#   under `STRATA_ENABLE_CUDA OR STRATA_ENABLE_HIP` (CMakeLists.txt:2054), so a CUDA-less configure builds this engine
+#   not at all - it would configure, compile zero engine files and report success. `strata_kernels_cpu` and
+#   `strata_spec` are all a CPU build gets.
+#
+# Local equivalent of one job, on this laptop:
+#   .venv/bin/cmake -B build-fourgbvram -G Ninja -DCMAKE_BUILD_TYPE=Release -DSTRATA_ENABLE_CUDA=ON \
+#       -DSTRATA_BUILD_TESTS=OFF -DCMAKE_CUDA_ARCHITECTURES=86 -DSTRATA_MMQ_KQUANTS=ON -DSTRATA_Q6K_EXPERTS=ON
+#   .venv/bin/ninja -C build-fourgbvram strata-fourgbvram
+name: Backend compile checks
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/backends.yml'
+      - 'CMakeLists.txt'
+      - 'cmake/**'
+      - 'src/**'
+      - 'include/**'
+      - 'metal/**'
+      - 'setup.py'
+      - 'third_party/ggml/VERSION.txt'
+  pull_request:
+    paths:
+      - '.github/workflows/backends.yml'
+      - 'CMakeLists.txt'
+      - 'cmake/**'
+      - 'src/**'
+      - 'include/**'
+      - 'metal/**'
+      - 'setup.py'
+      - 'third_party/ggml/VERSION.txt'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: backends-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # ggml is fetched by CMake at the commit third_party/ggml/VERSION.txt pins, so no job downloads a checkout by hand.
+  CMAKE_BUILD_PARALLEL_LEVEL: 4
+  # The kernel sources are the same in every job: one list, so a job cannot quietly build a different tree.
+  STRATA_TARGET: strata-fourgbvram
+
+jobs:
+  cuda13:
+    name: CUDA 13 (sm_75, sm_86, sm_89, sm_120)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    container: nvidia/cuda:13.0.2-devel-ubuntu24.04
+    steps:
+      - uses: actions/checkout@v5
+      - name: Tools
+        run: |
+          apt-get update -qq && apt-get install -y -qq --no-install-recommends cmake ninja-build git ca-certificates
+      - name: Configure (the release's line, from setup.py)
+        run: |
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DSTRATA_ENABLE_CUDA=ON \
+            -DSTRATA_ENABLE_HIP=OFF \
+            -DSTRATA_BUILD_TESTS=OFF \
+            -DCMAKE_CUDA_ARCHITECTURES="75-real;86-real;89-real;120-real" \
+            -DSTRATA_MMQ_KQUANTS=ON \
+            -DSTRATA_Q6K_EXPERTS=ON
+      - name: Build ${{ env.STRATA_TARGET }}
+        run: cmake --build build --target ${{ env.STRATA_TARGET }} --parallel 4
+      - name: The engine starts and answers its own usage line
+        # Not a model: --help exits 1 by design; anything else here means the binary did not link what it calls.
+        run: |
+          ./build/${{ env.STRATA_TARGET }} 2>&1 | head -3
+          test -x ./build/${{ env.STRATA_TARGET }}
+
+  cuda12:
+    name: CUDA 12 (sm_60, sm_61, sm_70, sm_86 — the Pascal/Volta path)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    container: nvidia/cuda:12.9.1-devel-ubuntu24.04
+    steps:
+      - uses: actions/checkout@v5
+      - name: Tools
+        run: |
+          apt-get update -qq && apt-get install -y -qq --no-install-recommends cmake ninja-build git ca-certificates
+      - name: Configure the CUDA 12 path as setup.py does (--cuda 12 plus -DSTRATA_EXPERIMENTAL_SM60=ON)
+        run: |
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DSTRATA_ENABLE_CUDA=ON \
+            -DSTRATA_ENABLE_HIP=OFF \
+            -DSTRATA_BUILD_TESTS=OFF \
+            -DSTRATA_EXPERIMENTAL_SM60=ON \
+            -DCMAKE_CUDA_ARCHITECTURES="60-real;61-real;70-real;86-real" \
+            -DSTRATA_MMQ_KQUANTS=ON \
+            -DSTRATA_Q6K_EXPERTS=ON
+      - name: Build ${{ env.STRATA_TARGET }}
+        run: cmake --build build --target ${{ env.STRATA_TARGET }} --parallel 4
+
+  hip:
+    name: HIP (ROCm 7.2, gfx1100 + gfx1201)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    container: rocm/dev-ubuntu-24.04:7.2.4-complete
+    steps:
+      - uses: actions/checkout@v5
+      - name: Tools
+        run: |
+          apt-get update -qq && apt-get install -y -qq --no-install-recommends cmake ninja-build git ca-certificates
+      - name: Configure the AMD path as setup.py does (-DSTRATA_ENABLE_HIP=ON)
+        run: |
+          cmake -S . -B build-hip -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DSTRATA_ENABLE_HIP=ON \
+            -DSTRATA_ENABLE_CUDA=OFF \
+            -DSTRATA_BUILD_TESTS=OFF \
+            -DCMAKE_HIP_ARCHITECTURES="gfx1100;gfx1201" \
+            -DSTRATA_MMQ_KQUANTS=ON \
+            -DSTRATA_Q6K_EXPERTS=ON
+      - name: Build ${{ env.STRATA_TARGET }}
+        run: cmake --build build-hip --target ${{ env.STRATA_TARGET }} --parallel 4
+
+  metal:
+    name: macOS arm64, Metal kernels and their parity tests
+    runs-on: macos-15
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Tools and Apple's metal-cpp headers
+        # The headers are the release's own, fetched and hash-checked by metal/setup_mac.py's metal_cpp(), so this job
+        # cannot drift from what a Mac user gets. -m pip is the same source setup uses.
+        run: |
+          python -m pip install --quiet cmake ninja
+          python - <<'PY'
+          import sys, pathlib
+          sys.path.insert(0, "metal")
+          sys.path.insert(0, ".")
+          import importlib.util
+          spec = importlib.util.spec_from_file_location("setup_mac", "metal/setup_mac.py")
+          m = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(m)
+          print("metal-cpp at", m.metal_cpp())
+          PY
+      - name: Configure the Metal tree
+        run: |
+          cmake -S metal -B build-metal -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DSTRATA_ROOT="$PWD" \
+            -DMETAL_CPP_DIR="$PWD/third_party/metal-cpp"
+      - name: Build every Metal target
+        run: cmake --build build-metal --parallel 4
