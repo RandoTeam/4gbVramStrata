@@ -83,6 +83,17 @@ constexpr int kTile[] = {32, 128};
 constexpr int kClasses = (int) (sizeof(kTile) / sizeof(kTile[0])) + 1;
 constexpr int kMaxStagedTiles = 8;   // the most size classes STRATA_FOURGBVRAM_STAGED_TILES makes of the staged experts
 
+// Whether a VMM allocation has a host location to fall back on, which is the 4 GB path's whole trick: the attention
+// caches grow into the host's RAM instead of pushing the expert cache out of the card.  TRUE ON CUDA ONLY - HIP's
+// memory-management API has no host location at all (hipMemLocationTypeDevice is the only one it defines), so there is
+// no sibling call to make, and a HIP card keeps its cache and gives VRAM back from it as it always did.  Named once,
+// here, so the three places that branch on it cannot drift.
+#if defined(STRATA_USE_HIP)
+constexpr bool kHostKvFallback = false;
+#else
+constexpr bool kHostKvFallback = true;
+#endif
+
 int tile_class(int rows) {
     int c = 0;
     while (c < kClasses - 1 && rows > kTile[c]) ++c;
@@ -863,9 +874,16 @@ void Engine::vmm_map(Mapped& m, size_t bytes, size_t piece, const char* what) {
 
     // A 4 GB card's attention caches may live in host RAM: the expert cache keeps the VRAM, and the caches grow into
     // the host's memory instead of pushing the experts out.  A piece of the pool is never host memory.
-    CUmemAllocationProp host_prop = {};
+    //
+    // CUDA only, and not a choice: HIP has no host location for a VMM allocation at all (hipMemLocationTypeDevice is
+    // the only one in the API), so there is no sibling call to make.  A HIP card loses this fallback and with it the
+    // case that matters most here - a 4 GB card of either vendor - which the HIP job in .github/workflows/backends.yml
+    // is the first place to say out loud.  What HIP still has is the `--vram-pool` path and the reserve.
+#if !defined(STRATA_USE_HIP)
+    CUmemAllocationProp host_prop = {};   // kHostKvFallback: absent on HIP, which has no host location
     host_prop.type = CU_MEM_ALLOCATION_TYPE_PINNED;
     host_prop.location.type = CU_MEM_LOCATION_TYPE_HOST;
+#endif
     CUmemAccessDesc access = {};
     access.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
     access.location.id = device_;
@@ -898,11 +916,14 @@ void Engine::vmm_map(Mapped& m, size_t bytes, size_t piece, const char* what) {
                 }
             }
             if (try_device) res = cuMemCreate(&h, n, &prop, 0);
-            // If device allocation was skipped or failed, and this is KV cache, fall back to Host RAM
-            if (res != CUDA_SUCCESS && is_kv) {
+#if !defined(STRATA_USE_HIP)
+            // If device allocation was skipped or failed, and this is KV cache, fall back to Host RAM (see the
+            // CU_MEM_LOCATION_TYPE_HOST note above: HIP has no such location, so it skips this and says why).
+            if (res != CUDA_SUCCESS && is_kv && kHostKvFallback) {
                 res = cuMemCreate(&h, n, &host_prop, 0);
                 host = res == CUDA_SUCCESS;
             }
+#endif
             if (res != CUDA_SUCCESS)
                 throw std::runtime_error("no VRAM for " + std::string(what) + " (" + std::to_string(n >> 20) +
                                          " MiB more)");
@@ -1353,9 +1374,11 @@ void Engine::cover(int64_t end) {
         // pool (shrink_cache()); nothing is asked of the card.  With the cache gone and the pool still short, the
         // maps below throw: the context does not fit the VRAM this engine has.
         if (more > vpool_bytes()) shrink_cache(more - vpool_bytes());
-    } else if (exp_ && !vmm_) {
-        // Without the pool but with VMM, vmm_map() gives the attention caches host memory when the card is short:
-        // the expert cache keeps its VRAM and the context grows into RAM (the 4 GB path).
+    } else if (exp_ && (!vmm_ || !kHostKvFallback)) {
+        // Without the pool but with VMM **and a host location to map into**, vmm_map() gives the attention caches host
+        // memory when the card is short: the expert cache keeps its VRAM and the context grows into RAM (the 4 GB path).
+        // Where that fallback does not exist - HIP, see kHostKvFallback - the cache is shrunk before the maps instead,
+        // which is what this branch always did; without this the maps would throw "no VRAM for the attention cache".
         size_t free_b = 0, total_b = 0;
         ck(cudaMemGetInfo(&free_b, &total_b), "cudaMemGetInfo");
         const size_t quarter = (size_t(std::max(reserve_mib_, 0)) << 20) / 4;
