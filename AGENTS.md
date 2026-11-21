@@ -82,9 +82,13 @@ the visible answer starts: use 2000 and up.
 **`docs/RELEASE.md` is the release contract** and outranks convenience: which platforms we build, what an asset must
 contain, the order of work, and what is deliberately not shipped. Two rules from it, because they are the ones broken
 first: an asset is published only for a platform this project has started on, and the tag names the commit that was
-built. `.github/workflows/checks.yml` runs the part of the gate that needs no card (the setup tests, both name checks,
-the release sources, the docs' links) on Linux for Python 3.10 and 3.12 and on Windows for 3.12 — **all three green
-since 2026-11-21, which is the first time this fork's suite ran on Windows**.
+built. Two workflows, and both are green since 2026-11-21:
+- `.github/workflows/checks.yml` — the part of the gate that needs no card: the setup tests, both name checks, the
+  release sources, the docs' links. Linux for Python 3.10 and 3.12 and Windows for 3.12, the first time this fork's
+  suite ran on Windows.
+- `.github/workflows/backends.yml` — compiles every backend: CUDA 13, CUDA 12, HIP and Metal. A compile is not a run,
+  so it never licenses a speed or a platform claim; what it does is make a kernel or an API that only one backend has
+  fail in CI. It found three such defects in its first hours.
 
 The release notes' table moves with `docs/BENCH-4GB.md`, and the tarball is rebuilt from the commit that changed a number.
 

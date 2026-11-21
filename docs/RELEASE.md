@@ -28,12 +28,12 @@ below is that capability filtered by what this project has a machine to verify o
 | Platform | Backend | Ships as | Status |
 | --- | --- | --- | --- |
 | **Linux x86-64** | CUDA 13 | engine `.tar.gz` + the installer tarball | **Built and measured here** — this is the reference platform |
-| **Linux x86-64** | CUDA 12 | engine `.tar.gz` | **Configured here, never built by this fork.** `setup.py --cuda 12` builds into `build-fourgbvram-cuda12` and adds `-DSTRATA_EXPERIMENTAL_SM60=ON`; no Pascal or Volta card has run it |
-| **Linux x86-64** | HIP (RX 7900 / RX 9070 / RX 6000 / Strix Halo) | engine `.tar.gz` per card family | **Not shipped yet, and not built here.** The target `strata-fourgbvram` is registered under `STRATA_ENABLE_HIP` too, so the sources are meant to build; this fork has no AMD card, so it has never compiled or started the HIP engine. Say "build from source", do not ship it |
+| **Linux x86-64** | CUDA 12 | engine `.tar.gz` | **Compiled in CI since 2026-11-21** (`sm_60;61;70;86`), never started on a Pascal or Volta card |
+| **Linux x86-64** | HIP (RX 7900 / RX 9070 / RX 6000 / Strix Halo) | engine `.tar.gz` per card family | **Compiled in CI since 2026-11-21** (`gfx1100;gfx1201`, ROCm 7.2), never started on an AMD card. Not shipped: compile is not a run |
 | **Windows x86-64** | CUDA 13 | engine `.zip` + the installer zip | **Shipped, not re-measured since poly.10.** Built on a Windows PC (no cross-compile from Linux: MSVC, `vcvars64.bat` and the CUDA toolkit are the release's tools) |
 | **Windows x86-64** | HIP | engine `.zip` | **Not shipped**: same reason as Linux HIP |
 | **Linux aarch64** | CUDA 13 | engine `.tar.gz` | **Not shipped**: no ARM machine here. Strata ships it; we do not |
-| **macOS arm64** | Metal | engine `.tar.gz` | **Not shipped**: `metal/` has this fork's `src/fourgbvram/` port, but nothing has run it on a Mac. Strata ships a `dmg`; that is its app, not our engine |
+| **macOS arm64** | Metal | engine `.tar.gz` | **Compiled in CI since 2026-11-21** (macos-26, every Metal target and its parity tests), never started on a Mac. Not shipped: compile is not a run |
 | Intel (SYCL) | SYCL | — | **Not shipped**: `setup.py` offers it; it is the donor's, unverified here |
 
 A row moves to "shipped" only with the run that justifies it written down: a card, a model, a context, a speed and its
@@ -97,6 +97,11 @@ log. That is not bureaucracy — it is the only way "works on Linux and Windows"
   time this fork's suite ran on Windows, and the reason to trust that the tree really is one tree.
   It does not run `package_release_131k.py --check` in full: that requires the compiled engine, so CI uses its
   `--no-engine` form and a release runs the full one.
+  `.github/workflows/backends.yml` is the other half, and it compiles instead of testing: **CUDA 13, CUDA 12, HIP and
+  Metal, all four green on 2026-11-21** - the first time this fork compiled any of them but CUDA 13. On the way it
+  found three defects that had never been reachable: a CUDA-only constant in the 4 GB host-KV fallback that HIP does
+  not define, an `MTLGPUFamilyMetal4` name that only the macOS 26 SDK has, and the Metal tree needing a llama.cpp
+  checkout that a fresh clone does not carry. A compile is still not a run: the matrix above keeps saying so.
 - **No signed feeds, no `.sig`.** Strata signs its assets; this fork does not. `setup.py` checks a downloaded engine
   against the size and SHA-256 GitHub's release API publishes for that asset, and `verify_engine_archive` states what
   that does not cover in its own docstring: a digest proves the bytes are the ones GitHub released, not that they are
