@@ -66,7 +66,12 @@ bool Context::has_family_apple(int n) const {
     return [impl_->dev supportsFamily:(MTLGPUFamily)(MTLGPUFamilyApple1 + (n - 1))];
 }
 bool Context::supports_metal4() const {
+    // MTLGPUFamilyMetal4 exists from the macOS 26 SDK on; a toolchain older than that (Xcode 16 and earlier) has no
+    // such constant to name, and @available() alone does not help - the identifier must exist at compile time. The
+    // availability check stays for the SDK, the family name is behind the SDK's own version macro.
+#if __MAC_OS_X_VERSION_MAX_ALLOWED >= 260000
     if (@available(macOS 26.0, *)) return [impl_->dev supportsFamily:MTLGPUFamilyMetal4];
+#endif
     return false;
 }
 uint64_t Context::recommended_working_set() const { return [impl_->dev recommendedMaxWorkingSetSize]; }

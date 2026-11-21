@@ -152,7 +152,11 @@ jobs:
 
   metal:
     name: macOS arm64, Metal kernels and their parity tests
-    runs-on: macos-15
+    # macos-26 on purpose: the tree was written against the macOS 26 SDK (metal/setup_mac.py's MIN_MACOS and the
+    # metal-cpp_26 headers it pins), and MTLGPUFamilyMetal4 is named there. macos-15's Xcode 16 has no such constant
+    # and the first run failed on it; the code now compiles under both (that is what the SDK guard in
+    # Context::supports_metal4() is for), but this job should build against the SDK the release targets.
+    runs-on: macos-26
     timeout-minutes: 75
     steps:
       - uses: actions/checkout@v5

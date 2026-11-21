@@ -28,6 +28,8 @@ typedef hipMemAllocationProp CUmemAllocationProp;
 typedef hipMemAccessDesc CUmemAccessDesc;
 
 #define CUDA_SUCCESS hipSuccess
+// The value the CUDA code uses as "the create failed", before it tries the next location: HIP names it hipErrorOutOfMemory
+#define CUDA_ERROR_OUT_OF_MEMORY hipErrorOutOfMemory
 #define CU_MEM_ALLOCATION_TYPE_PINNED hipMemAllocationTypePinned
 #define CU_MEM_LOCATION_TYPE_DEVICE hipMemLocationTypeDevice
 #define CU_MEM_ACCESS_FLAGS_PROT_READWRITE hipMemAccessFlagsProtReadWrite

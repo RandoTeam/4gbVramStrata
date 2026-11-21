@@ -62,10 +62,16 @@ int main(int argc, char** argv) {
     std::printf("recommendedMaxWorkingSetSize: %llu (%.2f GiB)\n", (unsigned long long) dev->recommendedMaxWorkingSetSize(),
                 dev->recommendedMaxWorkingSetSize() / 1073741824.0);
     std::printf("maxThreadgroupMemoryLength: %llu\n", (unsigned long long) dev->maxThreadgroupMemoryLength());
-    std::printf("families: apple7 %d apple8 %d apple9 %d apple10 %d metal3 %d metal4 %d\n", (int) dev->supportsFamily(MTL::GPUFamilyApple7),
+    std::printf("families: apple7 %d apple8 %d apple9 %d apple10 %d metal3 %d\n", (int) dev->supportsFamily(MTL::GPUFamilyApple7),
                 (int) dev->supportsFamily(MTL::GPUFamilyApple8), (int) dev->supportsFamily(MTL::GPUFamilyApple9),
-                (int) dev->supportsFamily(MTL::GPUFamilyApple10), (int) dev->supportsFamily(MTL::GPUFamilyMetal3),
-                (int) dev->supportsFamily(MTL::GPUFamilyMetal4));
+                (int) dev->supportsFamily(MTL::GPUFamilyApple10), (int) dev->supportsFamily(MTL::GPUFamilyMetal3));
+    // MTL::GPUFamilyMetal4 exists from the macOS 26 SDK on; naming it on an older toolchain does not compile, even
+    // inside a runtime check (see Context::supports_metal4() in src/mtl_rt.mm).
+#if __MAC_OS_X_VERSION_MAX_ALLOWED >= 260000
+    std::printf("metal4 %d\n", (int) dev->supportsFamily(MTL::GPUFamilyMetal4));
+#else
+    std::printf("metal4: not in this SDK\n");
+#endif
     std::printf("page size: %ld\n", sysconf(_SC_PAGESIZE));
 
     // ---- 2. run-time MSL compile
