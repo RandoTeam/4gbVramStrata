@@ -78,8 +78,8 @@ Asked directly, so answered directly: **an Android port of this engine is not po
   would be an app around *that* - a different engine, a different memory model (unified memory, no expert cache to
   swap into), and a different project.
 - **Neither donor does it.** Strata's tree has `app/desktop/src-tauri/icons/android/**` - launcher icons for a Tauri
-  build of its **desktop** app - and no Android engine, kernel or backend anywhere. PolyStrata mentions Android in
-  neither its README nor its docs.
+  build of its **desktop** app - and no Android engine, kernel or backend anywhere. The engine line this fork follows,
+  [PolyStrata](https://github.com/VecSzn/PolyStrata), mentions Android in neither its README nor its docs.
 - **What this fork could offer a phone** is not an engine but a **server**: the API on `127.0.0.1:8080` speaks OpenAI
   and Anthropic, so an Android app can talk to a 4 GB laptop over the local network. That is a real, small piece of
   work - a client, not a port - and it belongs in its own project.

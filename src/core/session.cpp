@@ -20,14 +20,12 @@
 #include <cstring>
 #include <vector>
 
-// `_mm_pause` for the doorbell spin.  Guarded because it is x86-only; a target without it still builds, the
-// spin is just less polite to the pipeline.
-#if defined(_MSC_VER) || defined(__x86_64__) || defined(__i386__)
-#include <immintrin.h>
-#define STRATA_SPIN_PAUSE() _mm_pause()
-#else
-#define STRATA_SPIN_PAUSE() ((void) 0)
-#endif
+// The doorbell spin's hint, and the store barrier: both come from strata/core/cpu_hint.hpp, which maps them per
+// architecture (x86: PAUSE and SFENCE; aarch64: yield and dmb ishst; elsewhere a plain release fence). This file used
+// to carry its own x86-only guard for the pause and an unguarded _mm_sfence below it, which is why it was the second
+// file an aarch64 build would have failed on.
+#include "strata/core/cpu_hint.hpp"
+#define STRATA_SPIN_PAUSE() cpu_pause()
 
 namespace strata::core {
 namespace {
@@ -970,7 +968,7 @@ bool session_run_token(const ModelGeometry& g, int64_t pos, int32_t pos_base, Se
         progress_at("token: the CPU experts of layer", l);
         if (pool != nullptr) pool(user, s.db->h_x_f, s.db->h_ids, s.db->h_weights, g.n_embd, s.k, y_miss_host);
         std::atomic_thread_fence(std::memory_order_seq_cst);
-        _mm_sfence();
+        cpu_store_fence();
         *flag = want;
         const auto t2 = Clock::now();
         tg.ms_wait += std::chrono::duration<double, std::milli>(t1 - t0).count();
