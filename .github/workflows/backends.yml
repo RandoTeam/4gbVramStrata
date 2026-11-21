@@ -131,13 +131,20 @@ jobs:
         run: |
           apt-get update -qq && apt-get install -y -qq --no-install-recommends cmake ninja-build git ca-certificates
       - name: Configure the AMD path as setup.py does (-DSTRATA_ENABLE_HIP=ON)
+        # setup.py passes a CMAKE_PREFIX_PATH built from rocm_root() and the HIP flags with --rocm-path; the first run
+        # of this job failed in find_package(hip CONFIG) because it passed neither. The ROCm image's prefix is well
+        # known, so it is spelled out here instead of being discovered at run time.
         run: |
+          ROCM=/opt/rocm
           cmake -S . -B build-hip -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
             -DSTRATA_ENABLE_HIP=ON \
             -DSTRATA_ENABLE_CUDA=OFF \
             -DSTRATA_BUILD_TESTS=OFF \
             -DCMAKE_HIP_ARCHITECTURES="gfx1100;gfx1201" \
+            -DCMAKE_HIP_COMPILER="$ROCM/lib/llvm/bin/clang++" \
+            -DCMAKE_PREFIX_PATH="$ROCM;$ROCM/lib/cmake" \
+            -DCMAKE_HIP_FLAGS="--rocm-path=$ROCM" \
             -DSTRATA_MMQ_KQUANTS=ON \
             -DSTRATA_Q6K_EXPERTS=ON
       - name: Build ${{ env.STRATA_TARGET }}
@@ -152,26 +159,33 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: '3.12'
-      - name: Tools and Apple's metal-cpp headers
-        # The headers are the release's own, fetched and hash-checked by metal/setup_mac.py's metal_cpp(), so this job
-        # cannot drift from what a Mac user gets. -m pip is the same source setup uses.
+      - name: Tools, Apple's metal-cpp headers and the pinned llama.cpp
+        # metal/ needs STRATA_GGML_DIR: a llama.cpp checkout, which a fresh clone does not have. Both downloads go
+        # through the same functions setup.py and metal/setup_mac.py use (get_llama_cpp(), metal_cpp()), so this job
+        # builds against the pinned commit and the hash-checked headers a Mac user gets, not against whatever was
+        # current that day. -m pip is the same source setup uses for cmake/ninja.
         run: |
           python -m pip install --quiet cmake ninja
           python - <<'PY'
-          import sys, pathlib
-          sys.path.insert(0, "metal")
+          import importlib.util, pathlib, sys
           sys.path.insert(0, ".")
-          import importlib.util
-          spec = importlib.util.spec_from_file_location("setup_mac", "metal/setup_mac.py")
-          m = importlib.util.module_from_spec(spec)
-          spec.loader.exec_module(m)
-          print("metal-cpp at", m.metal_cpp())
+          spec = importlib.util.spec_from_file_location("setup", "setup.py")
+          S = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(S)
+          print("llama.cpp at", S.get_llama_cpp())
+          spec2 = importlib.util.spec_from_file_location("setup_mac", "metal/setup_mac.py")
+          M = importlib.util.module_from_spec(spec2)
+          spec2.loader.exec_module(M)
+          print("metal-cpp at", M.metal_cpp())
           PY
       - name: Configure the Metal tree
+        # No -DSTRATA_ROOT: metal/CMakeLists.txt derives it from its own location
+        # (get_filename_component(... "${CMAKE_CURRENT_SOURCE_DIR}/..")). Passing it overwrote that with a value the
+        # first run got wrong, and the configure failed before it read a single source.
         run: |
           cmake -S metal -B build-metal -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
-            -DSTRATA_ROOT="$PWD" \
+            -DSTRATA_GGML_DIR="$PWD/third_party/llama.cpp" \
             -DMETAL_CPP_DIR="$PWD/third_party/metal-cpp"
       - name: Build every Metal target
         run: cmake --build build-metal --parallel 4

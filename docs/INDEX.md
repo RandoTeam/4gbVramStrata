@@ -14,6 +14,7 @@ of BENCH-4GB.md is this repository's current result. Only these pages carry numb
 | [QUALITY-4GB.md](QUALITY-4GB.md) | The 22-prompt gate, how it runs, and what it caught |
 | [MEMORY-4GB.md](MEMORY-4GB.md) | Where the bytes live: VRAM, RAM and SSD per model and per token |
 | [MODELS-4GB.md](MODELS-4GB.md) | Which of the twelve models fits this card, and what each one scores |
+| [MODELS-PLAN.md](MODELS-PLAN.md) | What is measured and what only estimated, the order to work through the other families, and what adding a new architecture (GPT-OSS) actually costs |
 | [models/clover.md](models/clover.md), [models/flint.md](models/flint.md) | The two models this fork is about |
 
 The measurements live in the repository as well, with their conditions: `bench/speed/` (speed, with a saved prompt and
