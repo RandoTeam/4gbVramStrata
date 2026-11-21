@@ -7,7 +7,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
-#include <immintrin.h>
+#include "spin.hpp"
 #include <mutex>
 #include <numeric>
 
@@ -88,7 +88,7 @@ void Workers::loop() {
             seen = now;
         }
         if (++idle < kSpinsBeforeSleep) {
-            _mm_pause();
+            spin_pause();
             continue;
         }
         // run() counts posted_ up before it reads sleepers_, and wait() returns at once when posted_ has moved
@@ -117,8 +117,8 @@ void Workers::run(int n, const std::function<void(int)>& fn) {
     if (sleepers_.load() > 0) posted_.notify_all();
     drain(b);
     cur_.store(nullptr);   // every task is taken: a worker that comes now has nothing to find
-    while (b.left.load(std::memory_order_acquire) != 0) _mm_pause();
-    while (users_.load() != 0) _mm_pause();
+    while (b.left.load(std::memory_order_acquire) != 0) spin_pause();
+    while (users_.load() != 0) spin_pause();
 }
 
 bool cpu_expert_types_ok(int gu_type, int d_type, int n_embd, int n_ff, std::string& err) {

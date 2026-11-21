@@ -150,6 +150,37 @@ jobs:
       - name: Build ${{ env.STRATA_TARGET }}
         run: cmake --build build-hip --target ${{ env.STRATA_TARGET }} --parallel 4
 
+  aarch64:
+    name: Linux aarch64, CUDA 13 (provisional)
+    # Provisional and allowed to fail until its first run reports: the engine's own sources are aarch64-clean as of
+    # 2026-11-21 (src/fourgbvram/spin.hpp replaced the unconditional <immintrin.h>), but everything after that is
+    # untested - ggml-cpu's NEON path, the MMQ kernel instances, and a CUDA driver on ARM (NVIDIA publishes arm64
+    # images for Grace and Jetson, not for a laptop). See docs/PLATFORMS.md. The point of the row is that this job,
+    # not a paragraph, answers the question from now on.
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 120
+    continue-on-error: true
+    container:
+      image: nvidia/cuda:13.0.2-devel-ubuntu24.04
+      options: --platform linux/arm64
+    steps:
+      - uses: actions/checkout@v5
+      - name: Tools
+        run: |
+          apt-get update -qq && apt-get install -y -qq --no-install-recommends cmake ninja-build git ca-certificates
+      - name: Configure (the release's line)
+        run: |
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DSTRATA_ENABLE_CUDA=ON \
+            -DSTRATA_ENABLE_HIP=OFF \
+            -DSTRATA_BUILD_TESTS=OFF \
+            -DCMAKE_CUDA_ARCHITECTURES="87-real" \
+            -DSTRATA_MMQ_KQUANTS=ON \
+            -DSTRATA_Q6K_EXPERTS=ON
+      - name: Build ${{ env.STRATA_TARGET }}
+        run: cmake --build build --target ${{ env.STRATA_TARGET }} --parallel 4
+
   metal:
     name: macOS arm64, Metal kernels and their parity tests
     # macos-26 on purpose: the tree was written against the macOS 26 SDK (metal/setup_mac.py's MIN_MACOS and the

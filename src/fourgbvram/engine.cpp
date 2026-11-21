@@ -35,7 +35,7 @@
 #include <cstring>
 #include <exception>
 #include <filesystem>
-#include <immintrin.h>
+#include "spin.hpp"
 #include <new>
 #include <numeric>
 #include <stdexcept>
@@ -3980,7 +3980,7 @@ void Engine::pool_loop() {
     for (;;) {
         const Clock::time_point t0 = Clock::now();
         while (pool_n_.load(std::memory_order_acquire) == 0 && Clock::now() - t0 < std::chrono::milliseconds(2))
-            _mm_pause();
+            spin_pause();
         PoolJob job;
         {
             std::unique_lock<std::mutex> l(pool_m_);
