@@ -151,15 +151,13 @@ jobs:
         run: cmake --build build-hip --target ${{ env.STRATA_TARGET }} --parallel 4
 
   aarch64:
-    name: Linux aarch64, CUDA 13 (provisional)
-    # Provisional and allowed to fail until its first run reports: the engine's own sources are aarch64-clean as of
-    # 2026-11-21 (src/fourgbvram/spin.hpp replaced the unconditional <immintrin.h>), but everything after that is
-    # untested - ggml-cpu's NEON path, the MMQ kernel instances, and a CUDA driver on ARM (NVIDIA publishes arm64
-    # images for Grace and Jetson, not for a laptop). See docs/PLATFORMS.md. The point of the row is that this job,
-    # not a paragraph, answers the question from now on.
+    name: Linux aarch64, CUDA 13
+    # GREEN SINCE 2026-11-21 (run 44897805629, 5m50s): the whole engine compiles for arm64, which it did not before
+    # this session ended - src/fourgbvram/spin.hpp and include/strata/core/cpu_hint.hpp replaced the unconditional
+    # <immintrin.h> includes, and this job is what found them. It is a gate now, not a report. Still true: a compile is
+    # not a run, so docs/PLATFORMS.md keeps the aarch64 row out of "ships as a download".
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 120
-    continue-on-error: true
     container:
       image: nvidia/cuda:13.0.2-devel-ubuntu24.04
       options: --platform linux/arm64

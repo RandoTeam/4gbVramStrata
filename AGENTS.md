@@ -86,9 +86,13 @@ built. Two workflows, and both are green since 2026-11-21:
 - `.github/workflows/checks.yml` — the part of the gate that needs no card: the setup tests, both name checks, the
   release sources, the docs' links. Linux for Python 3.10 and 3.12 and Windows for 3.12, the first time this fork's
   suite ran on Windows.
-- `.github/workflows/backends.yml` — compiles every backend: CUDA 13, CUDA 12, HIP and Metal. A compile is not a run,
-  so it never licenses a speed or a platform claim; what it does is make a kernel or an API that only one backend has
-  fail in CI. It found three such defects in its first hours.
+- `.github/workflows/backends.yml` — compiles every backend: CUDA 13, CUDA 12, HIP, aarch64 and Metal, five jobs. A
+  compile is not a run, so it never licenses a speed or a platform claim; what it does is make a kernel or an API that
+  only one backend has fail in CI. In its first hours it found five defects, all real: a CUDA-only constant in the 4 GB
+  host-KV fallback that HIP does not define, an `MTLGPUFamilyMetal4` name only the macOS 26 SDK has, the Metal tree
+  needing a llama.cpp checkout a fresh clone lacks, and two unconditional `<immintrin.h>` includes (this fork's engine,
+  then four files of the donor's core) that made an aarch64 build impossible. `docs/PLATFORMS.md` is every platform in
+  one table, with the three states kept apart: compiles in CI, started on hardware, ships as a download.
 
 The release notes' table moves with `docs/BENCH-4GB.md`, and the tarball is rebuilt from the commit that changed a number.
 

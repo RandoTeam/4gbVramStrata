@@ -17,7 +17,7 @@ has one machine: an RTX 3050 Laptop, 4 GB, x86-64 Linux. Everything else is a co
 | **Windows x86-64** | CUDA 13 | ❌ **impossible on GitHub's runners** (no CUDA toolkit in the images, see below) | ⚠️ measured before poly.10 | ✅ (prebuilt `.exe` per release) |
 | **Windows x86-64** | HIP | ❌ same reason | ❌ | ❌ |
 | **macOS arm64** | Metal | ✅ `metal` job on macos-26, 1m — *first ever* | ❌ no Mac here | ❌ |
-| **Linux aarch64** | CUDA 13 | ❌ **blocked by three x86-only constructs** (see below) | ❌ | ❌ |
+| **Linux aarch64** | CUDA 13 | ✅ `aarch64` job on `ubuntu-24.04-arm`, 5m50s — *first ever on 2026-11-21* | ❌ no ARM machine here | ❌ |
 | **Linux x86-64** | SYCL (Intel Arc) | ❌ not a backend of this engine | ❌ | ❌ |
 | **Android** | — | ❌ **not possible, and not a build problem** | ❌ | ❌ |
 | **Any** | CPU only | ❌ the engine's target does not exist without a GPU backend | — | ❌ |
@@ -61,10 +61,12 @@ possible. What stops the build is three x86-only constructs in the engine's own 
 | `src/fourgbvram/stage_copy.hpp` | SSE2 streaming stores | **already portable**: guarded behind `__SSE2__ || _M_X64 || _M_IX86_FP`, falls back to `memcpy` |
 | `src/kernels/cpu/*.cpp` (AVX2/AVX-512) | 11 files with real intrinsics | **does not block this engine**: `strata-fourgbvram` links `strata_fourgbvram_mmq`, `strata_kernels` (CUDA), `strata_spec` and `ggml-cpu` - **not** `strata_kernels_cpu`, which is the second engine's (`strata_qwen35`) and `strata_engine`'s |
 
-So the engine's own sources are aarch64-clean as of 2026-11-21, and what remains unknown is everything after that: the
-CUDA driver on ARM (NVIDIA's `arm64` images exist for Grace/Jetson, not for a laptop's RTX), `ggml-cpu`'s NEON path,
-and whether `strata_fourgbvram_mmq`'s kernel instances build. **A job now asks instead of this page guessing** - see
-the `aarch64` job in `backends.yml`, marked provisional until its first run reports.
+**The job answered it on 2026-11-21 (run 44897805629): the whole engine compiles for arm64, in 5m50s.** Its first
+run is also what found the last blocker, which was not in this fork's engine at all: four files of the donor's core
+(`graph.cpp`, `session.cpp`, `mtp.cpp`, `verify.cpp`) included `<immintrin.h>` for exactly two intrinsics, `_mm_pause`
+and `_mm_sfence`. `include/strata/core/cpu_hint.hpp` now maps that pair per architecture - PAUSE and SFENCE on x86,
+`yield` and `dmb ishst` on aarch64, a release fence elsewhere - and the four files call it. This table's rule still
+applies: **compiled, not run.** No ARM machine has started a model, so the row stays out of "ships as a download".
 
 ## Android: not a build target, and the reason is hardware
 
@@ -100,7 +102,7 @@ engine, and this project should not pretend otherwise.
 1. **A Windows CUDA build that CI can trust** - honestly: not possible on hosted runners. The alternative is a
    self-hosted Windows runner, which is a machine this project does not have. Until then the Windows row stays
    "shipped, not re-measured" and says so.
-2. **The aarch64 patch** (two includes, one pause) and then an `ubuntu-24.04-arm` job in `backends.yml`. Cheap, and it
-   turns a blocked row into a compiled one - which is still not "runs".
+2. ~~**The aarch64 patch**~~ - **done on 2026-11-21**: the job compiles the whole engine for arm64 in 5m50s, which is
+   still not "runs". Next would be a distribution that ships it, and that needs an ARM machine to start a model on.
 3. **A 6 GB or AMD card in the loop** would let HIP and the 6 GB row leave the estimate column. That is hardware, not
    code.

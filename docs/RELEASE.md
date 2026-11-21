@@ -32,7 +32,7 @@ below is that capability filtered by what this project has a machine to verify o
 | **Linux x86-64** | HIP (RX 7900 / RX 9070 / RX 6000 / Strix Halo) | engine `.tar.gz` per card family | **Compiled in CI since 2026-11-21** (`gfx1100;gfx1201`, ROCm 7.2), never started on an AMD card. Not shipped: compile is not a run |
 | **Windows x86-64** | CUDA 13 | engine `.zip` + the installer zip | **Shipped, not re-measured since poly.10.** Built on a Windows PC (no cross-compile from Linux: MSVC, `vcvars64.bat` and the CUDA toolkit are the release's tools) |
 | **Windows x86-64** | HIP | engine `.zip` | **Not shipped**: same reason as Linux HIP |
-| **Linux aarch64** | CUDA 13 | engine `.tar.gz` | **Not shipped**: no ARM machine here. Strata ships it; we do not |
+| **Linux aarch64** | CUDA 13 | engine `.tar.gz` | **Compiled in CI since 2026-11-21** (`ubuntu-24.04-arm`, 5m50s), never started on an ARM machine. Not shipped: compile is not a run |
 | **macOS arm64** | Metal | engine `.tar.gz` | **Compiled in CI since 2026-11-21** (macos-26, every Metal target and its parity tests), never started on a Mac. Not shipped: compile is not a run |
 | Intel (SYCL) | SYCL | — | **Not shipped**: `setup.py` offers it; it is the donor's, unverified here |
 
@@ -108,6 +108,9 @@ log. That is not bureaucracy — it is the only way "works on Linux and Windows"
   honest. A hash pinned in `setup.py` per release is the only thing that closes that, at a commit per release, and
   Strata's `.sig` files are the stronger version of the same idea. Neither exists here yet, and `docs/RELEASE.md`
   says so rather than calling a checksum a signature.
+- **No distribution for a platform nothing has run on.** Reachable today and deliberately not shipped: Linux aarch64
+  (compiles, 5m50s in CI, no ARM machine here) and Linux HIP (compiles, no AMD card here). A tarball is a promise that
+  somebody started it; a "build from source" line is the truth.
 - **No cross-compilation.** A Windows engine is built on Windows. `tools/build_131k.bat` used to exist here and was
   removed as stale; when a Windows asset is rebuilt, it is rebuilt with `setup.py` on a Windows PC, by the same
   configure line, and its `BUILD.json` names the commit.
