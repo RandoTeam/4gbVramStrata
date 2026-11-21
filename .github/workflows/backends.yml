@@ -16,9 +16,11 @@
 #
 # What is NOT here, and why - both are honest gaps rather than oversights:
 #   Windows CUDA.  The GitHub Windows images carry no CUDA toolkit (checked in Windows2025-Readme.md: Visual Studio yes,
-#                  no NVIDIA entry), and a container cannot supply MSVC + Nsight-incompatible `nvcc` on Windows the way
-#                  `nvidia/cuda` does on Ubuntu. A CUDA build for Windows therefore stays the maintainer's PC, as
-#                  docs/RELEASE.md says. What Windows DOES cover is the setup suite (checks.yml: 784 tests, green there).
+#                  no NVIDIA entry), and a container cannot supply MSVC + nvcc on Windows the way `nvidia/cuda` does on
+#                  Ubuntu. A CUDA build for Windows therefore stays the maintainer's PC, as docs/RELEASE.md says.
+#   -- but there IS a `windows` job below, and it is not a compromise: MSVC, no GPU backend, all 41 host targets built
+#      and the 40 that need no card RUN. That is the same shape as Strata's own check.yml, and it is what a Windows
+#      install exercises before a model starts.
 #   A CPU-only Windows build is impossible for a second reason worth knowing: `strata-fourgbvram` is registered only
 #   under `STRATA_ENABLE_CUDA OR STRATA_ENABLE_HIP` (CMakeLists.txt:2054), so a CUDA-less configure builds this engine
 #   not at all - it would configure, compile zero engine files and report success. `strata_kernels_cpu` and
@@ -149,6 +151,75 @@ jobs:
             -DSTRATA_Q6K_EXPERTS=ON
       - name: Build ${{ env.STRATA_TARGET }}
         run: cmake --build build-hip --target ${{ env.STRATA_TARGET }} --parallel 4
+
+  windows:
+    name: Windows x64, MSVC, host tests (no CUDA)
+    # What this job is, and why it exists after the note above says a Windows CUDA engine is not buildable here:
+    # this fork ships to Windows, and until now nothing in CI opened the tree on Windows except the setup suite, which
+    # mocks WIN on Linux. This job configures with MSVC for real, builds all 41 host targets, and RUNS the 40 that do
+    # not need a card - deliberately the same shape as Strata's `.github/workflows/check.yml`, whose Windows matrix
+    # has a "cpu CMake preset (MSVC)" step for exactly this reason.
+    #
+    # It proves what the Windows build of this tree can prove without a GPU: the _WIN32 branches in engine.cpp,
+    # spill.cpp, main.cpp and the platform layer, the conversation cache, the expert tier, the CPU-expert pool, and
+    # 40 tests' worth of behaviour. It does not prove a kernel runs - no runner has a card, and none will.
+    #
+    # The list of tests is taken from the CONFIGURED tree rather than written here, so a target added later is built
+    # and run too, and one that disappears cannot silently stop being run.
+    runs-on: windows-2025
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Tools
+        run: python -m pip install --quiet cmake ninja
+      - name: Configure with MSVC and no GPU backend
+        # The conversation tests are their own option (STRATA_BUILD_CONVERSATION_TESTS, OFF by default) and they are
+        # the part of the tree a Windows user's installer actually exercises; the first local run of this list found
+        # them missing until it was added.
+        run: |
+          cmake -S . -B build -G Ninja `
+            -DCMAKE_BUILD_TYPE=Release `
+            -DSTRATA_ENABLE_CUDA=OFF `
+            -DSTRATA_ENABLE_HIP=OFF `
+            -DSTRATA_BUILD_TESTS=ON `
+            -DSTRATA_BUILD_CONVERSATION_TESTS=ON
+      - name: Build every host target
+        shell: bash
+        # `ninja -t targets`, not `cmake --build --target help`: the latter lists only the phony convenience targets
+        # (edit_cache, install, ...) and NONE of this tree's tests - measured locally, 0 matches against 82 from ninja.
+        # With `--target help` this step would have built nothing and reported success.
+        run: |
+          set -eu
+          # cmake_object_order_depends_target_* entries are build-graph plumbing, not programs; the rest are targets.
+          targets=$(ninja -C build -t targets all | grep -oE '^[a-z0-9_]+_test:' | tr -d ':' \
+                    | grep -v '^cmake_object_order' | sort -u | tr '\n' ' ')
+          echo "host targets: $targets"
+          [ -n "$targets" ] || { echo "the configuration produced no test target, which is not a pass"; exit 1; }
+          echo "$targets" > host-targets.txt
+          cmake --build build --target $targets --parallel 4
+      - name: Run them
+        shell: bash
+        # A target that exits 77 says it needs a card or a device: skipped, not failed, which is the same convention
+        # the rest of this tree uses.
+        run: |
+          set -u
+          pass=0; skip=0; fail=0
+          for t in $(cat host-targets.txt); do
+            exe="./build/${t}.exe"
+            [ -f "$exe" ] || exe="./build/${t}"
+            [ -f "$exe" ] || continue
+            "$exe" >/dev/null 2>&1
+            rc=$?
+            if [ $rc -eq 0 ]; then pass=$((pass+1))
+            elif [ $rc -eq 77 ]; then skip=$((skip+1))
+            else echo "FAIL $t (exit $rc)"; fail=$((fail+1)); fi
+          done
+          echo "passed $pass, skipped $skip, failed $fail"
+          [ "$fail" -eq 0 ] || exit 1
+          [ "$pass" -ge 30 ] || { echo "only $pass tests ran: the list is wrong, which is not a pass"; exit 1; }
 
   aarch64:
     name: Linux aarch64, CUDA 13
