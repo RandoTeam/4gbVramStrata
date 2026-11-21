@@ -198,16 +198,23 @@ jobs:
                     | grep -v '^cmake_object_order' | sort -u | tr '\n' ' ')
           echo "host targets: $targets"
           [ -n "$targets" ] || { echo "the configuration produced no test target, which is not a pass"; exit 1; }
-          echo "$targets" > host-targets.txt
           cmake --build build --target $targets --parallel 4
       - name: Run them
         shell: bash
+        # Two things the first run taught, both measured: `host-targets.txt` written by the step above is not here -
+        # each step on Windows starts a fresh shell, and writing it to the workspace was the mistake; the list is
+        # therefore rebuilt from the build tree in this step. And a non-zero exit must not abort the loop before it
+        # reports, so `set +e` (the step still fails through the explicit check at the end).
+        #
         # A target that exits 77 says it needs a card or a device: skipped, not failed, which is the same convention
         # the rest of this tree uses.
         run: |
-          set -u
+          set +e
+          targets=$(ninja -C build -t targets all | grep -oE '^[a-z0-9_]+_test:' | tr -d ':' \
+                    | grep -v '^cmake_object_order' | sort -u)
+          echo "about to run: $(echo "$targets" | wc -l) targets"
           pass=0; skip=0; fail=0
-          for t in $(cat host-targets.txt); do
+          for t in $targets; do
             exe="./build/${t}.exe"
             [ -f "$exe" ] || exe="./build/${t}"
             [ -f "$exe" ] || continue
