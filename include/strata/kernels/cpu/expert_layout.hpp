@@ -44,6 +44,17 @@ struct ExpertLayout {
 /// Plan v0.3 P6: whether this CPU (and its OS) runs the AVX-512 kernels (F, BW, VL, VNNI, VBMI).  Probed in a
 /// file compiled without AVX-512, so asking is safe everywhere; STRATA_FORCE_AVX2=1 answers no (for tests).
 bool cpu_avx512_ok();
+/// The same probes with VBMI required only (the multishift unpack and other byte-permute shuffles): a CPU may run
+/// every other feature the kernels use and miss it (Cascade Lake Xeon).
+bool cpu_vbmi_ok();
+/// AVX-512F + DQ + BW + VL + VNNI, VBMI NOT required: the dpbusd row dots, the q8 quantizer and the dq/bw arithmetic
+/// need no byte-permute shuffles (the q2 unpack's op has a substitute in expert.cpp).  A CPU this answers yes on
+/// used to run every expert through the AVX-2 fallback. Without VBMI, STRATA_VNNI_TIER=1 opts in; unset keeps
+/// the AVX-2 rows' rounding. STRATA_FORCE_AVX2 and STRATA_FORCE_ISA still cap this probe.
+bool cpu_vnni_ok();
+/// Scattered pieces: the copy above is a declaration only (defined in expert.cpp, the AVX-512 TU, because it reads
+/// its STRATA_CPU_YMM switch): whether the 512-bit q2 row dot may run at all (VNNI and not the YMM env).
+bool q2_rows_512_ok();
 /// Whether this CPU runs AVX-512F + AVX-512BW + AVX-512VL + AVX-512DQ (e.g. Skylake-X i9-9920X) for iq_avx512.cpp.
 bool cpu_avx512bw_ok();
 /// Whether this CPU (and its OS) runs the AVX2 kernels (AVX, AVX2, FMA, F16C): the floor of every expert kernel
@@ -75,10 +86,11 @@ bool cpu_gather_fast_here();
 /// STRATA_FORCE_ISA, and not an older-CPU build (STRATA_ISA_FLOOR, which stays on its floor and AVX2).
 /// STRATA_NO_AVXVNNI=1 answers no.
 bool cpu_avxvnni_ok();
-/// Whether a native pack's layer of this ggml type runs on Strata's own Q2_0 kernels (AVX2 / AVX-512).  On a
-/// CPU without AVX2 (a native, non-portable build: ggml-cpu compiled for this CPU's SSE) a Q2_0 layer takes
-/// ggml-cpu's own Q2_0 vec_dot like every other native type: slower, but it runs.
-inline bool q2_native_kernels(int type) { return type == 42 && cpu_avx2_ok(); }
+/// Whether a native pack's layer of this ggml type runs on Strata's own Q2_0 kernels (AVX-512 / AVX2, and the AVX1
+/// rung of q2_rows_any / act_quant_any on a CPU with AVX but no AVX2: Sandy / Ivy Bridge).  Only a CPU without AVX
+/// (STRATA_ISA_FLOOR=none) takes ggml-cpu's own Q2_0 vec_dot, which on an i7-3770 took 0.98 ms per expert at one
+/// token against 0.52 ms for the AVX1 rows (0.42 with STRATA_Q2_BITPLANE=1; kq_cpu_bench --pairs q2_0/q2_0).
+inline bool q2_native_kernels(int type) { return type == 42 && (cpu_avx2_ok() || cpu_avx1_ok()); }
 /// The CPU's brand string (CPUID 0x80000002..4), for messages; "unknown" when it has none.
 std::string cpu_name();
 /// Q2_0 GGUF rows / activation quantizer on the kernels this CPU has.
@@ -96,6 +108,8 @@ const ExpertLayout& expert_layout();
 bool expert_layout_load(const std::string& pack_dir, int64_t n_layers, int64_t n_expert, std::string& err);
 /// The newest native_experts.txt this engine reads.  v4 = v3 plus the per-role shard column `gate,up,down`,
 /// written only when some layer's roles are in different shards (every other pack stays v3, byte for byte).
-inline constexpr int kExpertLayoutVersion = 4;
+/// v5 = v4 plus `hadamard.txt` beside it: Hadamard-folded experts (hadamard.hpp), written only for such models,
+/// so an engine that cannot rotate the activations refuses the pack instead of running it wrong.
+inline constexpr int kExpertLayoutVersion = 5;
 
 }  // namespace strata::kernels::cpu

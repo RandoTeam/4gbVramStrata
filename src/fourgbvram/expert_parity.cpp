@@ -6,8 +6,10 @@
 // CPU path (cpu_experts) are compared with a double-precision product over ggml's dequantized weights, and the
 // GPU path with two experts a launch (native_mmvq_slots) must give the bits it gives with one.  Then
 // every kind of matrix in the file (a type and a shape) takes a batch of tokens through the two GPU products,
-// native_mmvq and MMQ.  All of them quantize their input to 8 bits, so none is exact; the test fails when one is
-// far from the reference.  A model in several files: give the file that holds the tensors to check.
+// native_mmvq and the batch product (mmq.hpp): batches of several sizes, and a routed expert's kind three experts
+// a launch with the rows going elsewhere, as the engine launches them.  Most of them quantize their input to
+// 8 bits, so none is exact; the test fails when one is far from the reference.  A model in several files: give
+// the file that holds the tensors to check.
 #include "cpu_experts.hpp"
 #include "mmq.hpp"
 
@@ -15,12 +17,13 @@
 #include "strata/fourgbvram/kernels.hpp"
 #include "strata/kernels/native_mmvq.hpp"
 
-#include "ggml.h"
+#include "gguf_types.hpp"
 
 #include <cuda_runtime.h>
 
 #include <algorithm>
 #include <cmath>
+#include <cstddef>
 #include <cstdio>
 #include <cstring>
 #include <map>
@@ -41,7 +44,7 @@ void ck(cudaError_t e) {
 // rows x n_in weights in the GGUF's blocks, as floats
 std::vector<float> dequant(uint32_t type, const uint8_t* w, int n_in, int rows) {
     std::vector<float> out((size_t) rows * n_in);
-    ggml_get_type_traits((ggml_type) type)->to_float(w, out.data(), (int64_t) rows * n_in);
+    fourgbvram::type_to_floats(type, w, out.data(), (int64_t) rows * n_in);
     return out;
 }
 
@@ -134,7 +137,7 @@ int main(int argc, char** argv) {
                                        g.find(b + "ffn_down_exps.scale")};
             const uint32_t sc_type[3] = {tg.type, tu.type, td.type};
             for (int k = 0; k < 3; ++k)
-                if (sc_type[k] != GGML_TYPE_NVFP4) sc[k] = nullptr;
+                if (sc_type[k] != fourgbvram::kTypeNVFP4) sc[k] = nullptr;
             const bool scaled = sc[0] || sc[1] || sc[2];
             float* d_s = nullptr;   // this expert's gate and up scales, ExpertScales' table for it
             if (scaled) ck(cudaMalloc(&d_s, 2 * sizeof(float)));
@@ -226,7 +229,12 @@ int main(int argc, char** argv) {
 
         // Every kind of matrix: a type and a shape, a routed expert's being a matrix each.  The weights sit before
         // a megabyte of 0xFF bytes, which a product that reads past its matrix turns into NaN.
-        constexpr int kBatch = 40;
+        // The batch product takes each kind at several sizes: a launch's tiles are as wide as its rows need, and
+        // the last size is several tiles.  A routed expert's kind then goes as the engine launches it: three
+        // experts a launch, the middle one without rows, the products to other rows of a wider destination.
+        constexpr int kBatch = 40, kMost = 300, kRows = 60, kCut = 23;
+        const int sizes[] = {7, 16, 31, kBatch, 100, kMost};
+        constexpr float kUntouched = 12345.f;
         constexpr size_t kTail = size_t(1) << 20;
         std::map<std::tuple<uint32_t, uint64_t, uint64_t>, const TensorInfo*> kinds;
         for (const TensorInfo& t : g.tensors())
@@ -238,8 +246,9 @@ int main(int argc, char** argv) {
             const size_t bytes = tensor_payload_bytes(*t) / (t->shape.size() == 3 ? (size_t) t->shape[2] : 1);
             const size_t row_bytes = bytes / (size_t) n_out;
             const uint8_t* w = g.tensor_data(*t);
+            const int n_mat = t->shape.size() == 3 && t->shape[2] >= 3 ? 3 : 1;
 
-            std::vector<float> xb((size_t) kBatch * n_in);
+            std::vector<float> xb((size_t) kMost * n_in);
             for (float& v : xb) v = small(rng);
             for (size_t i = 0; i < xb.size(); i += 97) xb[i] *= 20.f;
             // the first, the middle and the last rows: the last ones are where a tile runs out
@@ -249,58 +258,104 @@ int main(int argc, char** argv) {
                 rows.insert(n_out / 2 + r < n_out ? n_out / 2 + r : r);
                 rows.insert(n_out - 1 - r);
             }
-            std::vector<double> want;
+            // want[m][k * kMost + b]: row k of `rows` of matrix m times row b of the batch (matrix 1 takes no rows)
+            std::vector<double> want[3];
             std::vector<float> wr((size_t) n_in);
-            for (int r : rows) {
-                ggml_get_type_traits((ggml_type) t->type)->to_float(w + (size_t) r * row_bytes, wr.data(), n_in);
-                for (int b = 0; b < kBatch; ++b) {
-                    double acc = 0.0;
-                    for (int i = 0; i < n_in; ++i) acc += (double) wr[(size_t) i] * xb[(size_t) b * n_in + i];
-                    want.push_back(acc);
+            for (int m = 0; m < n_mat; m += 2)
+                for (int r : rows) {
+                    fourgbvram::type_to_floats(t->type, w + (size_t) m * bytes + (size_t) r * row_bytes, wr.data(), n_in);
+                    for (int b = 0; b < (m == 0 ? kMost : kRows); ++b) {
+                        double acc = 0.0;
+                        for (int i = 0; i < n_in; ++i) acc += (double) wr[(size_t) i] * xb[(size_t) b * n_in + i];
+                        want[m].push_back(acc);
+                    }
+                    if (m > 0) want[m].resize(want[m].size() + kMost - kRows);
                 }
-            }
 
             uint8_t* d_w = nullptr;
             float *d_xb, *d_y;
             void *d_q, *d_mq;
             const size_t token = kernels::native_q8_1_bytes(n_in);
-            ck(cudaMalloc(&d_w, bytes + kTail));
-            ck(cudaMemset(d_w + bytes, 0xFF, kTail));
-            ck(cudaMemcpy(d_w, w, bytes, cudaMemcpyHostToDevice));
+            ck(cudaMalloc(&d_w, n_mat * bytes + kTail));
+            ck(cudaMemset(d_w + n_mat * bytes, 0xFF, kTail));
+            ck(cudaMemcpy(d_w, w, n_mat * bytes, cudaMemcpyHostToDevice));
             ck(cudaMalloc(&d_xb, xb.size() * 4));
-            ck(cudaMalloc(&d_y, (size_t) kBatch * n_out * 4));
+            ck(cudaMalloc(&d_y, (size_t) kMost * n_out * 4));
             ck(cudaMalloc(&d_q, (size_t) kBatch * token));
-            ck(cudaMalloc(&d_mq, fourgbvram::Mmq::q8_bytes(kBatch, n_in)));
+            ck(cudaMalloc(&d_mq, fourgbvram::Mmq::q8_bytes(kMost, n_in)));
             ck(cudaMemcpy(d_xb, xb.data(), xb.size() * 4, cudaMemcpyHostToDevice));
 
-            std::vector<float> y((size_t) kBatch * n_out), got(want.size());
-            auto error = [&]() {
-                ck(cudaMemcpyAsync(y.data(), d_y, y.size() * 4, cudaMemcpyDeviceToHost, st));
-                ck(cudaStreamSynchronize(st));
+            // the products of matrix m with batch rows [b0, b1), which lie at y[at(b) * ld + off + row]
+            std::vector<float> y((size_t) kMost * n_out);
+            auto error = [&](int m, int b0, int b1, int64_t ld, int64_t off, auto&& at) {
+                std::vector<float> got;
+                std::vector<double> exp;
                 size_t k = 0;
-                for (int r : rows)
-                    for (int b = 0; b < kBatch; ++b) got[k++] = y[(size_t) b * n_out + r];
-                const double e = rel_error(got.data(), want);
+                for (int r : rows) {
+                    for (int b = b0; b < b1; ++b) {
+                        got.push_back(y[(size_t) at(b) * (size_t) ld + (size_t) off + (size_t) r]);
+                        exp.push_back(want[m][k * kMost + (size_t) b]);
+                    }
+                    ++k;
+                }
+                const double e = rel_error(got.data(), exp);
                 return std::isfinite(e) ? e : 1e9;
             };
+            auto fetch = [&](size_t floats) {
+                ck(cudaMemcpyAsync(y.data(), d_y, floats * 4, cudaMemcpyDeviceToHost, st));
+                ck(cudaStreamSynchronize(st));
+            };
+            const auto same_row = [](int b) { return b; };
             kernels::native_quantize_q8_1(d_xb, d_q, n_in * kBatch, 1, st);
             for (int at = 0; at < kBatch; at += 8)
                 kernels::native_mmvq((int) t->type, d_w, (const uint8_t*) d_q + (size_t) at * token,
                                      d_y + (size_t) at * n_out, n_in, n_out, std::min(8, kBatch - at), st);
-            const double e_vec = error();
+            fetch((size_t) kBatch * n_out);
+            const double e_vec = error(0, 0, kBatch, n_out, 0, same_row);
             const bool tile = fourgbvram::Mmq::fits((int) t->type, n_out, n_in);
-            double e_mat = 0.0;
+            double e_mat = 0.0, e_group = 0.0;
+            bool kept = true;
             if (tile) {
-                ck(cudaMemsetAsync(d_y, 0, y.size() * 4, st));
-                fourgbvram::Mmq::quantize(d_xb, nullptr, d_mq, (int) t->type, n_in, n_in, kBatch, st);
-                mmq.mul(d_w, (int) t->type, n_out, n_in, 0, 1, d_mq, nullptr, nullptr, kBatch, kBatch, d_y, n_out, st);
-                e_mat = error();
+                for (int nb : sizes) {
+                    ck(cudaMemsetAsync(d_y, 0, (size_t) nb * n_out * 4, st));
+                    fourgbvram::Mmq::quantize(d_xb, nullptr, d_mq, (int) t->type, n_in, n_in, nb, st);
+                    mmq.mul(d_w, (int) t->type, n_out, n_in, 0, 1, d_mq, nullptr, nullptr, nb, nb, d_y, n_out, st);
+                    fetch((size_t) nb * n_out);
+                    e_mat = std::max(e_mat, error(0, 0, nb, n_out, 0, same_row));
+                }
             }
-            const bool pass = e_vec < 0.05 && e_mat < 0.05;
+            if (tile && n_mat == 3 && 2 * kRows <= kMost) {
+                // rows [0, kCut) to matrix 0 and [kCut, kRows) to matrix 2; row i's products to the upper half of
+                // row kRows - 1 - i of a destination twice as wide, whose lower half stays as it is
+                const int32_t bounds[4] = {0, kCut, kCut, kRows};
+                std::vector<int32_t> ids((size_t) kRows);
+                for (int i = 0; i < kRows; ++i) ids[(size_t) i] = kRows - 1 - i;
+                int32_t *d_bounds, *d_ids;
+                ck(cudaMalloc(&d_bounds, sizeof bounds));
+                ck(cudaMalloc(&d_ids, ids.size() * 4));
+                ck(cudaMemcpy(d_bounds, bounds, sizeof bounds, cudaMemcpyHostToDevice));
+                ck(cudaMemcpy(d_ids, ids.data(), ids.size() * 4, cudaMemcpyHostToDevice));
+                const size_t floats = (size_t) kRows * 2 * n_out;
+                std::fill(y.begin(), y.begin() + (std::ptrdiff_t) floats, kUntouched);
+                ck(cudaMemcpy(d_y, y.data(), floats * 4, cudaMemcpyHostToDevice));
+                fourgbvram::Mmq::quantize(d_xb, nullptr, d_mq, (int) t->type, n_in, n_in, kRows, st);
+                mmq.mul(d_w, (int) t->type, n_out, n_in, bytes, 3, d_mq, d_bounds, d_ids, kRows, kRows - kCut, d_y + n_out,
+                        2 * (int64_t) n_out, st);
+                fetch(floats);
+                const auto back = [](int b) { return kRows - 1 - b; };
+                e_group = std::max(error(0, 0, kCut, 2 * (int64_t) n_out, n_out, back),
+                                   error(2, kCut, kRows, 2 * (int64_t) n_out, n_out, back));
+                for (int b = 0; b < kRows && kept; ++b)
+                    for (int c = 0; c < n_out && kept; ++c) kept = y[(size_t) b * 2 * n_out + (size_t) c] == kUntouched;
+                ck(cudaFree(d_bounds));
+                ck(cudaFree(d_ids));
+            }
+            const bool pass = e_vec < 0.05 && e_mat < 0.05 && e_group < 0.05 && kept;
             ok = ok && pass;
-            std::printf("%-8s [%5d -> %6d]  relative error: vector %.4f, batch %s%s  (%s)\n", t->type_name(), n_in,
-                        n_out, e_vec, tile ? std::to_string(e_mat).c_str() : "(no tile)", pass ? "" : "  FAIL",
-                        t->name.c_str());
+            std::printf("%-8s [%5d -> %6d]  relative error: vector %.4f, batch %s%s%s%s  (%s)\n", t->type_name(), n_in,
+                        n_out, e_vec, tile ? std::to_string(e_mat).c_str() : "(no tile)",
+                        tile && n_mat == 3 ? (", three a launch " + std::to_string(e_group)).c_str() : "",
+                        kept ? "" : ", WROTE OTHER ROWS", pass ? "" : "  FAIL", t->name.c_str());
             for (void* p : {(void*) d_w, (void*) d_xb, (void*) d_y, d_q, d_mq}) ck(cudaFree(p));
         }
         return ok ? 0 : 1;

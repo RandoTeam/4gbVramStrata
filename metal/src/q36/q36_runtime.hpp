@@ -4,7 +4,7 @@
 #include <cuda_fp16.h>
 #include <cuda_runtime.h>
 #include <cstdint>
-struct dim3 { uint32_t x,y,z; dim3(uint32_t x_=1,uint32_t y_=1,uint32_t z_=1):x(x_),y(y_),z(z_){} };
+// dim3: metal_compat's cuda_runtime.h
 template<class A> void q36_dispatch(const char* name,const A& a,dim3 grid,dim3 block,void* stream) {
     using namespace strata;
     static const auto source=fourgbvram::metal_detail::read_source(STRATA_Q36_METAL_SOURCE);

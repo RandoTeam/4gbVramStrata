@@ -33,6 +33,7 @@
 #include <map>
 #include <mutex>
 #include <thread>
+#include <unordered_set>
 #include <vector>
 
 namespace strata::gpu {
@@ -120,7 +121,7 @@ struct StreamImpl {
     int pending = 0;          // dispatches in the open command buffer
     GraphImpl* rec = nullptr;
     std::vector<std::shared_ptr<ResourceHold>> resources;
-    std::vector<uint64_t> enc_keys;
+    std::unordered_set<uint64_t> enc_keys;   // the allocations the open encoder has made resident
     bool fallback_residency = false;
 };
 
@@ -297,10 +298,8 @@ void use_hold(StreamImpl* s, MTL::ComputeCommandEncoder* e, const std::shared_pt
     if (!h) return;
     if (s->resources.empty() || s->resources.back() != h) s->resources.push_back(h);
     for (const auto& item : h->items) {
-        if (std::find(s->enc_keys.begin(), s->enc_keys.end(), item.key) == s->enc_keys.end()) {
-            s->enc_keys.push_back(item.key);
+        if (s->enc_keys.insert(item.key).second)
             e->useResource(item.buf, MTL::ResourceUsageRead | MTL::ResourceUsageWrite);
-        }
     }
 }
 void flush(StreamImpl* s) {
@@ -313,15 +312,11 @@ void flush(StreamImpl* s) {
     }
 #if defined(STRATA_METAL_TESTING)
     {
-        std::vector<uint64_t> seen;
+        std::unordered_set<uint64_t> seen;
         size_t bytes = 0;
         for (const auto& h : holds) if (h) {
-            for (const auto& item : h->items) {
-                if (std::find(seen.begin(), seen.end(), item.key) == seen.end()) {
-                    seen.push_back(item.key);
-                    bytes += item.bytes;
-                }
-            }
+            for (const auto& item : h->items)
+                if (seen.insert(item.key).second) bytes += item.bytes;
         }
         rt().residency_bytes.store(bytes);
     }
@@ -353,9 +348,45 @@ void flush(StreamImpl* s) {
     s->cb = nullptr;
     s->pending = 0;
 }
-Error wait_value(const std::shared_ptr<Completion>& state, uint64_t v) {
+constexpr unsigned kSpinSkipMax = 64;   // waits sent straight to the completion handler after failed spins, at most
+
+// handler: wait for the completion handler itself, which drops the buffer's holds on the allocations it used
+Error wait_value(const std::shared_ptr<Completion>& state, uint64_t v, bool handler = false) {
     ++rt().stats.host_syncs;
     if (!state || !v) return rt().failed.load() ? fail(kErrorLaunchFailure) : kSuccess;
+    // The timeline is the GPU's own count, there as soon as the work is: a short spin reads it before sleeping on the completion handler,
+    // which Metal runs on a thread of its own after the buffer completes and which then wakes this one (a partly cached answer waits so
+    // for its router every layer).  The spin pays only when the answer comes inside it.  Each waiting thread counts its spins: after two
+    // in a row that did not end (a prompt's chunks) the next `skip` waits go straight to the handler, the skip doubling up to
+    // kSpinSkipMax while spins keep failing; a spin that ends resets the count.  One long wait among short ones (a token's last) keeps
+    // the spin, and a wait that is over before it starts counts for nothing.
+    if (state->timeline && !handler) {
+        static thread_local unsigned skip = 0, backoff = 1, misses = 0;
+        bool done = state->timeline->signaledValue() >= v;
+        if (!done && skip > 0) {
+            --skip;
+        } else if (!done) {
+            const auto t0 = std::chrono::steady_clock::now();
+            while (state->timeline->signaledValue() < v && !rt().failed.load() &&
+                   std::chrono::steady_clock::now() - t0 < std::chrono::milliseconds(2)) {
+#if defined(__aarch64__)
+                __asm__ __volatile__("yield");
+#endif
+            }
+            done = state->timeline->signaledValue() >= v;
+            if (done) {
+                misses = 0;
+                backoff = 1;
+            } else if (++misses >= 2) {
+                skip = backoff;
+                backoff = std::min(backoff * 2, kSpinSkipMax);
+            }
+        }
+        if (done) {
+            std::lock_guard<std::mutex> lock(state->mu);
+            return state->failed || rt().failed.load() ? fail(kErrorLaunchFailure) : kSuccess;
+        }
+    }
     std::unique_lock<std::mutex> lock(state->mu);
     // Notification handles normal completion. Poll only to notice a failure on a
     // different queue whose event this queue may be waiting for.
@@ -507,13 +538,32 @@ Error new_alloc(void** p, size_t bytes, bool host) {
     return kSuccess;
 }
 
+// Every stream's work complete.  handler: and every completion handler run, so the allocations that work used are no
+// longer held (free_alloc() disposes of a retired one at once, purge_device_allocations() sees all of them).
+Error synchronize_all(bool handler) {
+    Runtime& r = rt();
+    // Stream destruction uses this separate registry lock as well. Completion
+    // callbacks never acquire the registry lock. Resource cleanup may acquire
+    // the allocation mutex, which is never held here while waiting.
+    std::lock_guard<std::recursive_mutex> lock(r.streams_mu);
+    std::vector<std::pair<std::shared_ptr<Completion>, uint64_t>> submitted;
+    for (auto* s : r.streams) {
+        std::lock_guard<std::recursive_mutex> stream_lock(s->mu);
+        flush(s);
+        submitted.emplace_back(s->completion, s->submitted);
+    }
+    for (const auto& [completion,value] : submitted)
+        if (auto e = wait_value(completion, value, handler); e != kSuccess) return e;
+    return kSuccess;
+}
+
 Error free_alloc(void* p) {
     if (!p) return kSuccess;
     Runtime& r = rt();
     size_t off = 0;
     const Alloc* a = find(p, &off);
     if (!a || off != 0) return fail(kErrorInvalidValue);
-    if (auto e = device_synchronize(); e != kSuccess) return e;
+    if (auto e = synchronize_all(true); e != kSuccess) return e;
     std::lock_guard<std::mutex> lk(r.mu);
     auto it = r.by_gpu.find(a->gpu);
     it->second.retired = true;
@@ -536,7 +586,7 @@ void* host_view(const void* p) {
 // and dropped from the residency set.  Returns the bytes given back.
 uint64_t purge_device_allocations(size_t min_bytes) {
     Runtime& r = rt();
-    if (device_synchronize() != kSuccess) return 0;
+    if (synchronize_all(true) != kSuccess) return 0;
     std::lock_guard<std::mutex> lk(r.mu);
     uint64_t n = 0;
     for (auto& [gpu, a] : r.by_gpu) {
@@ -567,22 +617,7 @@ const char* error_string(Error e) {
 Error get_device(int* dev) { *dev = 0; return kSuccess; }
 Error set_device(int dev) { return dev == 0 ? kSuccess : fail(kErrorInvalidValue); }
 Error device_count(int* n) { *n = rt().dev ? 1 : 0; return kSuccess; }
-Error device_synchronize() {
-    Runtime& r = rt();
-    // Stream destruction uses this separate registry lock as well. Completion
-    // callbacks never acquire the registry lock. Resource cleanup may acquire
-    // the allocation mutex, which is never held here while waiting.
-    std::lock_guard<std::recursive_mutex> lock(r.streams_mu);
-    std::vector<std::pair<std::shared_ptr<Completion>, uint64_t>> submitted;
-    for (auto* s : r.streams) {
-        std::lock_guard<std::recursive_mutex> stream_lock(s->mu);
-        flush(s);
-        submitted.emplace_back(s->completion, s->submitted);
-    }
-    for (const auto& [completion,value] : submitted)
-        if (auto e = wait_value(completion, value); e != kSuccess) return e;
-    return kSuccess;
-}
+Error device_synchronize() { return synchronize_all(false); }
 
 Error mem_get_info(size_t* free_b, size_t* total_b) {
     // the GPU's budget is the working set the OS grants this process; what is free is that minus what is allocated
@@ -710,7 +745,7 @@ Error stream_destroy(Stream s) {
     std::lock_guard<std::recursive_mutex> lock(rt().streams_mu);
     std::unique_lock<std::recursive_mutex> stream_lock(s->mu);
     flush(s);
-    const auto result = wait_value(s->completion, s->submitted);
+    const auto result = wait_value(s->completion, s->submitted, true);   // synchronize_all() no longer waits for its handlers
     rt().streams.erase(s);
     delete s->rec;
     s->rec = nullptr;
@@ -758,7 +793,10 @@ Error launch_host_func(Stream st, HostFn fn, void* arg) {
 }
 
 Error event_create(Event* e, unsigned) { *e = new EventImpl; return kSuccess; }
-Error event_destroy(Event e) { delete e; return kSuccess; }
+Error event_destroy(Event e) {
+    delete e;
+    return kSuccess;
+}
 Error event_record(Event e, Stream st) {
     StreamImpl* s = S(st);
     std::lock_guard<std::recursive_mutex> stream_lock(s->mu);

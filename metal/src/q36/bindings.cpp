@@ -3,15 +3,20 @@
 #include "strata/kernels/native_mmvq.hpp"
 #include "strata/kernels/native_router.hpp"
 #include "strata/prefill/gemm.hpp"
+#include "strata/prefill/moe_fused.hpp"
+#include "strata/prefill/moe_fused_q36.hpp"
 #include "strata/prefill/moe_mmq.hpp"
 #include "strata/fourgbvram/kernels.hpp"
 #include "../fourgbvram/quantized.hpp"
 #include "../fourgbvram/launch.hpp"
 #include "mmq.hpp"
 #include "ggml.h"
+#include <cmath>
 #include <stdexcept>
 namespace strata::kernels {
 using namespace fourgbvram::metal_detail;
+// Qwen3.6's SwiGLU has no clamp; fourgbvram's swiglu_clamp_rows clamps to its limit, and a limit of 0 makes every output 0
+constexpr float kNoClamp = INFINITY;
 bool native_q8_0_packed_enabled() { return false; }
 bool native_q8_0_packed_eligible(int,int) { return false; }
 void native_q8_0_pack_host(const void*,void*,int,int) { throw std::logic_error("CUDA Q8 packing is not used on Metal"); }
@@ -41,7 +46,7 @@ void native_expert_grouped(const NativeExpertLayout& l,const unsigned long long*
     QArgs a;a.p[0]=ptr;a.p[1]=x;a.p[2]=gu;a.p[3]=tok;a.p[4]=bounds;a.p[5]=count;
     a.ni=l.n_embd;a.no=2*l.n_ff;a.rows=rows;a.xstride=native_q8_1_bytes(a.ni);a.ystride=a.no;a.kind=4;
     qrun(std::string("fourgbvram_mul_")+quant_name(l.gu_type),a,s,{uint32_t(a.no),uint32_t(rows),uint32_t(groups)});
-    fourgbvram::swiglu_clamp_rows(gu,h,l.n_ff,rows,0,s);
+    fourgbvram::swiglu_clamp_rows(gu,h,l.n_ff,rows,kNoClamp,s);
     native_quantize_q8_1(h,hq,l.n_ff,rows,s);
     a.p[1]=hq;a.p[2]=out;a.p[3]=dst;a.ni=l.n_ff;a.no=l.n_embd;a.xstride=native_q8_1_bytes(a.ni);
     a.ystride=a.no;a.offset=l.down_off;a.kind=5;
@@ -52,6 +57,33 @@ void iq_embed_rows(int type,const void* table,size_t stride,const int32_t* token
     if(!name)throw std::invalid_argument("unsupported Metal embedding type");
     QArgs a;a.p[0]=table;a.p[2]=out;a.p[3]=tokens;a.stride=stride;a.ni=n;a.rows=rows;
     qrun(std::string("q36_embed_")+name,a,s,{uint32_t((n+(type==30?31:511))/(type==30?32:512)),uint32_t(rows),1});
+}
+}
+// moe_fused's grouping, which only the fused prompt experts use: q36's own copies of the host library's Metal stubs
+// (prefill.cpp), so that its object, with the Strata engine's prompt path, is not linked
+namespace strata::prefill::fused {
+size_t act_bytes(int64_t,int64_t){return 0;}
+size_t group_bytes(int64_t,int){return 0;}
+void group(const int32_t*,int64_t,int,int,void*,int32_t*,int32_t*,void*){}
+}
+// the AVX-512 K-quant rows of the host library's expert pool (stubs.cpp has them for the Strata engine): x86 only
+namespace strata::metal_engine { void missing(const char* name); }
+namespace strata::kernels::cpu {
+void kq512_rows(int,const uint8_t*,size_t,int,const void* const*,int,float* const*,int,int){
+    strata::metal_engine::missing("strata::kernels::cpu::kq512_rows");
+}
+void kq512_gu_rows(int,const uint8_t*,size_t,size_t,int,const void* const*,int,float* const*,int,int){
+    strata::metal_engine::missing("strata::kernels::cpu::kq512_gu_rows");
+}
+}
+// the fused int8 prompt experts are CUDA kernels: no layer takes them on Metal, so the launch is never reached
+namespace strata::prefill::fused_q36 {
+bool native_layer_ext(int,int){return false;}
+void quantize_act_native(const float*,int64_t,int64_t,void*,void*){
+    throw std::logic_error("q36: the fused prompt experts are CUDA kernels");
+}
+void experts_native_ext(const Batch&,const NativeGeom&,int,int64_t,const void*,const void*,const int32_t*,void*,float*,void*){
+    throw std::logic_error("q36: the fused prompt experts are CUDA kernels");
 }
 }
 namespace strata::prefill {
@@ -81,7 +113,7 @@ void Context::run(const Product& p,void* s){
 }
 void swiglu(const float* gu,float* h,int64_t rows,int64_t f,bool interleaved,void* s){
     if(interleaved)throw std::invalid_argument("q36 GGUF experts use split gate/up rows");
-    fourgbvram::swiglu_clamp_rows(gu,h,f,rows,0,s);
+    fourgbvram::swiglu_clamp_rows(gu,h,f,rows,kernels::kNoClamp,s);
 }
 void iota(int32_t* dst,int64_t n,void* s){
     struct Args{int32_t* dst;int64_t n;}a{dst,n};

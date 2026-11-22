@@ -97,7 +97,7 @@ kernel void qsa_merge2(device const float* part [[buffer(0)]], device const floa
         L = fma(q[QD + 1], e, L);
         o = fma(q[tid], e, o);
     }
-    o = o / L;
+    o = (L > 0.0f) ? o / L : 0.0f;   // an empty row (M stays -INFINITY) makes exp(-inf - -inf) NaN; see qsa.metal
     const float gate = qfull[(t * QH + h) * 2 * QD + QD + tid];
     const float y = o * (1.0f / (1.0f + exp(-gate)));
     const uint n = QH * QD, plane = a.n_tok * n, d = uint(h) * QD + tid;
@@ -120,13 +120,14 @@ kernel void qsa_merge2(device const float* part [[buffer(0)]], device const floa
 
 kernel void qsa_topk2(device const float* scores [[buffer(0)]], device int* ids [[buffer(1)]],
                       constant QsaArgs& a [[buffer(2)]],
+                      device const uint* rinfo [[buffer(3), function_constant(qsa_rows)]],
                       uint3 tg [[threadgroup_position_in_grid]], ushort tid [[thread_index_in_threadgroup]],
                       ushort sg [[simdgroup_index_in_threadgroup]], ushort lane [[thread_index_in_simdgroup]]) {
     threadgroup atomic_uint hist[256];
     threadgroup uint sgs[32], sgs2[32];
     threadgroup uint sel[2];
     const int t = int(tg.x);
-    const uint n_kv = a.pos0 + uint(t) + 1, n_bid = n_kv >> 2, nb = n_bid + 1;
+    const uint n_kv = (qsa_rows ? rinfo[8 + 4 * t + 1] : a.pos0 + uint(t)) + 1, n_bid = n_kv >> 2, nb = n_bid + 1;
     device int* out = ids + t * QBUDGET;
     device const float* sc = scores + uint(t) * (a.max_cells / 4 + 2);
     if (n_kv <= QBUDGET) {

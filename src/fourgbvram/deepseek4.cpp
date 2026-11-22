@@ -5,7 +5,7 @@
 #include "runtime.hpp"
 #include "strata/kernels/native_mmvq.hpp"
 
-#include "ggml.h"
+#include "strata/quant/types.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -21,7 +21,7 @@ constexpr float kMinWeightSum = 6.103515625e-5f;   // the floor ggml's MoE graph
 constexpr uint32_t kTypeI32 = 26;
 constexpr float kPi = 3.14159265358979323846f;
 
-// ggml_rope_ext's arguments as the deepseek4 graph gives them, and ggml_rope_yarn_corr_dims().
+// The arguments of ggml's rope_ext as the deepseek4 graph gives them, and its rope_yarn_corr_dims().
 Rope make_rope(float base, int n_rot, float freq_scale, float ext_factor, int n_ctx_orig, float beta_fast,
                float beta_slow) {
     Rope r;
@@ -274,7 +274,7 @@ int DeepSeek4::head_key(int il, int n) const { return blocks_[(size_t) il].ratio
 // one.  A group of a token is n_head / groups heads that lie together.
 void DeepSeek4::out_proj(Block& B, int n) {
     const int in = n_head_ * head_dim_ / o_groups_;
-    const size_t row = ggml_row_size((ggml_type) B.wo_a.type, in);
+    const size_t row = strata::quant::row_bytes((int) B.wo_a.type, in);
     if (n == 1 && o_groups_ <= 8 && kernels::native_mmvq_supported((int) B.wo_a.type)) {
         // a token's groups lie one behind the other: quantized as one vector, then every group in one launch
         kernels::native_quantize_q8_1(att_, q8_, n_head_ * head_dim_, 1, st_);
@@ -452,8 +452,7 @@ bool DeepSeek4::route_card(int il, int n, int32_t* ids, float* w) {
 
 // The shared expert.  It runs on the GPU while the host routes.
 void DeepSeek4::moe_shared(const Layer& L, int il, int n) {
-    lin(L.sh_gate, xn_, g_, n, xq_);
-    lin(L.sh_up, xn_, u_, n, xq_);
+    lin_pair(L.sh_gate, L.sh_up, xn_, g_, u_, n, xq_);
     swiglu_clamp(g_, u_, h_, n * n_ff_shexp_, clamp_shexp_[(size_t) il], st_);
     lin(L.sh_down, h_, fo_, n);
 }
@@ -507,8 +506,8 @@ void DeepSeek4::save_layer(int il, int64_t pos, uint8_t* dst) {
     const size_t raw_row = (size_t) head_dim_ * sizeof(uint16_t);
     std::memset(dst, 0, layer_extra(B));
     ring_runs(pos, window_, raw_ring_, [&](size_t slot, size_t at, size_t m) {
-        ck(cudaMemcpy(dst + slot * raw_row, (const uint8_t*) B.raw + at * raw_row, m * raw_row,
-                      cudaMemcpyDeviceToHost),
+        ck(cudaMemcpyAsync(dst + slot * raw_row, (const uint8_t*) B.raw + at * raw_row, m * raw_row,
+                           cudaMemcpyDeviceToHost, cs(st_)),
            "save state");
     });
     dst += (size_t) window_ * raw_row;
@@ -517,7 +516,8 @@ void DeepSeek4::save_layer(int il, int64_t pos, uint8_t* dst) {
         const size_t row = (size_t) S->width * sizeof(float);
         for (const float* ring : {S->kv, S->score}) {
             ring_runs(pos, keep_rows(B), B.ring, [&](size_t slot, size_t at, size_t m) {
-                ck(cudaMemcpy(dst + slot * row, (const uint8_t*) ring + at * row, m * row, cudaMemcpyDeviceToHost),
+                ck(cudaMemcpyAsync(dst + slot * row, (const uint8_t*) ring + at * row, m * row, cudaMemcpyDeviceToHost,
+                                   cs(st_)),
                    "save state");
             });
             dst += (size_t) keep_rows(B) * row;

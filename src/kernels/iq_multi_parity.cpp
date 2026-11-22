@@ -61,11 +61,16 @@ const char* name_of(int t) {
         case 22: return "IQ2_S";
         case 23: return "IQ4_XS";
         case 29: return "IQ1_M";
+        case 19: return "IQ1_S";
         case 42: return "Q2_0";
+        case 12: return "Q4_K";
+        case 13: return "Q5_K";
+        case 7: return "Q5_1";
+        case 8: return "Q8_0";
         default: return "?";
     }
 }
-int block_values(int t) { return t == 20 ? 32 : t == 42 ? 64 : 256; }
+int block_values(int t) { return (t == 20 || t == 7 || t == 8) ? 32 : t == 42 ? 64 : 256; }
 
 // `rows` rows of `n` values of format t: random bytes, then a finite fp16 scale in every block
 std::vector<uint8_t> random_rows(int t, int64_t rows, int64_t n, std::mt19937& rng) {
@@ -82,6 +87,10 @@ std::vector<uint8_t> random_rows(int t, int64_t rows, int64_t n, std::mt19937& r
         } else {
             const uint16_t h = (uint16_t) ((sgn(rng) == 0 ? 0x8000 : 0) | (ex(rng) << 10) | man(rng));   // 2^-13 .. 2^-6
             std::memcpy(&w[o], &h, 2);
+            if (t == 12 || t == 13 || t == 7) {   // Q4_K / Q5_K (d, dmin) and Q5_1 (d, m): the second half is finite too
+                const uint16_t h2 = (uint16_t) ((sgn(rng) == 0 ? 0x8000 : 0) | (ex(rng) << 10) | man(rng));
+                std::memcpy(&w[o + 2], &h2, 2);
+            }
         }
     }
     return w;
@@ -157,7 +166,10 @@ void check_mmvq(int t, int n_in, int n_out, cudaStream_t s, std::mt19937& rng) {
             }
         const double rel = num / (den + 1e-30);
         worst = std::max(worst, rel);
-        if (diff != 0 || !finite || !(rel < 1e-2)) {
+        // IQ1_S takes its delta term from the q8_1 block's float sum (ds.y, as llama.cpp does), not from the int8
+        // values this reference is built from, so on 5 x 1024 it sits at ~1.07e-2: its guard is 2e-2
+        const double tol = t == 19 ? 2e-2 : 1e-2;
+        if (diff != 0 || !finite || !(rel < tol)) {
             std::printf("  %-8s %5d x %5d  ncols %2d: %zu outputs differ from the old kernel, ref rel %.2e%s  FAIL\n",
                         name_of(t), n_out, n_in, nc, diff, rel, finite ? "" : ", non-finite");
             ++bad;
@@ -252,19 +264,33 @@ struct Grouped {
 void check_grouped(int gu, int dt, int64_t H, int64_t FF, cudaStream_t s, std::mt19937& rng) {
     // 0..11 entries per group: one pass, a partial pass, two passes and three passes of GRP_NC = 4
     Grouped G(gu, dt, H, FF, {1, 3, 4, 5, 0, 8, 2, 11, 1}, 8, rng);
-    const auto a = G.result(true, s), b = G.result(false, s);
-    size_t diff = 0, written = 0;
+    const int saved_ed = k::native_expert_expdec();
+    const k::NativeExpertExpdecParams saved_p = k::native_expert_expdec_params();
+    const auto a = G.result(true, s);
+    k::native_expert_set_expdec(0);
+    const auto b = G.result(false, s);
+    k::NativeExpertExpdecParams ed_p = saved_p;
+    ed_p.down = 1;
+    ed_p.down_iq4_nl = 1;
+    k::native_expert_set_expdec(1);
+    k::native_expert_set_expdec_params(ed_p);
+    const auto c = G.result(false, s);
+    k::native_expert_set_expdec(saved_ed);
+    k::native_expert_set_expdec_params(saved_p);
+    size_t diff = 0, diff_ed = 0;
     bool finite = true;
     for (size_t i = 0; i < a.size(); ++i) {
         diff += std::memcmp(&a[i], &b[i], 4) != 0;
-        if (i < (size_t) G.n_ent * H) { ++written; finite = finite && std::isfinite(b[i]); }
+        diff_ed += std::memcmp(&a[i], &c[i], 4) != 0;
+        if (i < (size_t) G.n_ent * H) { finite = finite && std::isfinite(b[i]) && std::isfinite(c[i]); }
     }
-    const bool ok = diff == 0 && finite;
+    const bool ok = diff == 0 && diff_ed == 0 && finite;
     std::printf("%-8s/%-7s %5lld x %4lld  native_expert_grouped, %d groups, %d entries: %s\n", name_of(gu),
                 name_of(dt), (long long) H, (long long) FF, G.n_groups, G.n_ent,
                 ok ? "bitwise equal to the old kernels" : "FAIL");
     if (!ok) {
-        std::printf("  %zu of %zu floats differ%s\n", diff, a.size(), finite ? "" : ", non-finite outputs");
+        std::printf("  %zu (multi) / %zu (expdec) of %zu floats differ%s\n", diff, diff_ed, a.size(),
+                    finite ? "" : ", non-finite outputs");
         ++g_fail;
     }
 }
@@ -289,7 +315,7 @@ float time_ms(cudaStream_t s, int it, const auto& fn) {
 void bench(cudaStream_t s, std::mt19937& rng) {
     std::printf("\n--bench: microseconds per call, old (per-column decode) / new (decode once), idle GPU assumed\n");
     const int n_in = 2560, n_out = 8192, it = 200;
-    for (int t : {16, 17, 18, 21, 22, 29}) {
+    for (int t : {16, 17, 18, 21, 22, 29, 19}) {
         const auto w = random_rows(t, n_out, n_in, rng);
         uint8_t* dw = dalloc<uint8_t>(w.size());
         ck(cudaMemcpy(dw, w.data(), w.size(), cudaMemcpyHostToDevice), "w");
@@ -313,7 +339,7 @@ void bench(cudaStream_t s, std::mt19937& rng) {
         cudaFree(dw); cudaFree(dx); cudaFree(dxq); cudaFree(dy);
     }
     // the verify window's shape: 2560 x 640 experts, 16 groups of m entries each
-    for (int gu : {16, 17, 18, 21, 22, 29}) {
+    for (int gu : {16, 17, 18, 21, 22, 29, 19}) {
         std::printf("%-8s/Q2_0 grouped, 16 groups of m entries:", name_of(gu));
         for (int m : {1, 2, 3, 4, 8}) {
             Grouped G(gu, 42, 2560, 640, std::vector<int>(16, m), 8, rng);
@@ -409,14 +435,22 @@ int main(int argc, char** argv) {
     cudaStream_t s;
     ck(cudaStreamCreate(&s), "stream");
     std::mt19937 rng(18);
-    for (int t : {16, 17, 18, 20, 21, 22, 23, 29, 42}) {
+    for (int t : {16, 17, 18, 20, 21, 22, 23, 29, 19, 42, 12, 13, 7, 8}) {
         check_mmvq(t, 2560, 67, s, rng);   // the model's n_embd; 67 rows: a partial block of 4 rows
         check_mmvq(t, 1024, 5, s, rng);
     }
-    for (int gu : {16, 17, 18, 21, 22, 23, 29, 42}) {
+    for (int gu : {16, 17, 18, 21, 22, 23, 29, 19, 42}) {
         for (int dt : {20, 42}) check_grouped(gu, dt, 2560, 640, s, rng);   // the model's shape
         check_grouped(gu, 23, 1024, 512, s, rng);                           // IQ4_XS down needs n_ff % 256 == 0
     }
+    // UD-Q4_K_XL (run with STRATA_KQ_SPLIT=1 to compare the Split path with the old kernels; STRATA_EXPERT_V2K=0 / 1 picks
+    // the generic multi kernel or the V2K one on gfx12: both are bitwise the old kernels)
+    for (int gu : {12, 13})
+        for (int dt : {7, 8}) check_grouped(gu, dt, 2560, 640, s, rng);
+    for (int gu : {12, 13}) check_grouped(gu, 13, 2048, 512, s, rng);   // Qwen3.6-35B-A3B's geometry
+    // Q8_0 gate/up (UD-Q6_K_XL's layer 2, the rt-q8 drafter's experts): 320 calls a row at 2560, the full-warp rows - with
+    // STRATA_KQ_SPLIT=1 a 16-row grid left the up rows unwritten (native_expert_grouped's gu_sub16_rows)
+    check_grouped(8, 8, 2560, 640, s, rng);
     check_q8_1_finite(s, rng);
     if (do_bench) bench(s, rng);
     std::printf("iq_multi_parity: %d failures\n", g_fail);

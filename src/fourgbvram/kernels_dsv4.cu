@@ -492,6 +492,300 @@ __global__ void attend_rows_kernel(const float* __restrict__ q, const uint16_t* 
         }
 }
 
+// attend_rows_kernel on the tensor cores (Ampere on, CUDA).  A block takes MMA_HEADS heads of a token, eight warps:
+// a warp has 16 of its heads (rows) and a quarter of the 512 values.  The token's keys go MMA_KEYS at a time through
+// shared memory, two buffers taking turns; a warp's scores over its quarter go to shared memory and each warp sums
+// the four, so that every warp of a group of heads keeps the same softmax and multiplies its quarter of the values.
+// Queries and weights are rounded to halves; the products and the sums are floats.
+constexpr int MMA_DIM = 512, MMA_KEYS = 32, MMA_HEADS = 32, MMA_WARPS = 8, MMA_ROW = MMA_DIM + 8;
+constexpr size_t MMA_SMEM = 2 * size_t(MMA_KEYS) * MMA_ROW * sizeof(half) +
+                            size_t(MMA_WARPS) * 16 * MMA_KEYS * sizeof(float) + 2 * MMA_KEYS * sizeof(int);
+
+#if !defined(__HIPCC__)
+__device__ __forceinline__ void mma16816(float* c, const uint32_t* a, const uint32_t* b) {
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
+    asm volatile("mma.sync.aligned.m16n8k16.row.col.f32.f16.f16.f32 {%0,%1,%2,%3}, {%4,%5,%6,%7}, {%8,%9}, "
+                 "{%0,%1,%2,%3};\n"
+                 : "+f"(c[0]), "+f"(c[1]), "+f"(c[2]), "+f"(c[3])
+                 : "r"(a[0]), "r"(a[1]), "r"(a[2]), "r"(a[3]), "r"(b[0]), "r"(b[1]));
+#else
+    (void) c, (void) a, (void) b;
+#endif
+}
+
+__device__ __forceinline__ void ldmatrix_x4(uint32_t* r, const half* p, bool trans) {
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
+    const unsigned a = (unsigned) __cvta_generic_to_shared(p);
+    if (trans)
+        asm volatile("ldmatrix.sync.aligned.m8n8.x4.trans.shared.b16 {%0,%1,%2,%3}, [%4];\n"
+                     : "=r"(r[0]), "=r"(r[1]), "=r"(r[2]), "=r"(r[3]) : "r"(a));
+    else
+        asm volatile("ldmatrix.sync.aligned.m8n8.x4.shared.b16 {%0,%1,%2,%3}, [%4];\n"
+                     : "=r"(r[0]), "=r"(r[1]), "=r"(r[2]), "=r"(r[3]) : "r"(a));
+#else
+    (void) r, (void) p, (void) trans;
+#endif
+}
+
+__device__ __forceinline__ uint32_t half2_bits(float lo, float hi) {
+    const __half2 h = __floats2half2_rn(lo, hi);
+    return *reinterpret_cast<const uint32_t*>(&h);
+}
+
+// a pair of floats as halves (hi) and the halves of what they leave (lo): hi + lo holds them to about 2^-22
+__device__ __forceinline__ void split_bits(float a, float b, uint32_t& hi, uint32_t& lo) {
+    const __half2 h = __floats2half2_rn(a, b);
+    const float2 back = __half22float2(h);
+    hi = *reinterpret_cast<const uint32_t*>(&h);
+    lo = half2_bits(a - back.x, b - back.y);
+}
+
+__device__ __forceinline__ void copy16(void* dst, const void* src, bool whole) {
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
+    asm volatile("cp.async.cg.shared.global [%0], [%1], 16, %2;\n"
+                 :: "r"((unsigned) __cvta_generic_to_shared(dst)), "l"(src), "r"(whole ? 16 : 0));
+#else
+    (void) dst, (void) src, (void) whole;
+#endif
+}
+
+__device__ __forceinline__ void copies_commit() {
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
+    asm volatile("cp.async.commit_group;\n" ::);
+#endif
+}
+
+// until at most `ahead` of the thread's groups of copies are on their way
+template <int ahead> __device__ __forceinline__ void copies_wait() {
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
+    asm volatile("cp.async.wait_group %0;\n" :: "n"(ahead));
+#endif
+}
+
+__global__ void __launch_bounds__(MMA_WARPS * WARP)
+attend_mma_kernel(const float* __restrict__ q, const uint16_t* __restrict__ raw, int ring, int window,
+                  const uint16_t* __restrict__ comp, int ratio, const int32_t* __restrict__ sel, int sel_stride,
+                  int top, const float* __restrict__ sinks, float* __restrict__ out, int n_head, float scale,
+                  long long pos, const long long* at) {
+    constexpr int DIM = MMA_DIM, KEYS = MMA_KEYS, ROW = MMA_ROW, QUARTER = DIM / 4;
+    extern __shared__ __align__(16) unsigned char mma_sm[];
+    half(*ks)[KEYS][ROW] = reinterpret_cast<half(*)[KEYS][ROW]>(mma_sm);
+    float(*part)[16][KEYS] = reinterpret_cast<float(*)[16][KEYS]>(mma_sm + 2 * KEYS * ROW * sizeof(half));
+    int(*rows)[KEYS] = reinterpret_cast<int(*)[KEYS]>(mma_sm + 2 * KEYS * ROW * sizeof(half) +
+                                                      MMA_WARPS * 16 * KEYS * sizeof(float));
+    const int lane = threadIdx.x % WARP, w = threadIdx.x / WARP, gid = lane / 4, tig = lane % 4;
+    const int grp = w / 4, qt = w % 4;   // the warp's 16 heads (of the block's) and its quarter of the values
+    const int t = blockIdx.y, h0 = blockIdx.x * MMA_HEADS + 16 * grp;
+    const long long p = position(at, pos, 1, t);
+    const int n_raw = (int) min((long long) window, p + 1);
+    const long long first_raw = p + 1 - n_raw;
+    int n_comp = 0;
+    if (comp) {
+        const long long visible = (p + 1) / ratio;
+        n_comp = sel ? (int) min(visible, (long long) top) : (int) visible;
+    }
+    const int n_key = n_raw + n_comp;
+    constexpr float kLog2e = 1.44269504f;
+    // rows gid and gid + 8: heads h0 + gid and h0 + gid + 8, in log2 units, each a half and the half of what that
+    // left, so that the products are the floats' to about 2^-22 (the keys are halves already)
+    uint32_t qa[QUARTER / 16][4], ql[QUARTER / 16][4];
+    for (int k = 0; k < QUARTER / 16; ++k)
+        for (int i = 0; i < 2; ++i)
+            for (int hi = 0; hi < 2; ++hi) {
+                const int h = h0 + gid + 8 * i;
+                float2 x = make_float2(0.0f, 0.0f);
+                if (h < n_head)
+                    x = *reinterpret_cast<const float2*>(q + (size_t(t) * n_head + h) * DIM + qt * QUARTER + 16 * k +
+                                                         8 * hi + 2 * tig);
+                split_bits(x.x * scale * kLog2e, x.y * scale * kLog2e, qa[k][i + 2 * hi], ql[k][i + 2 * hi]);
+            }
+    float o[QUARTER / 8][4];
+    for (int n = 0; n < QUARTER / 8; ++n) o[n][0] = o[n][1] = o[n][2] = o[n][3] = 0.0f;
+    // the sink is one more weight of no value: the softmax starts from it
+    float m[2], l[2] = {1.0f, 1.0f};
+    for (int i = 0; i < 2; ++i) {
+        const int h = h0 + gid + 8 * i;
+        m[i] = h < n_head ? sinks[h] * kLog2e : 0.0f;
+    }
+    const auto fetch = [&](int buf, int k0) {
+        if (threadIdx.x < KEYS) {
+            const int k = k0 + threadIdx.x;
+            rows[buf][threadIdx.x] = k >= n_key ? -1
+                                     : k < n_raw ? int((first_raw + k) % ring)
+                                     : sel       ? sel[size_t(t) * sel_stride + k - n_raw]
+                                                 : k - n_raw;
+        }
+        __syncthreads();
+        for (int i = threadIdx.x; i < KEYS * DIM / 8; i += MMA_WARPS * WARP) {
+            const int r = i / (DIM / 8), c = 8 * (i % (DIM / 8)), row = rows[buf][r];
+            const uint16_t* src = row < 0 ? raw : (k0 + r < n_raw ? raw : comp) + size_t(row) * DIM + c;
+            copy16(&ks[buf][r][c], src, row >= 0);
+        }
+        copies_commit();
+    };
+    fetch(0, 0);
+    int buf = 0;
+    for (int k0 = 0; k0 < n_key; k0 += KEYS, buf ^= 1) {
+        const bool more = k0 + KEYS < n_key;
+        if (more) {
+            fetch(buf ^ 1, k0 + KEYS);
+            copies_wait<1>();
+        } else {
+            copies_wait<0>();
+        }
+        __syncthreads();
+        float s[KEYS / 8][4];
+        for (int n = 0; n < KEYS / 8; ++n) {
+            s[n][0] = s[n][1] = s[n][2] = s[n][3] = 0.0f;
+            for (int k = 0; k < QUARTER / 16; k += 2) {
+                uint32_t b[4];   // keys 8 n.., values 16 k.. and 16 (k + 1).. of the quarter
+                ldmatrix_x4(b, &ks[buf][8 * n + lane % 8][qt * QUARTER + 16 * k + 8 * (lane / 8)], false);
+                mma16816(s[n], qa[k], b);
+                mma16816(s[n], ql[k], b);
+                mma16816(s[n], qa[k + 1], b + 2);
+                mma16816(s[n], ql[k + 1], b + 2);
+            }
+            for (int j = 0; j < 4; ++j) part[w][gid + 8 * (j / 2)][8 * n + 2 * tig + j % 2] = s[n][j];
+        }
+        __syncthreads();
+        float f[2];
+        for (int i = 0; i < 2; ++i) {
+            float mx = -INFINITY;
+            for (int n = 0; n < KEYS / 8; ++n)
+                for (int j = 2 * i; j < 2 * i + 2; ++j) {
+                    const int r = gid + 8 * i, c = 8 * n + 2 * tig + j % 2;
+                    float v = 0.0f;
+                    for (int u = 0; u < 4; ++u) v += part[4 * grp + u][r][c];
+                    s[n][j] = k0 + c < n_key ? v : -INFINITY;
+                    mx = fmaxf(mx, s[n][j]);
+                }
+            mx = fmaxf(mx, __shfl_xor_sync(0xffffffffu, mx, 1));
+            mx = fmaxf(mx, __shfl_xor_sync(0xffffffffu, mx, 2));
+            const float now = fmaxf(m[i], mx);
+            f[i] = exp2f(m[i] - now);
+            m[i] = now;
+            float sum = 0.0f;
+            for (int n = 0; n < KEYS / 8; ++n)
+                for (int j = 2 * i; j < 2 * i + 2; ++j) {
+                    s[n][j] = exp2f(s[n][j] - now);
+                    sum += s[n][j];
+                }
+            sum += __shfl_xor_sync(0xffffffffu, sum, 1);
+            sum += __shfl_xor_sync(0xffffffffu, sum, 2);
+            l[i] = l[i] * f[i] + sum;
+        }
+        for (int n = 0; n < QUARTER / 8; ++n) {
+            o[n][0] *= f[0];
+            o[n][1] *= f[0];
+            o[n][2] *= f[1];
+            o[n][3] *= f[1];
+        }
+        for (int k = 0; k < KEYS / 16; ++k) {   // keys 16 k..: the weights as an A fragment
+            uint32_t pa[4], pl[4];
+            split_bits(s[2 * k][0], s[2 * k][1], pa[0], pl[0]);
+            split_bits(s[2 * k][2], s[2 * k][3], pa[1], pl[1]);
+            split_bits(s[2 * k + 1][0], s[2 * k + 1][1], pa[2], pl[2]);
+            split_bits(s[2 * k + 1][2], s[2 * k + 1][3], pa[3], pl[3]);
+            for (int n = 0; n < QUARTER / 8; n += 2) {
+                uint32_t b[4];   // keys 16 k.., values 8 n.. and 8 (n + 1).. of the quarter
+                ldmatrix_x4(b, &ks[buf][16 * k + lane % 8 + 8 * (lane / 8 % 2)][qt * QUARTER + 8 * n + 8 * (lane / 16)],
+                            true);
+                mma16816(o[n], pa, b);
+                mma16816(o[n], pl, b);
+                mma16816(o[n + 1], pa, b + 2);
+                mma16816(o[n + 1], pl, b + 2);
+            }
+        }
+        __syncthreads();   // the buffer and the scores are read: the next fetch may write them
+    }
+    for (int i = 0; i < 2; ++i) {
+        const int h = h0 + gid + 8 * i;
+        if (h >= n_head) continue;
+        float* y = out + (size_t(t) * n_head + h) * DIM + qt * QUARTER + 2 * tig;
+        for (int n = 0; n < QUARTER / 8; ++n)
+            *reinterpret_cast<float2*>(y + 8 * n) = make_float2(o[n][2 * i] / l[i], o[n][2 * i + 1] / l[i]);
+    }
+}
+
+// idx_score_kernel on the tensor cores for 64 heads: a block takes IDX_CHUNK keys of a token, four warps, a warp 16
+// heads, the keys IDX_TILE at a time.  The queries go in as a half and the half of what it left (split_bits()), so
+// a dot is the floats' to about 2^-22; each warp sums its heads' relu(dot) * weight over its rows, and the four warps'
+// sums meet in shared memory.
+constexpr int IDX_MMA_HEADS = 64, IDX_TILE = 64, IDX_CHUNK = 256, IDX_ROW = IDX_DIM + 8;
+
+__global__ void __launch_bounds__(4 * WARP)
+idx_mma_kernel(const float* __restrict__ q, const float* __restrict__ w, const uint16_t* __restrict__ keys,
+               float* __restrict__ score, int score_stride, int ratio, long long pos, float scale,
+               const long long* at) {
+    __shared__ __align__(16) half sk[IDX_TILE][IDX_ROW];
+    __shared__ float red[4][IDX_TILE];
+    const int lane = threadIdx.x % WARP, wid = threadIdx.x / WARP, gid = lane / 4, tig = lane % 4;
+    const int t = blockIdx.y;
+    const long long visible = (position(at, pos, 1, t) + 1) / ratio;
+    const long long c0 = (long long) blockIdx.x * IDX_CHUNK;
+    if (c0 >= visible) return;
+    const int h0 = 16 * wid;
+    uint32_t qa[IDX_DIM / 16][4], ql[IDX_DIM / 16][4];
+    for (int k = 0; k < IDX_DIM / 16; ++k)
+        for (int i = 0; i < 2; ++i)
+            for (int hi = 0; hi < 2; ++hi) {
+                const float2 x = *reinterpret_cast<const float2*>(
+                    q + (size_t(t) * IDX_MMA_HEADS + h0 + gid + 8 * i) * IDX_DIM + 16 * k + 8 * hi + 2 * tig);
+                split_bits(x.x, x.y, qa[k][i + 2 * hi], ql[k][i + 2 * hi]);
+            }
+    const float w0 = w[size_t(t) * IDX_MMA_HEADS + h0 + gid], w1 = w[size_t(t) * IDX_MMA_HEADS + h0 + gid + 8];
+    const long long end = min(visible, c0 + IDX_CHUNK);
+    for (long long k0 = c0; k0 < end; k0 += IDX_TILE) {
+        const int nk = (int) min((long long) IDX_TILE, end - k0);
+        for (int i = threadIdx.x; i < IDX_TILE * IDX_DIM / 8; i += 4 * WARP) {
+            const int r = i / (IDX_DIM / 8), c = 8 * (i % (IDX_DIM / 8));
+            copy16(&sk[r][c], keys + (r < nk ? size_t(k0 + r) * IDX_DIM + c : 0), r < nk);
+        }
+        copies_commit();
+        copies_wait<0>();
+        __syncthreads();
+        for (int n = 0; n < IDX_TILE / 8; ++n) {
+            float s[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+            for (int k = 0; k < IDX_DIM / 16; k += 2) {
+                uint32_t b[4];   // keys 8 n.., values 16 k.. and 16 (k + 1)..
+                ldmatrix_x4(b, &sk[8 * n + lane % 8][16 * k + 8 * (lane / 8)], false);
+                mma16816(s, qa[k], b);
+                mma16816(s, ql[k], b);
+                mma16816(s, qa[k + 1], b + 2);
+                mma16816(s, ql[k + 1], b + 2);
+            }
+            // this lane's two keys over its two heads, then over the warp's 16 (the lanes of one tig)
+            float a = fmaxf(s[0], 0.0f) * w0 + fmaxf(s[2], 0.0f) * w1;
+            float b = fmaxf(s[1], 0.0f) * w0 + fmaxf(s[3], 0.0f) * w1;
+            for (int o = 4; o < WARP; o <<= 1) {
+                a += __shfl_xor_sync(0xffffffffu, a, o);
+                b += __shfl_xor_sync(0xffffffffu, b, o);
+            }
+            if (gid == 0) {
+                red[wid][8 * n + 2 * tig] = a;
+                red[wid][8 * n + 2 * tig + 1] = b;
+            }
+        }
+        __syncthreads();
+        if (threadIdx.x < nk)
+            score[size_t(t) * score_stride + k0 + threadIdx.x] =
+                (red[0][threadIdx.x] + red[1][threadIdx.x] + red[2][threadIdx.x] + red[3][threadIdx.x]) * scale;
+        __syncthreads();   // sk and red are read: the next tile may write them
+    }
+}
+
+bool idx_mma_runs() {
+    cudaFuncAttributes a{};
+    return cudaFuncGetAttributes(&a, idx_mma_kernel) == cudaSuccess && a.ptxVersion >= 80 && a.binaryVersion >= 80;
+}
+
+// This build runs attend_mma_kernel on the current card: compiled for Ampere or newer, not from an older PTX.
+bool attend_mma_runs() {
+    cudaFuncAttributes a{};
+    return cudaFuncGetAttributes(&a, attend_mma_kernel) == cudaSuccess && a.ptxVersion >= 80 && a.binaryVersion >= 80;
+}
+#endif
+
 __global__ void permute_kernel(const float* __restrict__ x, float* __restrict__ y, int n, int groups, int rows,
                                bool back) {
     const int i = blockIdx.x * blockDim.x + threadIdx.x;
@@ -541,6 +835,15 @@ void dsv4_idx_score(const float* q, const float* w, const uint16_t* keys, float*
         throw std::invalid_argument("dsv4_idx_score: the indexer's keys are not 128 values");
     const long long visible = (at ? room : pos + rows) / ratio;   // the last token sees the most
     if (rows <= 0 || visible == 0) return;
+#if !defined(__HIPCC__)
+    static const bool mma = idx_mma_runs();
+    if (n_head == IDX_MMA_HEADS && rows >= GROUP_ROWS && mma) {
+        idx_mma_kernel<<<dim3(grid((int) visible, IDX_CHUNK), rows), 4 * WARP, 0, cs(stream)>>>(
+            q, w, keys, score, score_stride, ratio, (long long) pos, scale, at);
+        ck("dsv4_idx_score");
+        return;
+    }
+#endif
     const size_t smem = (size_t(n_head) * (IDX_DIM + 1) + n_head + SCORE_KEYS * IDX_DIM) * sizeof(float);
     static unsigned done = 0;
     if (smem > allow_smem(idx_score_kernel, done))
@@ -564,6 +867,18 @@ void dsv4_attend(const float* q, const uint16_t* raw, int ring, int window, cons
     if (rows <= 0) return;
     // a batch: its shared memory does not grow with the keys.  A few tokens keep a block a head, which spreads a
     // token over more of the card.
+#if !defined(__HIPCC__)
+    static const bool mma = attend_mma_runs();
+    if (rows >= GROUP_ROWS && dim == MMA_DIM && mma) {
+        static unsigned done = 0;
+        if (MMA_SMEM <= allow_smem(attend_mma_kernel, done)) {
+            attend_mma_kernel<<<dim3(grid(n_head, MMA_HEADS), rows), MMA_WARPS * WARP, MMA_SMEM, cs(stream)>>>(
+                q, raw, ring, window, comp, ratio, sel, sel_stride, top, sinks, out, n_head, scale, (long long) pos, at);
+            ck("dsv4_attend");
+            return;
+        }
+    }
+#endif
     if (rows >= GROUP_ROWS && dim % (8 * WARP) == 0 && dim <= GROUP_DIM) {
         const size_t smem = (size_t(GROUP_HEADS) * dim + GROUP_HEADS * GROUP_KEYS) * sizeof(float) +
                             size_t(GROUP_KEYS) * (dim / 2 + 4) * sizeof(uint32_t);

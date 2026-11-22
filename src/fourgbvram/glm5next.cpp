@@ -6,7 +6,6 @@
 #include "strata/fourgbvram/kernels.hpp"
 #include "strata/kernels/native_mmvq.hpp"
 
-#include "ggml.h"
 
 #include <algorithm>
 #include <bit>
@@ -344,14 +343,14 @@ void Glm5Next::save_layer(int il, int64_t pos, uint8_t* dst) {
         for (int j = 0; j < il; ++j) dst += blocks_[(size_t) j].dsa ? part : 0;
         std::memset(dst, 0, part);
         for (int64_t p = pos - pos % kpool_; p < pos; ++p)
-            ck(cudaMemcpy(dst + (size_t) (p % kpool_) * row, B.ring + (size_t) (p % ring_) * 2 * idx_dim_, row,
-                          cudaMemcpyDeviceToHost),
+            ck(cudaMemcpyAsync(dst + (size_t) (p % kpool_) * row, B.ring + (size_t) (p % ring_) * 2 * idx_dim_, row,
+                               cudaMemcpyDeviceToHost, cs(st_)),
                "save state");
         return;
     }
     const size_t n = size_t(3) * d_inner_ * (kConv - 1) + size_t(n_head_) * kda_dim_ * kda_dim_;
-    ck(cudaMemcpy(dst + (size_t) (B.conv - state_) * sizeof(float), B.conv, n * sizeof(float),
-                  cudaMemcpyDeviceToHost),
+    ck(cudaMemcpyAsync(dst + (size_t) (B.conv - state_) * sizeof(float), B.conv, n * sizeof(float),
+                       cudaMemcpyDeviceToHost, cs(st_)),
        "save state");
 }
 

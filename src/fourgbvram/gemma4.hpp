@@ -42,6 +42,7 @@ protected:
     bool route_card(int il, int n, int32_t* ids, float* w) override;
     void moe_shared(const Layer& L, int il, int n) override;
     void router_scores(const Layer& L, int n) override;
+    bool plain_router() const override { return false; }
     void finish_logits(float* logits, int rows) override;
     float embed_scale() const override;
     size_t extra_bytes() const override;

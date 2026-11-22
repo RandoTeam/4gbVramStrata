@@ -1,7 +1,7 @@
 // Adapted from ggml-org/llama.cpp 7182ef71e6d5dd0c8ea76486fac134fcd25025d4.
 // Original GDN MMA kernel: PR #29353. MIT; see third_party/ggml/LICENSE.
 #pragma once
-#include "mma.cuh"
+#include "gdn_mma_tiles.cuh"   // mma.cuh's NVIDIA tiles and BF16 product, written out
 namespace ggml_cuda_mma {
     template <int stride, typename T>
     static __device__ __forceinline__ uint32_t swizzle(const uint32_t offset, const uint32_t i) {

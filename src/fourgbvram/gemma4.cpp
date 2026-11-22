@@ -576,7 +576,8 @@ void Gemma4::save_layer(int il, int64_t pos, uint8_t* dst) {
     auto save_ring = [&](const uint8_t* cache, size_t row) {
         std::memset(dst, 0, (size_t) keep_ * row);   // the places of positions before the sequence's start
         window_runs(pos, [&](size_t slot, size_t at, size_t m) {
-            ck(cudaMemcpy(dst + slot * row, cache + at * row, m * row, cudaMemcpyDeviceToHost), "save state");
+            ck(cudaMemcpyAsync(dst + slot * row, cache + at * row, m * row, cudaMemcpyDeviceToHost, cs(st_)),
+               "save state");
         });
         dst += (size_t) keep_ * row;
     };

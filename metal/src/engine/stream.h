@@ -37,6 +37,7 @@ public:
     // On when STRATA_METAL_STREAM=1, or (unset / auto) when the GGUF's experts do not fit in the GPU working set
     // with room to spare.  =0: never (the whole GGUF wrapped, as on the M5 Max).
     static bool wanted(const gguf::File& f, const mtl::Context& cx);
+    // pack: a ready pack's folder (experts.bin + native_experts.txt) for a GGUF that has no routed experts of its own
     bool open(gguf::File& f, std::string& err, const std::string& pack = "", int n_embd = 2560, int n_ff = 640, int n_expert = 512);
     // pread `len` bytes at file offset `off` (F_NOCACHE)
     bool read(void* dst, uint64_t len, uint64_t off) const;
@@ -92,7 +93,6 @@ private:
     uint8_t* standalone_region(uint64_t bytes);   // the prompt's buffers as their own allocation, when no region of the arena's slots takes them
 
     int fd_ = -1;
-    int ne_ = 512;
     // <gguf>.experts (metal/tools/stream_experts.py): each expert's gate, up and down rows together, read with one
     // request (cfd_ >= 0); else the GGUF's three slices.  STRATA_METAL_CONTIG=0: the GGUF always.
     int cfd_ = -1;
@@ -120,6 +120,7 @@ private:
     int outstanding_ = 0;
     int nio_ = 6, pre_k_ = 10, pre_k2_ = 0, split_ = 2;
     bool prefetch_ = true, fake_ = false, pre_mru_ = false;
+    int ne_ = 512;   // routed experts per layer of this model (512; 256 for the expert-pruned Coder), read from the GGUF at open(); stream.cpp's NE is the largest (array sizes, the 512-wide key / smap stride)
     // stats
     uint64_t stamp_ = 1;   // the handshake count: slots pinned with the current one are in use on the GPU
     uint64_t p_lookups_ = 0, p_hits_ = 0, p_pre_ = 0, p_misses_ = 0, p_streamed_ = 0, p_chunks_ = 0;

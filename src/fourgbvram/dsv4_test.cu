@@ -219,9 +219,9 @@ int test_attend(bool with_sel, int ratio, int rows, int heads, int window) {
     return bad;
 }
 
-int test_index() {
-    const int heads = 64, dim = 128, ratio = 4, top = 16, rows = 3;
-    const int64_t pos = 400;
+// rows from GROUP_ROWS (32) take the tensor-core kernel
+int test_index(int rows, int64_t pos) {
+    const int heads = 64, dim = 128, ratio = 4, top = 16;
     const int stride = (int) ((pos + rows) / ratio) + 1, n_keys = stride;
     auto q = random((size_t) rows * heads * dim, 0.1f), w = random((size_t) rows * heads);
     auto keysf = random((size_t) n_keys * dim);
@@ -281,7 +281,10 @@ int main() {
     bad += test_attend(false, 128, 40, 12, 40);
     bad += test_attend(true, 4, 40, 12, 40);
     bad += test_attend(false, 4, 40, 12, 40);
-    bad += test_index();
+    bad += test_attend(true, 4, 40, 64, 128);     // the model's 64 heads and window of 128
+    bad += test_attend(false, 128, 40, 64, 128);
+    bad += test_index(3, 400);
+    bad += test_index(40, 1000);
     if (cudaGetLastError() != cudaSuccess) {
         std::printf("CUDA error\n");
         return 2;

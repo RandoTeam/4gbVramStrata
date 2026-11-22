@@ -14,11 +14,21 @@
 // Everything that varies per window (token ids, `n_keep`) is read from DEVICE memory so the kernels can be captured.
 #pragma once
 
+#include "strata/kernels/window_limits.hpp"
+
 #include <cstdint>
 
 namespace strata::kernels {
 
-inline constexpr int kVerifyMaxT = 8;
+/// The most rows one verify / batch window holds (8; 16 in the CUDA / HIP builds, window_limits.hpp).  A window of up to
+/// kVerifyNarrowT rows runs the kernels it always ran.
+inline constexpr int kVerifyMaxT = kWindowMaxT;
+/// --lookup-max-t: the longest one-conversation window (a prompt-lookup window).  In a build whose windows hold 8 rows, a
+/// window past kVerifyMaxT tokens runs as two token groups of at most kVerifyMaxT each (the --spec-split layout), so every
+/// per-group kernel, the CPU experts and the drafter keep their kVerifyMaxT rows; only the window-wide parts (staging,
+/// head, commit) take more.  A build whose windows already hold 16 rows runs the 16 as one group.
+/// Batch and pipelined windows stay at kVerifyMaxT.
+inline constexpr int kVerifyLongT = kVerifyMaxT > kVerifyNarrowT ? kVerifyMaxT : 2 * kVerifyMaxT;
 
 /// For token t of T: conv over [history(3) | qkv_0 .. qkv_t] -> SiLU -> L2 norm of the q/k heads -> h[t].
 /// `history` is NOT written, but with `commit` (one token): it then keeps the token, as gdn_conv_commit.  Bitwise
@@ -69,6 +79,27 @@ bool gdn_commit_layers(float* state, int64_t state_stride, int64_t conv_off, con
 /// Spin until *flag >= value (a mapped host flag).  The value is fixed at capture, so several rings can be
 /// outstanding at once (the split verify window keeps two).
 void wait_flag_ge(const uint32_t* flag, uint32_t value, void* stream);
+/// BW-5 (STRATA_L2_PF=1): device ranges to pull into the L2 cache.  `l2_prefetch_ranges` issues a prefetch hint for every
+/// byte of them (`cp.async.bulk.prefetch.L2` on sm_90+, `prefetch.global.L2` below); it reads and writes nothing, so every
+/// value the window computes is unchanged.  A no-op on HIP.
+struct L2PrefetchSet {
+    static constexpr int kMax = 32;
+    unsigned long long ptr[kMax];
+    unsigned long long bytes[kMax];
+    unsigned first_chunk[kMax + 1];   ///< filled by l2_prefetch_finish
+    int n = 0;
+    unsigned long long total_bytes = 0;
+    void add(const void* p, unsigned long long b) {
+        if (p == nullptr || b < 16 || n >= kMax) return;
+        const unsigned long long a = (unsigned long long) (uintptr_t) p;
+        const unsigned long long lo = a & ~15ull;
+        ptr[n] = lo;
+        bytes[n] = (b + (a - lo)) & ~15ull;
+        total_bytes += bytes[n];
+        ++n;
+    }
+};
+void l2_prefetch_ranges(const L2PrefetchSet& set, void* stream);
 /// wait_flag_ge and copy_i32_from_mapped in ONE launch (143-amdk): thread 0 spins on *flag >= value, the block then
 /// copies dst[0, n) = src[0, n) (mapped host memory, volatile reads).  One kernel node fewer per layer: a dependent
 /// kernel costs ~2.4 us on a gfx1201 graph whatever it does.  n <= 128 * k for any k (a strided loop).
@@ -108,6 +139,17 @@ void copy_rows_strided(float* dst, const float* src, int64_t rows, int64_t w, in
 void resident_plan(const int32_t* ids, int n_entries, int k, const int32_t* res_layer, int n_expert,
                    const uint8_t* cache_base, const unsigned long long* slot_off, long long blob, int32_t* plan,
                    long long capx, uint32_t* skip, uint32_t ring, void* stream, uint32_t* plan_err = nullptr);
+/// Partial-VRAM on-device hit plan (`STRATA_VERIFY_DEVICE_HITS=1`, `--pcie-frac 0`, CUDA / HIP): groups only the
+/// resident routed experts (`res_layer[e] >= 0`) in first-occurrence routing order into `plan` (`counts = {hit_groups,
+/// hit_entries, 0}`), matching `expert_pool_dispatch_multi` when `fetches == 0` without waiting on `m_flagA_`/`m_flagB_`.
+void resident_hits_plan(const int32_t* ids, int n_entries, int k, const int32_t* res_layer, int n_expert,
+                        const uint8_t* cache_base, const unsigned long long* slot_off, long long blob, int32_t* plan,
+                        long long capx, void* stream);
+/// Opt-in `STRATA_ROUTE_TAIL_RENORM=1` (CUDA / HIP): zeroes routing weights of missed experts (`res_layer[e] < 0`)
+/// routed exclusively at rank >= `tail_rank` across the `n_tok` rows of the window, and rescales each row's remaining
+/// weights so their sum equals the row's original router weight sum.
+void route_tail_renorm(const int32_t* ids, float* weights, const int32_t* res_layer, int n_tok, int k, int n_expert,
+                       int tail_rank, void* stream);
 /// wait_flag_ge that also returns when *skip == value (device memory).
 void wait_flag_ge_or(const uint32_t* flag, uint32_t value, const uint32_t* skip, void* stream);
 /// copy_i32_from_mapped unless *skip == value.
@@ -123,6 +165,12 @@ void embedding_gather_dev(const uint8_t* codes, const float* scales, const float
                           uint64_t row_groups, float* out, void* stream);
 /// R[t][c][:] = x[t][:] for the hc streams.
 void broadcast_streams(const float* x, float* R, int64_t n_embd, int hc, int n_tok, void* stream);
+/// out[:n_embd] = the mean of the hc streams of ONE row R[hc][n_embd] (the DFlash2 drafter's target features; only the
+/// STRATA_TAP_FILE hook calls it).
+void hc_mean_streams(const float* R, float* out, int64_t n_embd, int hc, void* stream);
+/// STRATA_ROUTE_STATS only: acc[r] += the number of ids of row r (k per row, n rows <= 8) that no earlier row of the window holds
+/// (duplicates inside a row count once).
+void route_marginal_stats(const int32_t* ids, int n, int k, unsigned long long* acc, void* stream);
 /// dst[:n] = src[(*index) * stride + :n]  (index read from device memory; a negative index copies nothing).
 void copy_indexed(float* dst, const float* src, int64_t stride, const int32_t* index, int64_t n, void* stream);
 
@@ -130,11 +178,18 @@ void copy_indexed(float* dst, const float* src, int64_t stride, const int32_t* i
 /// into dst + k * blob_bytes with coalesced 16-byte loads - the PCIe share of a layer's missed experts, staged
 /// into VRAM before the grouped expert kernel reads them.  Launched for a capacity of `cap` blobs.
 void fetch_blobs(const unsigned long long* src, const int32_t* n, uint8_t* dst, int64_t blob_bytes, int cap, void* stream);
+/// The same with `dst2` (device memory, may be null): blob k goes to dst2[k] instead where that is not 0
+/// (STRATA_ADAPT_FETCH: a VRAM cache slot).  A separate overload, so the SYCL copy keeps the one above.
+void fetch_blobs(const unsigned long long* src, const int32_t* n, uint8_t* dst, int64_t blob_bytes, int cap, void* stream,
+                 const unsigned long long* dst2);
 /// table[pairs[2k]] = pairs[2k + 1] for k < n, `pairs` in mapped host memory: a residency table's changed entries,
 /// stream-ordered before the window that reads it, without the copy engine (where the tier's swaps may queue).
 void res_patch(int32_t* table, const int32_t* pairs, int n, void* stream);
 /// ptr[k] = base + k * blob_bytes for k < *n (the staged copies `fetch_blobs` made).
 void rebase_ptrs(unsigned long long* ptr, const int32_t* n, uint8_t* base, int64_t blob_bytes, void* stream);
+/// The same, or dst2[k] where `dst2` (may be null) is not 0 (fetch_blobs' second target).
+void rebase_ptrs(unsigned long long* ptr, const int32_t* n, uint8_t* base, int64_t blob_bytes, void* stream,
+                 const unsigned long long* dst2);
 
 // ---- the MTP draft layer (src/core/mtp.cpp)
 /// R[t][c][:] = h[t][c][:] + e[t][:]  (the embedding branch added to every stream).
@@ -186,5 +241,10 @@ void dense_steps(const int32_t* cells, int n, int32_t* steps, void* stream);
 /// A sliding attention window: for `n` step records (kStepCount ints each, n_kv at [1]) the selection becomes the
 /// last `window` cells: ids[q * ids_stride + j] = max(0, n_kv - window) + j and the record's width = the count.
 void window_ids(int32_t* steps, int n, int window, int32_t* ids, int64_t ids_stride, void* stream);
+/// window_ids whose window starts no lower than the cell `*floor_cell` (device-visible memory, read when the kernel
+/// runs; KVA: the first draft cell built from a real row).  `window` may be INT_MAX for "every cell".  A floor of 0
+/// selects exactly what window_ids selects.  CUDA / HIP only.
+void window_ids_floor(int32_t* steps, int n, int window, int32_t* ids, int64_t ids_stride, const int32_t* floor_cell,
+                      void* stream);
 
 }  // namespace strata::kernels

@@ -99,6 +99,45 @@ int check_batch(const Buffers& b, long long pos, int rows) {
     return ok ? 0 : 1;
 }
 
+// check_batch() for heads of 256 values, kv_heads of them and n_head queries (attn_flash256_kernel's groups of 8 and
+// 16), over a cache of its own
+int check_batch256(int n_head, int kv_heads, long long pos, int rows) {
+    constexpr int dim = 256, chunk = 8;
+    std::mt19937 rng(7);
+    std::normal_distribution<float> nd(0.f, 1.f);
+    std::vector<float> q(size_t(rows) * n_head * dim);
+    for (float& x : q) x = 2.f * nd(rng);
+    std::vector<uint16_t> k(size_t(pos + rows) * kv_heads * dim), v(k.size());
+    for (uint16_t& x : k) x = __half_as_ushort(__float2half(nd(rng)));
+    for (uint16_t& x : v) x = __half_as_ushort(__float2half(nd(rng)));
+    float* dq = upload(q);
+    uint16_t *dk = upload(k), *dv = upload(v);
+    const size_t score_n = std::max(size_t(chunk) * n_head * size_t(pos + rows), size_t(rows) * n_head * 64);
+    float *score = nullptr, *out = nullptr;
+    cudaMalloc(&score, score_n * sizeof(float));
+    cudaMalloc(&out, q.size() * sizeof(float));
+    const float scale = 0.0625f;
+    std::vector<float> ref(q.size());
+    for (int first = 0; first < rows; first += chunk) {
+        const int c = std::min(chunk, rows - first);
+        const size_t o = size_t(first) * n_head * dim;
+        attend(dq + o, dk, dv, pos + first, c, score, chunk, out, dim, n_head, kv_heads, scale, nullptr);
+        cudaMemcpy(ref.data() + o, out, size_t(c) * n_head * dim * sizeof(float), cudaMemcpyDeviceToHost);
+    }
+    attend_batch(nullptr, dq, dk, dv, pos, rows, score, score_n, nullptr, out, dim, n_head, kv_heads, scale, nullptr);
+    const std::vector<float> batch = download(out, q.size());
+    float most = 0.f, big = 0.f;
+    for (size_t i = 0; i < q.size(); ++i) {
+        most = std::max(most, std::fabs(batch[i] - ref[i]));
+        big = std::max(big, std::fabs(ref[i]));
+    }
+    cudaFree(dq), cudaFree(dk), cudaFree(dv), cudaFree(score), cudaFree(out);
+    const bool ok = most <= 4e-3f;
+    std::printf("%s batch dim 256, %d/%d heads, pos %5lld rows %4d: %.2e from attend() (results up to %.2f)\n",
+                ok ? "ok  " : "FAIL", n_head, kv_heads, pos, rows, most, big);
+    return ok ? 0 : 1;
+}
+
 }  // namespace
 
 int main() {
@@ -122,6 +161,10 @@ int main() {
     bad += check(b, kMaxRows - 16, 16);         // to the end of the cache
     const std::pair<long long, int> batches[] = {{0, 37}, {0, kBatch}, {1000, 517}, {30000, 700}};
     for (const auto& [pos, rows] : batches) bad += check_batch(b, pos, rows);
+    for (const auto& [pos, rows] : batches) {
+        bad += check_batch256(16, 2, pos, rows);
+        bad += check_batch256(32, 2, pos, rows);
+    }
     cudaFree(b.q), cudaFree(b.k), cudaFree(b.v), cudaFree(b.score), cudaFree(b.out), cudaFree(b.at);
     if (const cudaError_t e = cudaGetLastError(); e != cudaSuccess) {
         std::printf("CUDA: %s\n", cudaGetErrorString(e));

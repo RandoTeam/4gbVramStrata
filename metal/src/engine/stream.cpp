@@ -1,4 +1,5 @@
 // metal/src/engine/stream.cpp - see stream.h.
+#include "geo.h"
 #include "stream.h"
 
 #include "ref_quant.h"
@@ -16,14 +17,14 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <map>
 #include <fstream>
+#include <map>
 #include <sstream>
 
 namespace strata::metal_engine {
 
 namespace {
-constexpr int NL = 48;
+constexpr int NL = strata_metal::geo::NL, NE = 512;   // layers of the compiled shape (engine/geo.h); NE: the row stride of the per-layer maps (the largest expert count)
 constexpr uint64_t PAGE = 16384;
 double now_ms() { return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now().time_since_epoch()).count(); }
 int env_int(const char* n, int d) {
@@ -65,45 +66,48 @@ bool ExpertStream::open(gguf::File& f, std::string& err, const std::string& pack
     if (fd_ < 0) { err = "metal stream: cannot open " + f.path; return false; }
     fcntl(fd_, F_NOCACHE, 1);
     fcntl(fd_, F_RDAHEAD, 0);
-    if (!pack.empty()) {
+    if (!pack.empty()) {   // a ready pack: experts.bin holds each layer's experts back to back, native_experts.txt says where
         std::ifstream index(pack + "/native_experts.txt");
         cfd_ = ::open((pack + "/experts.bin").c_str(), O_RDONLY);
-        struct stat statbuf{};
-        if (!index || cfd_ < 0 || ::fstat(cfd_, &statbuf)) {err="metal: missing ready-pack expert files";return false;}
-        fcntl(cfd_, F_NOCACHE, 1);fcntl(cfd_, F_RDAHEAD, 0);
-        coff_.assign(NL, UINT64_MAX);ne_=n_expert;
-        std::string line;uint64_t last=0;
-        while (std::getline(index,line)) {
-            if(line.empty() || line[0]=='#')continue;
-            std::istringstream row(line);int l,gu,d;uint64_t off,blob;
-            if(!(row>>l>>gu>>d>>off>>blob) || l<0 || l>=NL || coff_[l]!=UINT64_MAX || gu!=40 || d!=40) {
-                err="metal: invalid NVFP4 expert table";return false;
+        struct stat statbuf {};
+        if (!index || cfd_ < 0 || ::fstat(cfd_, &statbuf)) { err = "metal: missing ready-pack expert files"; return false; }
+        fcntl(cfd_, F_NOCACHE, 1);
+        fcntl(cfd_, F_RDAHEAD, 0);
+        coff_.assign(NL, UINT64_MAX);
+        ne_ = n_expert;
+        std::string line;
+        uint64_t last = 0;
+        while (std::getline(index, line)) {
+            if (line.empty() || line[0] == '#') continue;
+            std::istringstream row(line);
+            int l, gu, d;
+            uint64_t off, blob;
+            if (!(row >> l >> gu >> d >> off >> blob) || l < 0 || l >= NL || coff_[(size_t) l] != UINT64_MAX || gu != 40 || d != 40) {
+                err = "metal: invalid NVFP4 expert table"; return false;
             }
-            uint64_t gs=ref::row_bytes(gu,n_embd)*n_ff,ds=ref::row_bytes(d,n_ff)*n_embd;
-            if(blob!=2*gs+ds+16 || off<last || off>uint64_t(statbuf.st_size) ||
-               blob*ne_>uint64_t(statbuf.st_size)-off) {err="metal: invalid NVFP4 expert span";return false;}
-            coff_[l]=off;last=off+blob*ne_;
-            for (int part=0;part<3;++part) {
-                std::string name="blk."+std::to_string(l)+".ffn_"+(part==0?"gate":part==1?"up":"down")+"_exps.weight";
-                f.tensors[name]={name,{uint64_t(part==2?n_ff:n_embd),uint64_t(part==2?n_embd:n_ff),uint64_t(ne_)},part==2?d:gu,0,(part==2?ds:gs)*ne_};
+            const uint64_t gs = ref::row_bytes(gu, n_embd) * n_ff, ds = ref::row_bytes(d, n_ff) * n_embd;
+            if (blob != 2 * gs + ds + 16 || off < last || off > (uint64_t) statbuf.st_size ||
+                blob * ne_ > (uint64_t) statbuf.st_size - off) { err = "metal: invalid NVFP4 expert span"; return false; }
+            coff_[(size_t) l] = off;
+            last = off + blob * ne_;
+            for (int part = 0; part < 3; ++part) {
+                const std::string name = "blk." + std::to_string(l) + ".ffn_" + (part == 0 ? "gate" : part == 1 ? "up" : "down") + "_exps.weight";
+                f.tensors[name] = {name, {uint64_t(part == 2 ? n_ff : n_embd), uint64_t(part == 2 ? n_embd : n_ff), uint64_t(ne_)},
+                                   part == 2 ? d : gu, 0, (part == 2 ? ds : gs) * ne_};
             }
         }
-        if(std::find(coff_.begin(),coff_.end(),UINT64_MAX)!=coff_.end()){err="metal: incomplete NVFP4 expert table";return false;}
+        if (std::find(coff_.begin(), coff_.end(), UINT64_MAX) != coff_.end()) { err = "metal: incomplete NVFP4 expert table"; return false; }
     }
-    const auto* first = f.find("blk.0.ffn_gate_exps.weight");
-    if (!first || first->shape.size() != 3 || (first->shape[2] != 256 && first->shape[2] != 512)) {
-        err = "metal stream: unsupported expert geometry"; return false;
-    }
-    ne_ = (int) first->shape[2];
     lay_.resize(NL);
+    if (const gguf::Tensor* g0 = f.find("blk.0.ffn_gate_exps.weight"); g0 && g0->shape.size() >= 3 && g0->shape[2] > 0 && g0->shape[2] <= NE)
+        ne_ = (int) g0->shape[2];
     for (int l = 0; l < NL; ++l) {
         const std::string b = "blk." + std::to_string(l) + ".";
         const gguf::Tensor* g = f.find(b + "ffn_gate_exps.weight");
         const gguf::Tensor* u = f.find(b + "ffn_up_exps.weight");
         const gguf::Tensor* d = f.find(b + "ffn_down_exps.weight");
-        if (!g || !u || !d || g->shape.size() != 3 || u->shape.size() != 3 || d->shape.size() != 3 ||
-            g->shape[2] != ne_ || u->shape[2] != ne_ || d->shape[2] != ne_) { err = "metal stream: layer " + std::to_string(l) + " has no routed experts"; return false; }
-        lay_[(size_t) l] = {g->offset, g->bytes / ne_, u->offset, u->bytes / ne_, d->offset, d->bytes / ne_ + (pack.empty()?0:16), -1};
+        if (!g || !u || !d) { err = "metal stream: layer " + std::to_string(l) + " has no routed experts"; return false; }
+        lay_[(size_t) l] = {g->offset, g->bytes / ne_, u->offset, u->bytes / ne_, d->offset, d->bytes / ne_ + (pack.empty() ? 0 : 16), -1};
     }
     // the expert-contiguous copy beside the GGUF, when it is this GGUF's (sizes in its header) and its first and
     // last experts match the GGUF's bytes
@@ -217,6 +221,9 @@ bool ExpertStream::load_dense(gguf::File& f, mtl::Context& cx, const std::vector
     for (auto& kv : f.tensors) {
         gguf::Tensor& t = kv.second;
         if (t.name.find("_exps") != std::string::npos) continue;
+        // the n-gram table is read by the host from the SSD, a few rows at a time (src/ngram/ple_reader.cpp).  It is its own shard in
+        // the ISTA / Unsloth files; in agentionai's Gyro files it is the first 28.8 GB of the one file, and must not be read in here
+        if (t.name == "per_layer_token_embd.weight") continue;
         if (std::find(skip.begin(), skip.end(), t.name) != skip.end()) { t.offset = 0; continue; }
         ts.push_back(&t);
         tot += (t.bytes + 255) / 256 * 256;
@@ -237,8 +244,8 @@ bool ExpertStream::load_dense(gguf::File& f, mtl::Context& cx, const std::vector
             for (;;) {
                 const size_t i = next++;
                 if (i >= ts.size()) break;
-                if(embedding && ts[i]->name=="token_embd.weight")
-                    std::memcpy(out.as<uint8_t>()+dst[i],(const uint8_t*)embedding->map+src[i],ts[i]->bytes);
+                if (embedding && ts[i]->name == "token_embd.weight")
+                    std::memcpy(out.as<uint8_t>() + dst[i], (const uint8_t*) embedding->map + src[i], ts[i]->bytes);
                 else if (!read(out.as<uint8_t>() + dst[i], ts[i]->bytes, src[i])) ok = false;
             }
         });
@@ -292,7 +299,7 @@ int ExpertStream::victim(int ci) {
         if (slots_[(size_t) s].state.load() == 0 && slots_[(size_t) s].pin != stamp_) {
             Slot& x = slots_[(size_t) s];
             if (x.layer >= 0) {
-                const int key = x.layer * ne_ + x.e;
+                const int key = x.layer * NE + x.e;
                 where_[(size_t) key] = -1;
                 smap_.as<uint32_t>()[key] = 0xFFFFFFFFu;
             }
@@ -354,7 +361,7 @@ void ExpertStream::io_main() {
             std::lock_guard<std::mutex> g(mu_);
             Slot& x = slots_[(size_t) j.slot];
             if (--x.left == 0) {
-                smap_.as<uint32_t>()[j.layer * ne_ + j.e] = code_[(size_t) j.slot];
+                smap_.as<uint32_t>()[j.layer * NE + j.e] = code_[(size_t) j.slot];
                 x.state = 0;
                 --outstanding_;
                 ++reads_;
@@ -374,7 +381,7 @@ void ExpertStream::submit(int s, int l, int e, bool urgent) {
     const int parts = cfd_ >= 0 ? split_ : 3 * split_;
     x.left = parts;
     ++outstanding_;
-    where_[(size_t) (l * ne_ + e)] = s;
+    where_[(size_t) (l * NE + e)] = s;
     for (int p = 0; p < parts; ++p) (urgent ? urgent_q_ : pre_q_).push_back({s, l, e, p});
 }
 
@@ -382,7 +389,7 @@ void ExpertStream::submit(int s, int l, int e, bool urgent) {
 void ExpertStream::cancel_slot(int s) {
     Slot& x = slots_[(size_t) s];
     for (auto it = pre_q_.begin(); it != pre_q_.end();) it = it->slot == s ? pre_q_.erase(it) : it + 1;
-    where_[(size_t) (x.layer * ne_ + x.e)] = -1;
+    where_[(size_t) (x.layer * NE + x.e)] = -1;
     x.layer = x.e = -1;
     x.state = 0;
     x.pre = false;
@@ -408,7 +415,7 @@ bool ExpertStream::make_arena(mtl::Context& cx, uint64_t budget, const std::stri
     for (auto& k : cls_) k.n = 0;   // a second try (after a shrink) lays the arena out again
     // the ranking: the profile's pairs, then every pair it misses, layer-interleaved
     std::vector<std::pair<int, int>> rank;
-    std::vector<uint8_t> seen((size_t) NL * ne_, 0);
+    std::vector<uint8_t> seen((size_t) NL * NE, 0);
     if (FILE* f = std::fopen(profile.c_str(), "rb")) {
         char magic[4];
         uint32_t h[5];
@@ -417,8 +424,8 @@ bool ExpertStream::make_arena(mtl::Context& cx, uint64_t budget, const std::stri
             for (uint32_t i = 0; i < h[4]; ++i) {
                 uint16_t p[2];
                 if (std::fread(p, 2, 2, f) != 2) break;
-                if (p[0] < NL && p[1] < ne_ && !seen[(size_t) p[0] * ne_ + p[1]]) {
-                    seen[(size_t) p[0] * ne_ + p[1]] = 1;
+                if (p[0] < NL && p[1] < ne_ && !seen[(size_t) p[0] * NE + p[1]]) {
+                    seen[(size_t) p[0] * NE + p[1]] = 1;
                     rank.push_back({p[0], p[1]});
                 }
             }
@@ -430,7 +437,7 @@ bool ExpertStream::make_arena(mtl::Context& cx, uint64_t budget, const std::stri
     const size_t from_profile = rank.size();
     for (int e = 0; e < ne_; ++e)
         for (int l = 0; l < NL; ++l)
-            if (!seen[(size_t) l * ne_ + e]) rank.push_back({l, e});
+            if (!seen[(size_t) l * NE + e]) rank.push_back({l, e});
     // the pool of each size class: at least min_slots (a prompt chunk's layer needs up to 512 at once), then the
     // top-ranked pairs that fit in the budget
     uint64_t used = 0;
@@ -498,11 +505,11 @@ bool ExpertStream::make_arena(mtl::Context& cx, uint64_t budget, const std::stri
         code_[(size_t) s] = ((uint32_t) at[(size_t) s].first << 28) | (uint32_t) at[(size_t) s].second;
         host_[(size_t) s] = chunks_[(size_t) at[(size_t) s].first].as<uint8_t>() + at[(size_t) s].second * PAGE;
     }
-    smap_ = cx.alloc((size_t) NL * ne_ * 4);
-    std::memset(smap_.ptr, 0xFF, (size_t) NL * ne_ * 4);
+    smap_ = cx.alloc((size_t) NL * NE * 4);
+    std::memset(smap_.ptr, 0xFF, (size_t) NL * NE * 4);
     slots_ = std::vector<Slot>((size_t) base);
     retired_.assign((size_t) base, 0);
-    where_.assign((size_t) NL * ne_, -1);
+    where_.assign((size_t) NL * NE, -1);
     for (auto& k : cls_) {
         for (int s = k.base; s < k.base + k.n; ++s) {
             slots_[(size_t) s].prev = s == k.base ? -1 : s - 1;
@@ -561,7 +568,7 @@ bool ExpertStream::make_arena(mtl::Context& cx, uint64_t budget, const std::stri
                 }
             }
         // the LRU order = the rank order (best at the front)
-        for (size_t i = done; i-- > 0;) lru_front(where_[(size_t) (fill[i].first * ne_ + fill[i].second)]);
+        for (size_t i = done; i-- > 0;) lru_front(where_[(size_t) (fill[i].first * NE + fill[i].second)]);
     }
     if (stopped)
         std::fprintf(stderr, "strata metal stream: the arena's fill stopped after %.2f GB: macOS's free memory reached what it "
@@ -610,7 +617,7 @@ void ExpertStream::ahead(int ln, int T, const float* pred, int K) {
     std::pair<float, int> pw[8 * 32];
     int np = 0;
     for (int t = 0; t < T; ++t) {
-        const float* lg = pred + (size_t) t * ne_;
+        const float* lg = pred + (size_t) t * NE;
         int top[32];
         int nt = 0;
         for (int e = 0; e < ne_; ++e) {
@@ -631,7 +638,7 @@ void ExpertStream::ahead(int ln, int T, const float* pred, int K) {
     {
         std::lock_guard<std::mutex> g(mu_);
         for (int j = 0; j < np; ++j) {
-            const int key = ln * ne_ + pw[j].second;
+            const int key = ln * NE + pw[j].second;
             const int s0 = where_[(size_t) key];
             if (s0 >= 0) { lru_front(s0); continue; }
             const int s = victim(lay_[(size_t) ln].cls);
@@ -652,18 +659,18 @@ void ExpertStream::at_layer(int l, int T, int topk, const int32_t* ids, const fl
     const bool prompt = T > 8;   // a prompt chunk (the GEMM path): nearly every expert of the layer is used
     if (l == 0) { if (prompt) ++p_chunks_; else ++windows_; }
     ++stamp_;                    // the slots this layer uses are pinned until the next handshake
-    std::vector<uint8_t> used(ne_, 0);
-    std::vector<int> want(ne_);
+    bool used[NE] = {};
+    int want[NE];
     int nw = 0;
     for (int i = 0; i < T * topk; ++i) {
         const int e = ids[i];
-        if (e < 0 || e >= ne_ || used[e]) continue;
+        if (e < 0 || e >= NE || used[e]) continue;
         used[e] = true;
         want[nw++] = e;
     }
     if (fake_) {
         for (int j = 0; j < nw; ++j)
-            if (where_[(size_t) (l * ne_ + want[j])] < 0) smap_.as<uint32_t>()[l * ne_ + want[j]] = code_[0];
+            if (where_[(size_t) (l * NE + want[j])] < 0) smap_.as<uint32_t>()[l * NE + want[j]] = code_[0];
         host_ms_ += now_ms() - t0;
         return;
     }
@@ -680,9 +687,9 @@ void ExpertStream::at_layer(int l, int T, int topk, const int32_t* ids, const fl
             for (int s : drop) cancel_slot(s);
         }
         for (int j = 0; j < nw; ++j)   // pass 1: pin what is resident (or on its way), so no miss below evicts it
-            if (where_[(size_t) (l * ne_ + want[j])] >= 0) slots_[(size_t) where_[(size_t) (l * ne_ + want[j])]].pin = stamp_;
+            if (where_[(size_t) (l * NE + want[j])] >= 0) slots_[(size_t) where_[(size_t) (l * NE + want[j])]].pin = stamp_;
         for (int j = 0; j < nw; ++j) {
-            const int e = want[j], key = l * ne_ + e;
+            const int e = want[j], key = l * NE + e;
             uint64_t& lk = prompt ? p_lookups_ : lookups_;
             ++lk;
             int s = where_[(size_t) key];
@@ -728,7 +735,7 @@ void ExpertStream::at_layer(int l, int T, int topk, const int32_t* ids, const fl
             std::lock_guard<std::mutex> g(mu_);
             const int ln = l + 1;
             for (int e = 0; e < ne_; ++e) {
-                if (where_[(size_t) (ln * ne_ + e)] >= 0) continue;
+                if (where_[(size_t) (ln * NE + e)] >= 0) continue;
                 const int s = victim(lay_[(size_t) ln].cls);
                 if (s < 0) break;
                 submit(s, ln, e, false);
@@ -761,7 +768,7 @@ uint8_t* ExpertStream::region(uint64_t bytes) {
             const uint64_t sz = cls_[(size_t) cls_of(s)].pages * PAGE;
             if (h + sz > lo && h < end) { region_slots_.push_back(s); first = std::min(first, (uint8_t*) h); }
         }
-        {   // a class left with fewer slots than a prompt chunk's layer can use (ne_) would stop with "no free slot": a small
+        {   // a class left with fewer slots than a prompt chunk's layer can use (NE) would stop with "no free slot": a small
             // arena (a Mac with little free memory at start) gets the prompt's buffers as their own allocation instead
             std::vector<int> stolen(cls_.size(), 0);
             for (int s : region_slots_) ++stolen[(size_t) cls_of(s)];
@@ -807,7 +814,7 @@ void ExpertStream::hold_region(bool hold) {
         for (int s : region_slots_) {
             Slot& x = slots_[(size_t) s];
             if (x.layer >= 0) {
-                const int key = x.layer * ne_ + x.e;
+                const int key = x.layer * NE + x.e;
                 where_[(size_t) key] = -1;
                 smap_.as<uint32_t>()[key] = 0xFFFFFFFFu;
             }
@@ -838,7 +845,7 @@ void ExpertStream::report(FILE* f) const {
     if (p_chunks_)
         std::fprintf(f, "expert stream prompts    %llu chunks: %llu distinct lookups (%.1f per layer), in the arena %.4f, streamed "
                         "ahead %.4f, missed %.4f; %llu streamed in; host %.1f ms per chunk, of it waiting %.1f ms\n",
-                     (unsigned long long) p_chunks_, (unsigned long long) p_lookups_, p_lookups_ / 48.0 / p_chunks_,
+                     (unsigned long long) p_chunks_, (unsigned long long) p_lookups_, p_lookups_ / (double) NL / p_chunks_,
                      p_hits_ / std::max(1.0, (double) p_lookups_), p_pre_ / std::max(1.0, (double) p_lookups_),
                      p_misses_ / std::max(1.0, (double) p_lookups_), (unsigned long long) p_streamed_, p_host_ms_ / p_chunks_,
                      p_wait_ms_ / p_chunks_);

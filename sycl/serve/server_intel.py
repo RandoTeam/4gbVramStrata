@@ -25,8 +25,9 @@ import urllib.request
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-ROOT = HERE.parent.parent
+ROOT = HERE.parent.parent                                # engine/
 sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(ROOT.parent / "terminal"))        # serve/ (server.py, telemetry.py) is the Terminal's
 sys.path.insert(0, str(HERE))
 
 import serve.server as S  # noqa: E402
@@ -45,6 +46,24 @@ def install_xe_reader():
         return xe if xe.ok() else orig(index, amd)
 
     T.gpu_reader = gpu_reader
+
+
+def install_shared_embeddings():
+    """Pictures: the engine runs in a container, and a request's image embeddings reach it as a file named on its GENI line.
+    serve/server.py writes that file to /dev/shm when that has room, and strata-sycl.sh shares the host's /dev/shm with the
+    container, so the path means the same on both sides.  Anywhere else (a full /dev/shm) the container cannot see the file:
+    said once, in the log, in plain words."""
+    orig = S.combined_embeddings_path
+    said = []
+
+    def path(vision_dir, nbytes):
+        p = orig(vision_dir, nbytes)
+        if not str(p).startswith("/dev/shm/") and not said:
+            said.append(1)
+            print("[strata] /dev/shm has no room for this picture: the engine runs in a container that sees only the host's /dev/shm, so it "
+                  "cannot read the picture. Free /dev/shm (or enlarge it: mount -o remount,size=4G /dev/shm) and send it again.", flush=True)
+        return p
+    S.combined_embeddings_path = path
 
 
 def model_switcher(url: str, port, model, mode: str = "") -> dict:
@@ -109,7 +128,7 @@ def install_switcher(argv):
                     self._send(f.read_bytes(), types[f.suffix])
                     return
                 if path == "":
-                    page = (ROOT / "serve" / "web" / "index.html").read_text(encoding="utf-8")
+                    page = (ROOT.parent / "terminal" / "serve" / "web" / "index.html").read_text(encoding="utf-8")
                     page = page.replace("</head>", '<link rel="stylesheet" href="sycl-web/switcher.css">\n</head>', 1)
                     page = page.replace("</body>", '<script src="sycl-web/switcher.js"></script>\n</body>', 1)
                     self._send(page.encode("utf-8"), "text/html; charset=utf-8")
@@ -306,8 +325,34 @@ def top_logprobs(req: dict):
     return None
 
 
+def install_two_card_spec():
+    """engine_args -> the config's --spec 2 on exactly two Arc B-series cards (strata_control/intel_spec.py), at every start: a
+    config written before (by an older setup, or by the launcher) gets what a new setup run would write.  The person's own
+    --spec ("user_args", or a value other than setup's 4) is never touched; one plain line says what changed."""
+    from strata_control import intel_spec
+    original = S.engine_args
+
+    def engine_args(cfg, exe=None, *, announce=True):      # the base signature (serve/server.py engine_args): start calls it with exe, the budget check with announce=False
+        args = original(cfg, exe, announce=announce)
+        try:
+            if cfg.get("backend") == "sycl" and S.layer_split_of(cfg):
+                sysfs = intel_spec.sysfs_cards()
+                cards = [sysfs[i] for i in S.gpu_list(cfg) if isinstance(i, int) and 0 <= i < len(sysfs)]
+                new, note = intel_spec.plan(args, cfg.get("user_args"), cards, mtp_off=cfg.get("mtp") is False)
+                if note:
+                    if announce:                                   # (announce=False builds the arguments without any line)
+                        print("[strata] " + note, flush=True)
+                    return new
+        except Exception as exc:  # noqa: BLE001 - a rule that cannot be read leaves the config's own args
+            print(f"[strata] two-card --spec rule skipped: {exc}", flush=True)
+        return args
+    S.engine_args = engine_args
+
+
 if __name__ == "__main__":
+    install_two_card_spec()
     install_xe_reader()
+    install_shared_embeddings()
     install_narrator()
     install_switcher(sys.argv[1:])
     install_logprobs()

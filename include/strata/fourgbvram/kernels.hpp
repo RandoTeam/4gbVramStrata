@@ -19,6 +19,14 @@ namespace strata::fourgbvram {
 void gemv_f32(const float* w, const float* x, float* y, int n_in, int n_out, int rows_per_x, int rows, void* stream);
 void gemv_bf16(const uint16_t* w, const float* x, float* y, int n_in, int n_out, int rows_per_x, int rows,
                void* stream);
+/// gemv_f32() (type 0) or gemv_bf16() (type 1) of two matrices on one input, each a plain product (rows_per_x ==
+/// its n_out), in one launch with the same bits.  CUDA and HIP only.
+void gemv_pair(int type, const void* w1, const void* w2, const float* x, float* y1, float* y2, int n_in, int n_out1,
+               int n_out2, int rows, void* stream);
+/// gemv_f32() of 1 to 6 matrices of one width (n_in), each a plain product on an input of its own, in one launch
+/// with the same bits.  CUDA and HIP only.
+void gemv_set(const float* const* w, const float* const* x, float* const* y, const int* n_out, int count, int n_in,
+              int rows, void* stream);
 /// The same for the many rows of a prompt batch, as a cuBLAS product on the stream of `blas` (blas_create), one
 /// for each group of rows_per_x outputs.  It sums in another order than gemv_f32, so a row does not come out
 /// to the last bit as it does there.  Throws std::runtime_error.
@@ -41,6 +49,10 @@ void scale_rows(float* y, int64_t ld, int width, int rows, const int32_t* place,
 /// rows) may be null.  A row of y starts y_stride values after the one before it (0: n), so two calls can fill
 /// the two halves of rows twice as long.
 void rms_norm(const float* x, const float* w, float* y, int n, int rows, float eps, void* stream, int y_stride = 0);
+/// rms_norm() of 1 to 3 inputs of `rows` rows each, every one with its weight (null: none) and output, in one
+/// launch with the same bits.
+void rms_norm_many(const float* const* x, const float* const* w, float* const* y, int count, int n, int rows, float eps,
+                   void* stream);
 /// The threads of a block that sums over n values (rms_norm()'s among them).
 int sum_threads(int n);
 /// y = (x - mean) / sqrt(var + eps) * w + b.
@@ -122,11 +134,44 @@ void store_int8_at(const float* x, int8_t* code, uint16_t* delta, int n_kv, int 
                    const long long* at, int ring, void* stream);
 
 /// Stores the tokens' rows as ggml Q8_0 (one fp16 scale a 32-value block of int8 codes) from row `pos`.
-/// codes: n int8 a row; scales: n/32 fp16 a row.  n must be a multiple of 32 (QK8_0).
-void store_q8(const float* x, int8_t* codes, uint16_t* scales, int n, int64_t pos, int rows, void* stream);
+/// codes: n int8 a row; scales: n/32 fp16 a row.  n must be a multiple of 32 (QK8_0).  rs as Kvq8::rs.
+void store_q8(const float* x, int8_t* codes, uint16_t* scales, int n, int64_t pos, int rows, void* stream,
+              size_t rs = 0);
 /// The same from the row the card holds at `at` when the launch runs; with `ring`, a row is its number % ring.
 void store_q8_at(const float* x, int8_t* codes, uint16_t* scales, int n, const long long* at, int rows, int ring,
-                 void* stream);
+                 void* stream, size_t rs = 0);
+/// store_q8_at() for rows of different sequences: row r into codes[r] and scales[r] at the row at[2 * r] (step()'s
+/// pairs of position and turn).  Each row gets the bits a call of its own gives.  CUDA only.
+struct RowCaches {
+    static constexpr int kMax = 32;
+    int8_t* codes[kMax] = {};
+    uint16_t* scales[kMax] = {};
+    size_t rs = 0;   ///< the codes from a cache's row to its next, as Kvq8::rs; 0: n
+};
+void store_q8_rows(const float* x, const RowCaches& caches, int n, const long long* at, int rows, void* stream);
+/// A step's rows' fp16 caches, row r's own sequence's in rows[r] (attend_seqs() under an fp16 cache).
+struct RowHalves {
+    static constexpr int kMax = 32;
+    uint16_t* rows[kMax] = {};
+};
+
+#pragma pack(push, 1)
+struct block_q4_0 {
+    uint16_t d;             // scale (fp16 bits)
+    uint8_t qs[16];         // 32 4-bit codes: element j in low nibble of qs[j], j + 16 in high nibble
+};
+#pragma pack(pop)
+static_assert(sizeof(block_q4_0) == 18, "block_q4_0 must be 18 bytes");
+
+/// Stores the tokens' rows as ggml Q4_0 (one fp16 scale and 16 bytes of nibbles per 32-value block) from row `pos`.
+/// blocks: (n / 32) block_q4_0 per row. n must be a multiple of 32.
+void store_q4(const float* x, block_q4_0* out, int n, int64_t pos, int rows, void* stream);
+void store_q4_at(const float* x, block_q4_0* out, int n, const long long* at, int rows, int ring, void* stream);
+
+/// Dequantizes Q4_0 blocks to Q8_0 codes and scales (exact integer mapping: codes = nibble - 8, scale = scale).
+/// With `at`, the destination rows start at the position held on the card when the launch runs (graph replay).
+void dequant_q4_to_q8(const block_q4_0* in, int8_t* codes, uint16_t* scales, int n, int rows, void* stream,
+                      const long long* at = nullptr);
 /// Attention over cached latents for the tokens from position `pos`.  q: n_head * rank absorbed queries a token.
 /// The first dense_rows tokens attend to every cache row up to their own.  The others each have a list in sel
 /// (sel_stride apart): top_rows cache rows, then the rows of the pool their own position is still filling.
@@ -181,9 +226,23 @@ struct ExpertScales {
     const int32_t* ids = nullptr;
     int32_t e[32] = {};
 };
+/// Metal's (CUDA's activations put the scales on themselves): rows that each hold n gate values and then n up values
+/// into out, each row's gate and up values times its ExpertScales as above, the same floats as CUDA's activations
+/// take; out may be gate_up.  Without scales (null, or neither): a copy, nothing in place.  For a Metal activation's
+/// rows ahead of it (situ_rows).
+void scale_expert_rows(const float* gate_up, float* out, int n, int rows, const ExpertScales* scales, void* stream);
 /// swiglu_clamp for rows that each hold n gate values and then n up values; out has n values a row.
 void swiglu_clamp_rows(const float* gate_up, float* out, int n, int rows, float limit, void* stream,
                        const ExpertScales* scales = nullptr);
+/// Inkling 2's activation (SiTU) for the same rows: out = beta * tanh(gate / beta) * sigmoid(gate) * lb * tanh(up /
+/// lb), each row's gate and up values times its expert's scales first.  Declared here because the experts' shared
+/// code calls it (Engine::situ_beta_); the kernel is inkling2.cu's, and Metal has none.
+void situ_rows(const float* gate_up, float* out, int n, int rows, float beta, float lb, void* stream, void* q8,
+               const ExpertScales* scales = nullptr);
+/// swiglu_clamp_rows, its rows written straight into xq as gemm_iq_i8_quantize writes them (n a multiple of 32),
+/// the same numbers as the two calls one after the other, without the floats between them.
+void swiglu_clamp_i8_rows(const float* gate_up, void* xq, int n, int rows, float limit, void* stream,
+                          const ExpertScales* scales = nullptr);
 /// out = gelu(gate) * up, with the tanh form of GELU that ggml's CUDA backend computes.
 void geglu(const float* gate, const float* up, float* out, int n, void* stream);
 /// geglu for rows that each hold n gate values and then n up values; out has n values a row.
@@ -208,6 +267,57 @@ void axpy(const float* x, float a, float* acc, int n, bool add, void* stream);
 /// and write too, and a kernel's copy to or from it has none of the wait that a copy engine's has on Windows,
 /// some 25 microseconds between it and the launches beside it.
 void copy2(const void* x0, void* y0, int n0, const void* x1, void* y1, int n1, void* stream);
+/// An expert the card lacks, for a call routed on the card: from its slot in the pinned mirror to a staging slot.
+struct FarFetch {
+    const void* src;
+    void* dst;
+};
+/// tab[e] = slots[e] for each of n_expert experts, and for an expert some pair of ids[0..rr) picks that has no slot
+/// (null), the next staging slot (stage + k * stride), listed in fetch[] with its mirror slot far[e]; *count is how
+/// many.  One block.  CUDA and HIP only.
+void far_plan(const void* const* slots, const void* const* far, const int32_t* ids, int rr, int n_expert,
+              uint8_t* stage, size_t stride, void** tab, FarFetch* fetch, int* count, void* stream);
+/// uses[ids[k]] += 1 for k in [0, rr), ids below n_expert only.
+void count_picks(const int32_t* ids, int rr, int n_expert, int32_t* uses, void* stream);
+/// The first *count of fetch[0..most), `bytes` each (a multiple of 16), copied by the card's threads.
+void far_pull(const FarFetch* fetch, const int* count, int most, size_t bytes, void* stream);
+/// A doorbell in pinned memory between the card and the host for a token's routed experts outside VRAM, after Strata
+/// v0.2.19's Inkling hybrid mode (engine/src/inkling2/cuda/ink_hybrid.cuh): the card rings it with the experts it
+/// lacks and goes on with its own, the host computes those and answers, and the card waits for the answer only where
+/// it adds their sum.  Its fields are each a cache line from the others'.
+constexpr int kBellJobs = 32;
+struct ExpertBell {
+    volatile uint32_t ring;    ///< the card's rings so far; a new value is a new job
+    uint32_t pad0[15];
+    volatile uint32_t ack;     ///< the ring the host has answered
+    uint32_t pad1[15];
+    volatile uint32_t abort;   ///< the host gave up: every wait ends at once
+    uint32_t pad2[15];
+    int32_t layer, n;          ///< the job: layer and how many experts
+    int32_t e[kBellJobs];      ///< their ids
+    float w[kBellJobs];        ///< their router weights
+};
+/// One token's picks ids[0..n_used) with weights w at layer `layer`: the ones whose slots[] entry is null, at a place
+/// under skip_from, go into the bell, x (n floats) into hx, and the bell rings (seq[0] counts the rings; seq[1] is
+/// this one, or 0 when there is none).  One block.  CUDA only.
+void bell_ring(const void* const* slots, const int32_t* ids, const float* w, int n_used, int skip_from, int layer,
+               const float* x, float* hx, int n, ExpertBell* bell, uint32_t* seq, void* stream);
+/// Where seq[1] is a ring: wait until the bell's ack is that ring (or abort is set), then acc += hy (n floats).
+void bell_add(const ExpertBell* bell, const uint32_t* seq, const float* hy, float* acc, int n, void* stream);
+/// copy2() with a third run.  CUDA and HIP only.
+void copy3(const void* x0, void* y0, int n0, const void* x1, void* y1, int n1, const void* x2, void* y2, int n2,
+           void* stream);
+/// A piece of a gather: `bytes` from src to dst, each 16-byte aligned, as is bytes.  32 bytes, so that the kernel
+/// reads a piece in whole 16-byte loads.
+struct GatherPiece {
+    const void* src;
+    void* dst;
+    unsigned long long bytes, pad;
+};
+/// pieces[0..n) copied, by the card's threads: src may be pinned host memory, which the card then reads over the
+/// bus, and so may the piece list itself.  One launch for many pieces, where a copy call each cost the host more
+/// than the card took for them.
+void gather_pieces(const GatherPiece* pieces, int n, void* stream);
 /// Up to 32 vectors of n values, each times its weight into its own sum, one after the other: acc[k] += x[k] * w[k]
 /// for k = 0, 1, ...  Two of them may have the same sum.
 struct ScaledRows {
@@ -233,13 +343,60 @@ void add_bias(const float* b, float* acc, int n, int rows, void* stream);
 void head_norm_rope(const float* x, int x_stride, const float* w, float* y, int dim, int heads, int n_rot,
                     float theta_scale, int64_t pos, int rows, float eps, void* stream, const float* freq = nullptr,
                     const int32_t* axes = nullptr, int sections = 1, const long long* at = nullptr);
+/// attend() for a step's sequences, each its own rows, cache and position: sequence k's queries q[k] (tokens[k]
+/// rows), its caches, its position at[k] on the card and the room keys[k] its call is sized for, its output
+/// out[k].  score[k] holds its scores and wt[k] its weights, apart from every other sequence's.  Each sequence gets
+/// the bits attend() gives it alone.  CUDA only.
+struct AttnSeqs {
+    static constexpr int kMax = 32;
+    int n = 0;
+    const float* q[kMax] = {};
+    float* out[kMax] = {};
+    float* score[kMax] = {};
+    float* wt[kMax] = {};
+    const int8_t* kc[kMax] = {};
+    const uint16_t* ks[kMax] = {};
+    const int8_t* vc[kMax] = {};
+    const uint16_t* vs[kMax] = {};
+    const long long* at[kMax] = {};
+    int keys[kMax] = {}, tokens[kMax] = {};
+    size_t rs = 0;   ///< every cache's codes from a row to the next, as Kvq8::rs; 0: kv_heads * dim
+    bool f16 = false;   ///< kc[k] and vc[k] are fp16 caches (const half*), ks and vs unused, rs 0
+};
+/// Whether attend_seqs() takes these sequences: what attend() would run for each of them, a q8_0 or fp16 cache
+/// with no window, no ring and no sinks, has a kernel here.  It fills in score[k] and wt[k] from `score` (score_floats).
+bool attend_seqs_plan(AttnSeqs& seqs, float* score, size_t score_floats, int chunk, int dim, int n_head, int kv_heads);
+void attend_seqs(const AttnSeqs& seqs, int dim, int n_head, int kv_heads, float scale, void* stream);
+/// head_norm_rope() for rows of different sequences: row r turns by turns[2 * r] (step()'s pairs of position and
+/// turn, from the turn of the first), the bits a call of its own gives the row.  CUDA only.
+void head_norm_rope_rows(const float* x, int x_stride, const float* w, float* y, int dim, int heads, int n_rot,
+                         float theta_scale, int rows, float eps, void* stream, int sections, const long long* turns);
+/// YaRN as ggml's rope_yarn computes it, for head_norm_rope_yarn() (laguna's full layers).  Pair i's angle is the
+/// interpolated one, freq_scale times the angle head_norm_rope() gives it, mixed with that angle itself by the
+/// ramp ext_factor * (1 - clamp((i - corr_low) / max(0.001, corr_high - corr_low), 0, 1)).  mscale multiplies the
+/// rotated values' cos and sin: the final magnitude, the attention factor llama.cpp passes times the
+/// 1 + 0.1 * ln(1 / freq_scale) ggml adds when ext_factor is not 0.  The values past n_rot are only normed.
+struct RopeYarn {
+    float freq_scale = 1.0f;
+    float ext_factor = 0.0f;
+    float corr_low = 0.0f, corr_high = 0.0f;   ///< ggml_rope_yarn_corr_dims()
+    float mscale = 1.0f;
+};
+/// head_norm_rope() with YaRN: the same norm, NeoX pairing, positions and `at`, with no frequency factors or
+/// axes.  CUDA and HIP only.
+void head_norm_rope_yarn(const float* x, int x_stride, const float* w, float* y, int dim, int heads, int n_rot,
+                         float theta_scale, int64_t pos, int rows, float eps, void* stream, const RopeYarn& yarn,
+                         const long long* at = nullptr);
 /// An attention cache stored as ggml Q8_0: a row is `n` int8 codes and `n / 32` fp16 scales with
 /// `n = kv_heads * dim`, row-major (`codes[row * n + blk * 32 + j]`, `scales[row * (n / 32) + blk]`).
 /// A q8 read is active wherever `codes` is not null.  The value a block holds is
 /// `(float)codes[..] * __half2float(scales[..])` with one scale a 32-value block.
+/// rs: the codes from a row to the next where that is not n (several caches' rows side by side in one array, as
+/// Qwen3.6's layers are on CUDA), and the scales rs / 32; 0 is n.  A multiple of 32.
 struct Kvq8 {
     const int8_t* codes = nullptr;
     const uint16_t* scales = nullptr;
+    size_t rs = 0;
 };
 
 /// Causal attention for the tokens from position `pos`: token t attends the rows 0 to pos + t, or with `window`
@@ -267,7 +424,12 @@ struct Kvq8 {
 void attend(const float* q, const uint16_t* kcache, const uint16_t* vcache, int64_t pos, int rows, float* score,
             int chunk, float* out, int dim, int n_head, int kv_heads, float scale, void* stream, int window = 0,
             int ring = 0, bool whole = false, const long long* at = nullptr, int room = 0, size_t score_floats = 0,
-            Kvq8 kq8 = {}, Kvq8 vq8 = {}, const float* sinks = nullptr, size_t part_floats = 0);
+            Kvq8 kq8 = {}, Kvq8 vq8 = {}, const float* sinks = nullptr, size_t part_floats = 0,
+            float* ml_out = nullptr);
+/// Merges a piece's normalized attention output (piece_out) and per-(token, head) (max, sum) pairs (piece_ml)
+/// into the running accumulator (acc_out, acc_ml) via exact online softmax.
+void merge_attn_piece(float* acc_out, float* acc_ml, const float* piece_out, const float* piece_ml, int rows,
+                      int n_head, int dim, void* stream);
 /// The floats of score that attend()'s blocks of rows take for calls of up to chunk tokens attending up to max_rows
 /// rows (score_floats): with that much a model's every call takes them.
 size_t attend_split_floats(int chunk, int n_head, int max_rows, int dim);
@@ -289,11 +451,23 @@ size_t attend_split_floats(int chunk, int n_head, int max_rows, int dim);
 /// work_halves halves, `work_halves / (kv_heads * dim)` rows at most: a block of keys larger than that is split,
 /// taking more products.  The fp16 path (both null) is unchanged and reads the caches where they lie.
 /// `sinks` as attend()'s: the sink joins each token's sum after the last block of rows.
+/// `bias` (null: none): a score gets its key's bias by distance and loses its token's sink first (AttnBias), in the
+/// cuBLAS products' path only, which a model with a bias takes whatever its heads.
+/// A bias a score gets by its key's distance d from the query (the query's position minus the key's), for a model
+/// with learned relative positions: the dot product of the query's n_rel values (r: n_rel a head, the call's
+/// tokens in the engine's order) with table's column d (n_rel values a distance), nothing from `extent` on; and
+/// the token's own sink, a head (sink), taken off every score.
+struct AttnBias {
+    const float* r = nullptr;
+    const float* sink = nullptr;
+    const float* table = nullptr;
+    int n_rel = 0, extent = 0;
+};
 void attend_batch(void* blas, const float* q, const uint16_t* kcache, const uint16_t* vcache, int64_t pos, int rows,
                   float* score, size_t score_floats, float* work, float* out, int dim, int n_head, int kv_heads,
                   float scale, void* stream, int window = 0, int ring = 0, bool whole = false, Kvq8 kq8 = {},
                   Kvq8 vq8 = {}, uint16_t* kwork = nullptr, uint16_t* vwork = nullptr, size_t work_halves = 0,
-                  const float* sinks = nullptr);
+                  const float* sinks = nullptr, float* ml_out = nullptr, const AttnBias* bias = nullptr);
 /// attend() over int8 caches (store_int8): the same attention, the same order of products and sums.  `q8` is scratch
 /// in the same form for this call's queries (rows * n_head * dim / kQ8_0Values blocks of codes, and as many
 /// deltas).  A score is a dp4a of a lane's own run of codes - the query's against the key's, both 4-aligned - and
@@ -319,9 +493,14 @@ struct Likeliest {
     float prob;
 };
 void likeliest(const float* logits, int n, Likeliest* out, void* stream);
+/// likeliest() for `rows` rows of n scores back to back, out[r] row r's.
+void likeliest_rows(const float* logits, int n, int rows, Likeliest* out, void* stream);
 /// acc[r][i] *= sigmoid(g[r][i]) for `rows` groups of n values; group r's gates start r * g_stride floats into g.
 /// With one_gate a group has one gate for all its values.
 void mul_sigmoid(float* acc, const float* g, int n, int rows, int g_stride, bool one_gate, void* stream);
+/// mul_sigmoid() with ggml's softplus in place of the sigmoid: g above 20 as it is, else log1p(exp(g)) (laguna's
+/// attention output gate).  CUDA and HIP only.
+void mul_softplus(float* acc, const float* g, int n, int rows, int g_stride, bool one_gate, void* stream);
 /// A causal convolution of four taps over each of `channels` channels, and its SiLU.  x and out: `channels` values
 /// a token.  state: 3 past inputs a channel, oldest first, advanced here by `rows` tokens.  w: (4, channels).
 /// With snap, the state as it is after some of the call's tokens is also written there, for a window of guessed
@@ -344,6 +523,24 @@ void shortconv(const float* bcx, float* state, const float* w, float* out, int c
 void gdn_step(float* qkv, float* alpha, float* beta, const float* dt, const float* a, float* s,
               const float* z, const float* o_norm, float* out, int dim, int n_head, int k_heads, int rows,
               float norm_eps, void* stream, float* snap = nullptr, size_t stride = 0, unsigned snaps = 0);
+/// The rows of several sequences in one call, each with a recurrent state of its own: sequence k has rows
+/// [first[k], first[k] + rows[k]) of the call, its state in state[k], and snap[k], when not null, takes the state as
+/// it is after its first row (a token and its guess).  CUDA only.
+struct SeqStates {
+    static constexpr int kMax = 32;
+    int n = 0;
+    int first[kMax] = {}, rows[kMax] = {};
+    float* state[kMax] = {};
+    float* snap[kMax] = {};
+};
+/// conv4_silu() and gdn_step() for each sequence of `seqs`, in one launch a kernel where they launched one a
+/// sequence: each sequence's values are the bits a call of its own gives.  rows: all of the call's.
+void conv4_silu_seqs(const float* x, const SeqStates& seqs, const float* w, float* out, int channels, void* stream);
+/// shortconv() for each sequence of `seqs` (no snapshots), one launch.
+void shortconv_seqs(const float* bcx, const SeqStates& seqs, const float* w, float* out, int channels, void* stream);
+void gdn_step_seqs(float* qkv, float* alpha, float* beta, const float* dt, const float* a, const SeqStates& seqs,
+                   const float* z, const float* o_norm, float* out, int dim, int n_head, int k_heads, int rows,
+                   float norm_eps, void* stream);
 /// conv4_silu() for a block of `rows` tokens that see each other (Clover's block guesses): a token's sum adds
 /// input t + d of the block times right[d - 1] for d = 1 to 3, right (3, channels).  The state is only read.
 void conv4_block_silu(const float* x, const float* state, const float* w, const float* right, float* out,

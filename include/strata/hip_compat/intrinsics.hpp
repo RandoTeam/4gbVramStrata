@@ -34,10 +34,13 @@ __device__ __forceinline__ int dp4a(int a, int b, int c) {
     // clamp.  On a Radeon Pro 5500M it matched the byte-wise form on 1,048,576 random operand triples and ran
     // 3.5x as fast as the SDWA sequence below, which -DSTRATA_GFX1012_SDWA_DOT keeps.
     return __builtin_amdgcn_sdot4(a, b, c, false);
-#elif (defined(__gfx1010__) || defined(__gfx1012__)) && !defined(STRATA_GFX1012_PORTABLE_DOT)
-    // Navi 10 (gfx1010) has no native signed dot4 (its target lacks dot1-insts: __builtin_amdgcn_sdot4 does not
-    // compile for it); gfx1012 comes here only with -DSTRATA_GFX1012_SDWA_DOT. SDWA selects and sign-extends byte
-    // operands directly, avoiding separate shift/mask/sign-extension work.
+#elif (defined(__gfx1012__) || (defined(__gfx1010__) && !defined(STRATA_AMD_COMMUNITY_DOT_OFF))) && \
+    !defined(STRATA_GFX1012_PORTABLE_DOT)
+    // RDNA1 has no native signed dot4 (gfx1010 has no dot instructions at all; gfx1012 comes here only with
+    // -DSTRATA_GFX1012_SDWA_DOT). SDWA selects and sign-extends byte
+    // operands directly, avoiding separate shift/mask/sign-extension work.  gfx1010 takes this since #4855 (Keoian; no card here
+    // runs it): the community switch, cmake -DSTRATA_AMD_COMMUNITY_TUNING=OFF, defines STRATA_AMD_COMMUNITY_DOT_OFF and
+    // gfx1010 gets the portable loop again (strata/core/amd_community.hpp).
     // Adapted from pinned llama.cpp ggml-cuda/common.cuh (MIT; see
     // third_party/ggml/LICENSE), same modulo-2^32 accumulation contract.
     int lo, hi;

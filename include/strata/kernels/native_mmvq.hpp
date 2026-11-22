@@ -119,6 +119,18 @@ bool native_q8_0_packed_eligible(int n_in, int n_out);
 void native_q8_0_pack_host(const void* gguf_blocks, void* out, int n_in, int n_out);
 void native_q8_0_packed_register(const void* gguf_weights, const void* packed, int n_in, int n_out);
 void native_q8_0_packed_unregister(const void* gguf_weights);
+/// STRATA_Q8_SM60=1 (opt-in, Pascal GP100): every Q8_0 dense matrix is packed as above whatever its shape, and the
+/// Q8_0 decode GEMVs run a kernel written for compute capability 6.0 (q8_sm60.cuh; not bitwise the exact kernels).
+/// native_q8_0_sm60_pack packs a device matrix here (the head) and owns the copy until native_q8_0_sm60_release;
+/// native_q8_0_sm60_pack_quiet is the same with no line for a success (the caller sums several up).
+bool native_q8_0_sm60_pack(const void* weights, int n_in, int n_out, const char* what);
+bool native_q8_0_sm60_pack_quiet(const void* weights, int n_in, int n_out, const char* what);
+/// The same for a matrix that nothing but native_mmvq reads (the MTP drafter's draft head subset): where every column
+/// count takes the Pascal kernel and the planes stay 16-byte aligned, they replace the GGUF blocks in the matrix's own
+/// allocation (the same byte count, staged through the host: no second copy); otherwise a packed copy as
+/// native_q8_0_sm60_pack makes. Either way native_q8_0_sm60_release must run before the caller frees the matrix.
+bool native_q8_0_sm60_pack_in_place(void* weights, int n_in, int n_out, const char* what);
+void native_q8_0_sm60_release(const void* weights);
 
 /// STRATA_Q6_PACKED=1 (opt-in): a packed copy of a Q6_K matrix (the output heads) - the same bytes as ql / qh /
 /// scales / d planes - that native_q6_k_mmvq calls on `weights` read instead (bitwise equal outputs). The copy is
@@ -179,10 +191,26 @@ bool native_mmvq_supported(int ggml_type) noexcept;
 std::size_t native_mmvq_weight_bytes(int ggml_type, int n_in, int n_out);
 void native_mmvq(int ggml_type, const void* weights, const void* x_q8_1, float* y,
                  int n_in, int n_out, int ncols, void* stream);
-/// S26 STRATA_LFUSE: native_mmvq(w1 -> y1) and native_mmvq(w2 -> y2), same type / shape / input, in ONE launch,
-/// bitwise the two calls. Returns false (nothing launched) where that is not the case (Q8_0, 2-8 columns only).
+/// S26 STRATA_LFUSE: native_mmvq(w1 -> y1) and native_mmvq(w2 -> y2), same type / input, in ONE launch, bitwise
+/// the two calls; w2 has n_out2 rows (0: n_out). Returns false (nothing launched) where that is not the case (Q8_0,
+/// 2-8 columns only).
 bool native_mmvq_pair(int ggml_type, const void* w1, const void* w2, const void* x_q8_1, float* y1, float* y2,
-                      int n_in, int n_out, int ncols, void* stream);
+                      int n_in, int n_out, int ncols, void* stream, int n_out2 = 0);
+/// native_mmvq() of 1 to 8 matrices of one type and width, one column each, every one on a q8_1 input of its own, in
+/// ONE launch: each row's block is native_small_mmvq_kernel's for it, the same bits.  Q8_0 only.
+struct NativeMmvqMany {
+    const void* w[8];
+    const void* x_q8_1[8];
+    float* y[8];
+    int n_out[8];
+    int count;
+};
+/// Whether native_mmvq_many() takes these: false where one of the single calls would run another kernel (another
+/// type, the small-K layout, a packed tensor, the wave layout).
+bool native_mmvq_many_fits(int ggml_type, const NativeMmvqMany& m, int n_in);
+void native_mmvq_many(int ggml_type, const NativeMmvqMany& m, int n_in, void* stream);
+/// native_quantize_q8_1() of 1 to 3 vectors of n_in values in one launch: the same bytes.
+void native_quantize_q8_1_many(const float* const* x, void* const* x_q8_1, int count, int n_in, void* stream);
 
 // Fork F4 (Eddoursul): 2..4 columns also INTERLEAVED, so one 16-byte load reads a position of every column: CP = 2 (2
 // columns) or 4 (3-4), zero-padded; nb = n_in / 32 blocks; int32 bm[nb][8][CP] (block-major), int32 pm[8][nb][CP]
@@ -205,5 +233,8 @@ void native_mmvq_il(int ggml_type, const void* weights, const void* x_q8_1, cons
 int native_mmvq_il_rows_for(int cc, int ggml_type, int ncols, int n_out);
 // Tests and benchmarks: every native_mmvq_il call takes `rows` a warp (0: the table).
 void native_mmvq_il_tune(int rows);
+// Tests and benchmarks: the P1 / P2 kernel variant for every native_mmvq_il call (0: today's kernel, 2-6 as
+// STRATA_MMVQ_IL_PF; -1: the environment).
+void native_mmvq_il_pf(int pf);
 
 } // namespace strata::kernels

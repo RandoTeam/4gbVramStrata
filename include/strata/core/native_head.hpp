@@ -5,6 +5,10 @@
 #include <string>
 #include <vector>
 
+namespace strata::kernels {
+struct BitplaneHeadHandle;
+}
+
 namespace strata::core {
 
 /// Opt-in native output projection. Uploads unchanged GGUF blocks once at startup and owns its
@@ -21,20 +25,29 @@ public:
 
     bool load(const std::vector<std::string>& shards, int64_t n_in, int64_t n_out, std::string& err);
     void unload();
+    /// Moves the loaded weights from VRAM to mapped pinned host memory (a card too short for it: every logits row then reads them over PCIe).  False: not loaded, already
+    /// on the host, or a repacked layout that stays in VRAM.
+    bool to_host(std::string& err);
+    bool on_host() const { return host_ != nullptr; }
     bool run(const float* mixed, float* logits, void* stream, std::string& err) const;
     uint64_t weight_bytes() const { return bytes_; }
     bool loaded() const { return weights_ != nullptr; }
     /// Plan v0.3 P6: the GGUF blocks, for the verify window's multi-column head.
     const void* weights() const { return weights_; }
+    const void* scratch() const { return scratch_; }   ///< the activation scratch the head's GEMV reads (captured with the weights)
     int type() const { return type_; }
     /// The device whose memory holds the weights (the one current when `load` ran; -1 before).
     int device() const { return device_; }
     /// Bytes of one vocabulary row.
     size_t row_bytes() const { return n_out_ > 0 ? (size_t) (bytes_ / (uint64_t) n_out_) : 0; }
+    /// Exact 2-stage bit-plane LM head handle (Q8_0 / Q6_K on sm_80+; nullptr if unavailable or disabled).
+    strata::kernels::BitplaneHeadHandle* bitplane() const { return bitplane_; }
 
 private:
     void* weights_ = nullptr;
+    void* host_ = nullptr;   // the pinned host buffer weights_ aliases when the head did not fit in VRAM
     void* scratch_ = nullptr;
+    strata::kernels::BitplaneHeadHandle* bitplane_ = nullptr;
     uint64_t bytes_ = 0;
     int n_in_ = 0, n_out_ = 0;
     int type_ = -1;
@@ -43,7 +56,8 @@ private:
 
 /// Plan v0.3 P6: `token_embd.weight` in its GGUF form (the IQ model files), in mapped pinned host memory: a row
 /// is read over PCIe per token, so the table costs no VRAM.  `embed_row`, the verify window and the MTP drafter
-/// use it instead of the canonical table when it is set (`set_native_embed`).
+/// use it instead of the canonical table when it is set (`set_native_embed`).  `STRATA_EMBED_VRAM=1` places the
+/// same bytes in VRAM instead (slow PCIe links); the gathers read `dev_` either way.
 class NativeEmbed {
 public:
     NativeEmbed() = default;
@@ -57,6 +71,8 @@ public:
     void gather_one(int64_t token, float* out, void* stream) const;
     uint64_t bytes() const { return bytes_; }
     int type() const { return type_; }
+    /// The table was placed in VRAM (STRATA_EMBED_VRAM=1, or the pinned / alias fallbacks) rather than mapped.
+    bool in_vram() const { return dev_ != nullptr && host_ == nullptr; }
 
 private:
     void* host_ = nullptr;

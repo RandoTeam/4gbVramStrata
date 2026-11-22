@@ -1,4 +1,4 @@
-// Host-only opt-in lifecycle; no CUDA context or model is needed.
+// Host-only switch lifecycle; no CUDA context or model is needed.
 #include "gdn_mma_control.hpp"
 #include <cstdio>
 #include <cstdlib>
@@ -30,14 +30,14 @@ void parse(const char* value, bool expected) {
     int probes = 0;
     const bool report = control.initialize([&] { ++probes; return true; });
     require(report == expected && control.enabled() == expected && probes == int(expected),
-            "environment request parsing: only atoi(value)==1 enables");
+            "environment request parsing: on unless atoi(value)==0");
 }
 }
 int main() {
     Restore restore;
     try {
-        for (const char* value : std::initializer_list<const char*>{nullptr, "", "0", "2", "true", "-1"}) parse(value, false);
-        for (const char* value : {"1", "01", " 1", "1suffix"}) parse(value, true);
+        for (const char* value : {"0", "00", " 0", "0suffix", "false"}) parse(value, false);
+        for (const char* value : std::initializer_list<const char*>{nullptr, "", "1", "01", "2", "-1"}) parse(value, true);
         for (bool initially_on : {false, true}) {
             set(initially_on ? "1" : "0");
             GdnMmaControl control;
@@ -59,7 +59,7 @@ int main() {
             require(probes == 1 && reports == 1 && control.enabled() == available,
                     "double scratch setup must probe/report once even on fallback");
         }
-        std::puts("PASS GDN opt-in: parsing, captured request, disabled no-probe and single setup/report");
+        std::puts("PASS GDN switch: parsing, captured request, disabled no-probe and single setup/report");
         return 0;
     } catch (const std::exception& e) { std::fprintf(stderr, "FAIL %s\n", e.what()); return 1; }
 }

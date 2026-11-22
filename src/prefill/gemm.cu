@@ -1,7 +1,9 @@
 // src/prefill/gemm.cu - see include/strata/prefill/gemm.hpp.
 #include "strata/prefill/gemm.hpp"
 #include "strata/kernels/dequant_bf16.hpp"
+#include "strata/core/arch_defaults.hpp"   // prompt_f16_resolve (inline)
 #if defined(STRATA_PREFILL_MMQ) && defined(__HIPCC__)
+#include "strata/prefill/mmq_ids_margin.hpp"
 #include "strata/prefill/moe_mmq.hpp"
 #endif
 
@@ -12,6 +14,12 @@
 #include <cublas_v2.h>
 #include <cuda_fp16.h>
 #include <cuda_runtime.h>
+#if !defined(__HIPCC__)
+#include "strata/prefill/dense_fp4_tc.hpp"
+#endif
+#if !defined(__HIPCC__) && defined(STRATA_CUBLASLT_MXFP8)
+#include "gemm_mxfp8.cuh"
+#endif
 
 #include <algorithm>
 #include <atomic>
@@ -28,6 +36,8 @@
 #endif
 
 #include <algorithm>
+#include <cctype>
+#include <initializer_list>
 #include <climits>
 #include <cstdio>
 #include <cstdlib>
@@ -36,6 +46,17 @@
 
 #if defined(__HIPCC__) && defined(STRATA_HIPBLASLT_AVAILABLE)
 #include "hipblaslt_tuning.hpp"
+#if defined(_WIN32)
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+#else
+#include <unistd.h>
+#endif
 #include <hip/hip_runtime_api.h>
 #include <hipblaslt/hipblaslt.h>
 #include <hipblaslt/hipblaslt-ext.hpp>
@@ -45,6 +66,7 @@
 #endif
 #if defined(__HIPCC__) && defined(STRATA_ROCBLAS_AVAILABLE)
 #include "rocblas_tuning.hpp"
+#include "strata/core/amd_community.hpp"
 #include <hip/hip_runtime_api.h>
 #include <rocblas/rocblas.h>
 #include <filesystem>
@@ -238,9 +260,43 @@ struct HipLtDescriptors {
     }
 };
 
+// The engine package's own tuning folder (<engine folder>/tuning), for a start that did not come through the launcher (a hand-made
+// config, a CLI run): without a table the prompt GEMMs fall back to plain hipBLAS and a Strix Halo reads prompts at half speed
+// (340 against 690 tok/s, IQ3_S 4K).  The launcher sets STRATA_HIPBLASLT_TUNING itself; this is the same table found by the engine.
+std::string own_tuning_dir() {
+#if defined(_WIN32)
+    char p[4096] = {};
+    const DWORD n = GetModuleFileNameA(nullptr, p, (DWORD) sizeof(p));
+    std::string s(p, n);
+    const size_t k = s.find_last_of("\\/");
+    return k == std::string::npos ? std::string() : s.substr(0, k + 1) + "tuning/";
+#else
+    char p[4096] = {};
+    const ssize_t n = readlink("/proc/self/exe", p, sizeof(p) - 1);
+    std::string s(p, n > 0 ? (size_t) n : 0);
+    const size_t k = s.find_last_of('/');
+    return k == std::string::npos ? std::string() : s.substr(0, k + 1) + "tuning/";
+#endif
+}
+
 std::unique_ptr<HipLtState> create_hipblaslt_state(void* workspace, size_t workspace_bytes) {
+    std::string path_own;
     const char* path = std::getenv("STRATA_HIPBLASLT_TUNING");
-    if (!path || !*path) return nullptr;
+    bool from_package = false, table_forced = false;
+    if (!path || !*path) {
+        const char* sw = std::getenv("STRATA_HIPBLASLT_TABLE");     // the launcher's switch (strata_control/hipblaslt_tuning.py): off / on / auto
+        std::string low = sw != nullptr ? sw : "";                   // trimmed and lower case, as the launcher reads it
+        while (!low.empty() && std::isspace((unsigned char) low.back())) low.pop_back();
+        while (!low.empty() && std::isspace((unsigned char) low.front())) low.erase(low.begin());
+        for (char& ch : low) ch = (char) std::tolower((unsigned char) ch);
+        const auto word = [&](std::initializer_list<const char*> ws) {
+            for (const char* w : ws) if (low == w) return true;
+            return false;
+        };
+        if (word({"off", "0", "no", "false", "none", "disable", "disabled"})) return nullptr;   // never the packaged table
+        table_forced = word({"on", "1", "yes", "true", "force", "enable", "enabled"});          // any card that has a table beside the engine
+        from_package = true;                                          // the file is found below, once the card and the version are known
+    }
 
     auto state = std::make_unique<HipLtState>();
     state->workspace = workspace;
@@ -265,6 +321,21 @@ std::unique_ptr<HipLtState> create_hipblaslt_state(void* workspace, size_t works
     const auto suffix = arch.find(':');
     if (suffix != std::string::npos) arch.resize(suffix);
 
+    if (from_package) {
+        // Unset or "auto": gfx11 matrix-core parts (RX 7000 discrete RDNA3 + Strix Halo / 780M / 890M gfx1150) take a matching
+        // packaged tuning table automatically unless STRATA_GFX11_DEFAULTS=0 (on RX 7900 XTX, 128K prompt +82%: 926 -> 1,687 tok/s);
+        // gfx12 parts keep the opt-in STRATA_HIPBLASLT_TABLE=on rule.
+        const char* off11 = std::getenv("STRATA_GFX11_DEFAULTS");
+        const bool g11_auto = !(off11 != nullptr && off11[0] == '0') && strata::kernels::gfx_arch_is_gfx11_wmma(arch.c_str());
+        if (!table_forced && arch != "gfx1151" && !g11_auto) return nullptr;
+        const std::string dir = own_tuning_dir();
+        if (dir.empty()) return nullptr;
+        path_own = dir + arch + "-hipblaslt-" + std::to_string(version) + ".txt";
+        std::FILE* f = std::fopen(path_own.c_str(), "rb");
+        if (f == nullptr) return nullptr;       // no table for this card and hipBLASLt version beside the engine: plain hipBLAS as before
+        std::fclose(f);
+        path = path_own.c_str();
+    }
     std::string error;
     if (!state->table.load(path, arch, version, error)) {
         std::fprintf(stderr, "prefill gemm: %s; using hipBLASEx\n", error.c_str());
@@ -451,6 +522,12 @@ std::unique_ptr<RocBlasState> create_rocblas_state(void* stream) {
         while (!tag.empty() && tag.back() == '.') tag.pop_back();
         file /= arch + "-rocblas-" + tag + ".txt";
     }
+    // The community-made tables (strata/core/amd_community.hpp) load only with STRATA_AMD_COMMUNITY_TUNING on (the default).
+    if (!strata::amd_community::rocblas_table_allowed(arch, version)) {
+        std::fprintf(stderr, "prefill gemm: the rocBLAS table for %s / %s is community-made and STRATA_AMD_COMMUNITY_TUNING=0; "
+                             "rocBLAS's default kernels run\n", arch.c_str(), version);
+        return nullptr;
+    }
     std::string error;
     if (!state->table.load(file.string(), arch, version, error)) {
         std::fprintf(stderr, "prefill gemm: %s (%s); rocBLAS's default kernels run\n", error.c_str(),
@@ -540,19 +617,26 @@ bool prompt_f16() {
     int dev = 0;
     if (hipGetDevice(&dev) != hipSuccess || dev < 0 || dev >= kMaxDev) { (void) hipGetLastError(); return false; }
     if (const int8_t c = cached[dev].load(std::memory_order_relaxed)) return c == 2;
-    // Opt-in (#835): only STRATA_HIP_PROMPT_F16=1 turns it on.  It changes the prompt path's numbers (an FP16 rounding of
-    // each 16-bit GEMM's output), so no card gets it unasked.  On gfx103x it is ~2x faster, so we say so once.
+    // (#835) STRATA_HIP_PROMPT_F16=1 turns it on.  It changes the prompt path's numbers (an FP16 rounding of each 16-bit GEMM's output), so a card
+    // gets it unasked only where it was measured: the Radeon 780M (gfx1103, integrated, Linux) and the discrete RX 6000 cards (gfx1030 / 1031 / 1032, #5151;
+    // strata::core::prompt_f16_resolve), where =0 is the way back.
     const char* e = std::getenv("STRATA_HIP_PROMPT_F16");
-    const bool on = e != nullptr && e[0] == '1';
     hipDeviceProp_t p{};
-    if (hipGetDeviceProperties(&p, dev) != hipSuccess) { (void) hipGetLastError(); p.gcnArchName[0] = 0; }
-    if (on) std::fprintf(stderr, "strata prefill: HIP device %d%s%s - STRATA_HIP_PROMPT_F16=1: the prompt's 16-bit GEMMs run FP16 in and out "
+    if (hipGetDeviceProperties(&p, dev) != hipSuccess) { (void) hipGetLastError(); p.gcnArchName[0] = 0; p.integrated = 0; }
+#if defined(_WIN32)
+    constexpr bool kWin = true;
+#else
+    constexpr bool kWin = false;
+#endif
+    const bool on = strata::core::prompt_f16_resolve(e, p.gcnArchName, p.integrated != 0, kWin);
+    if (on && e != nullptr) std::fprintf(stderr, "strata prefill: HIP device %d%s%s - STRATA_HIP_PROMPT_F16=1: the prompt's 16-bit GEMMs run FP16 in and out "
                                  "(rocBLAS is tuned only for that on gfx103x; not bit-identical to the default)%s",
                          dev, p.gcnArchName[0] ? " " : "", p.gcnArchName, "\n");
-    else if (e == nullptr && std::strncmp(p.gcnArchName, "gfx103", 6) == 0)
-        std::fprintf(stderr, "strata prefill: HIP device %d %s - tip: STRATA_HIP_PROMPT_F16=1 reads long prompts about 2x faster here "
-                             "(FP16 prompt GEMMs, rocBLAS is tuned only for FP16 on gfx103x; the numbers differ slightly, see docs/AMD_HIP.md)%s",
-                     dev, p.gcnArchName, "\n");
+    else if (on && std::strncmp(p.gcnArchName, "gfx103", 6) == 0)
+        std::fprintf(stderr, "strata prefill: HIP device %d %s - the prompt's 16-bit GEMMs run FP16 in and out by default here (rocBLAS is tuned for that on "
+                             "gfx103x; STRATA_HIP_PROMPT_F16=0 keeps the old route)%s", dev, p.gcnArchName, "\n");
+    // (#5151: the start-up tip that asked gfx103x owners to set STRATA_HIP_PROMPT_F16=1 is gone: users never set variables.  On a discrete RX 6000 card the
+    // FP16 route is the default now (prompt_f16_resolve): against the exact FP32 products it is no further from exact than the old route and 11-14 % faster.)
     cached[dev].store(on ? 2 : 1, std::memory_order_relaxed);
     return on;
 #else
@@ -560,7 +644,44 @@ bool prompt_f16() {
 #endif
 }
 
+// A padded X (ldx > K) no kernel took: its rows copied to a contiguous FP16 buffer of stride K.  Grown, never shrunk
+// (one buffer per Gemm; a padded X only arrives from STRATA_PF_PAD's producers).  One 2-D copy: the same values, and
+// the ordinary paths below then read them exactly as if the producer had written them unpadded.
+const uint16_t* Gemm::unpad_x(const uint16_t* X, int64_t T, int64_t K, int64_t ldx) {
+    if (X == nullptr || T <= 0 || K <= 0 || ldx <= K) return nullptr;
+    const int64_t need = T * K;
+    if (need > unpadded_x_elems_) {
+        if (unpadded_x_ != nullptr) { cudaFree(unpadded_x_); unpadded_x_ = nullptr; unpadded_x_elems_ = 0; }
+        void* p = nullptr;
+        if (cudaMalloc(&p, (size_t) need * sizeof(uint16_t)) != cudaSuccess) { cudaGetLastError(); return nullptr; }
+        unpadded_x_ = (uint16_t*) p;
+        unpadded_x_elems_ = need;
+    }
+    if (cudaMemcpy2DAsync(unpadded_x_, (size_t) K * sizeof(uint16_t), X, (size_t) ldx * sizeof(uint16_t),
+                          (size_t) K * sizeof(uint16_t), (size_t) T, cudaMemcpyDeviceToDevice,
+                          (cudaStream_t) stream_) != cudaSuccess) {
+        cudaGetLastError();
+        return nullptr;
+    }
+    return unpadded_x_;
+}
+
+bool gemm_dequant_side() {
+#if defined(__HIPCC__)
+    return false;
+#else
+    static const bool on = [] { const char* v = std::getenv("STRATA_DEQUANT_SIDE"); return v && v[0] == '1'; }();
+    return on;
+#endif
+}
+
 Gemm::~Gemm() {
+    for (W16Entry& e : w16_) if (e.d) (void) cudaFree(e.d);
+    for (void* e : side_ready_)
+        if (e) (void) cudaEventDestroy((cudaEvent_t) e);
+    for (void* e : side_free_)
+        if (e) (void) cudaEventDestroy((cudaEvent_t) e);
+    if (side_stream_) (void) cudaStreamDestroy((cudaStream_t) side_stream_);
 #if defined(STRATA_PREFILL_MMQ) && defined(__HIPCC__)
     delete static_cast<strata::prefill::mmq::Context*>(mmq_ctx_);
     if (mmq_buf_) cudaFree(mmq_buf_);
@@ -571,9 +692,13 @@ Gemm::~Gemm() {
 #if defined(__HIPCC__) && defined(STRATA_ROCBLAS_AVAILABLE)
     delete static_cast<RocBlasState*>(rocblas_state_);
 #endif
+#if !defined(__HIPCC__) && defined(STRATA_CUBLASLT_MXFP8)
+    delete static_cast<strata::prefill::mxfp8::State*>(mxfp8_state_);
+#endif
     if (handle_) cublasDestroy((cublasHandle_t) handle_);
     if (tc_w_) cudaFree(tc_w_);
     if (tc_x_) cudaFree(tc_x_);
+    if (unpadded_x_) cudaFree(unpadded_x_);
     if (!external_) {
         if (scratch_) cudaFree(scratch_);
         if (workspace_) cudaFree(workspace_);
@@ -592,6 +717,7 @@ bool Gemm::init_external(void* stream, uint16_t* scratch, int64_t scratch_elems,
     external_ = true;
     note(cublasSetStream(h, (cudaStream_t) stream), "cublasSetStream");
     workspace_ = workspace;
+    ws_bytes_ = ws_bytes;
     note(cublasSetWorkspace(h, workspace_, ws_bytes), "cublasSetWorkspace");
     note(cublasSetMathMode(h, CUBLAS_DEFAULT_MATH), "cublasSetMathMode");
     scratch_ = scratch;
@@ -609,6 +735,7 @@ void Gemm::rebind(uint16_t* scratch, int64_t scratch_elems, void* workspace, siz
     scratch_ = scratch;
     scratch_elems_ = scratch_elems;
     workspace_ = workspace;
+    ws_bytes_ = ws_bytes;
     cublasSetWorkspace((cublasHandle_t) handle_, workspace_, ws_bytes);
 #if defined(__HIPCC__) && defined(STRATA_HIPBLASLT_AVAILABLE)
     if (hipblaslt_state_) {
@@ -617,6 +744,43 @@ void Gemm::rebind(uint16_t* scratch, int64_t scratch_elems, void* workspace, siz
         state->workspace_bytes = ws_bytes;
     }
 #endif
+#if !defined(__HIPCC__) && defined(STRATA_CUBLASLT_MXFP8)
+    if (mxfp8_state_) {
+        static_cast<strata::prefill::mxfp8::State*>(mxfp8_state_)->rebind_ws(workspace_, ws_bytes);
+    }
+#endif
+}
+
+bool Gemm::set_dequant_side(uint16_t* scratch2, std::string& err) {
+    side_scratch_ = scratch2;
+    side_cur_ = 0;
+    if (scratch2 == nullptr) return true;
+    if (side_stream_ == nullptr) {   // once: the stream and the four events outlive every rebind
+        cudaStream_t s = nullptr;
+        if (const cudaError_t e = cudaStreamCreateWithFlags(&s, cudaStreamNonBlocking); e != cudaSuccess) {
+            err = std::string("prefill gemm: dequant side stream: ") + cudaGetErrorString(e);
+            side_scratch_ = nullptr;
+            return false;
+        }
+        side_stream_ = s;
+        for (int i = 0; i < 2; ++i) {
+            cudaEvent_t r = nullptr, f = nullptr;
+            const bool made = cudaEventCreateWithFlags(&r, cudaEventDisableTiming) == cudaSuccess &&
+                              cudaEventCreateWithFlags(&f, cudaEventDisableTiming) == cudaSuccess;
+            side_ready_[i] = r;   // kept even on a failure: the destructor frees what was made
+            side_free_[i] = f;
+            if (!made) {
+                err = "prefill gemm: dequant side events";
+                side_scratch_ = nullptr;
+                return false;
+            }
+        }
+    }
+    // both scratches are free once what the compute stream holds now is done (a rebind follows a stream sync, so
+    // this is belt and braces; a wait on an event never recorded would pass anyway)
+    for (int i = 0; i < 2; ++i)
+        (void) cudaEventRecord((cudaEvent_t) side_free_[i], (cudaStream_t) stream_);
+    return true;
 }
 
 bool Gemm::init(void* stream, int64_t scratch_elems, std::string& err) {
@@ -635,6 +799,7 @@ bool Gemm::init(void* stream, int64_t scratch_elems, std::string& err) {
         err = std::string("prefill gemm: workspace of 32 MiB: ") + cudaGetErrorString(e);
         return false;
     }
+    ws_bytes_ = ws;
     note(cublasSetWorkspace(h, workspace_, ws), "cublasSetWorkspace");
     note(cublasSetMathMode(h, CUBLAS_DEFAULT_MATH), "cublasSetMathMode");
 #if defined(__HIPCC__) && defined(STRATA_HIPBLASLT_AVAILABLE)
@@ -1038,6 +1203,27 @@ void Gemm::bf16(const uint16_t* X, const uint16_t* W, float* Y, int64_t T, int64
         return;
     }
 #endif
+#if !defined(__HIPCC__) && defined(STRATA_CUBLASLT_MXFP8)
+    if ((ldx == 0 || ldx == K) && T >= 128 && N >= 128 && K >= 128 && (N & 15) == 0 && (K & 31) == 0 &&
+        strata::prefill::mxfp8::enabled()) {
+        auto* ms = static_cast<strata::prefill::mxfp8::State*>(mxfp8_state_);
+        if (ms == nullptr) {
+            ms = new strata::prefill::mxfp8::State();
+            mxfp8_state_ = ms;
+        }
+        if (ms->init(workspace_, ws_bytes_) &&
+            ms->run_16(X, !x_f16, W, -2, W, true, Y, T, N, K, ldy, beta, (cudaStream_t) stream_, nullptr, nullptr,
+                       nullptr)) {
+            const int64_t T_al = T & ~15ll;
+            const int64_t T_rem = T - T_al;
+            if (T_rem > 0) {
+                const int64_t ldy_eff = ldy > 0 ? ldy : N;
+                bf16(X + T_al * K, W, Y + T_al * ldy_eff, T_rem, N, K, ldy, beta, ldx, x_f16);
+            }
+            return;
+        }
+    }
+#endif
     // Column-major view: Y^T[N, T] = W[N, K] (stored K x N col-major, transposed) . X^T[K, T].
     ck(cublasGemmEx((cublasHandle_t) handle_, CUBLAS_OP_T, CUBLAS_OP_N, (int) N, (int) T, (int) K, &alpha, W,
                     CUDA_R_16BF, (int) K, X, CUDA_R_16BF, (int) (ldx ? ldx : K), &beta, Y, CUDA_R_32F, (int) ldy,
@@ -1157,8 +1343,12 @@ bool Gemm::native_mmq(const uint16_t* X, int type, const void* W, float* Y, int6
     if (ldy <= 0) ldy = N;
 
     const auto up = [](size_t v) { return (v + 255) & ~(size_t) 255; };
+    // The row table is read past its end by llama.cpp's MMQ (mul_mat_q: a whole J-column tile from the start of each tile, J up to 128; the stream-k fixup:
+    // up to roundup(max_rows, J) from the expert's first row): kRows + the margin of mmq_ids_margin.hpp (max_rows <= kRows), the identity written over all of it.
+    // Exact, with only the 256 bytes of the bounds after it, a tile of 112 columns on a full chunk read 384 bytes past the table, 128 past the allocation.
+    const size_t ids_rows = (size_t) mmq::mmq_ids_table_rows((uint64_t) kRows, (uint64_t) kRows);
     const size_t ident_off = up(mmq::q8_bytes(kRows, kMaxK));
-    const size_t bounds_off = ident_off + up((size_t) kRows * 4);
+    const size_t bounds_off = ident_off + up(ids_rows * 4);
     if (!mmq_buf_) {
         if (cudaMalloc(&mmq_buf_, bounds_off + 256) != cudaSuccess) {
             cudaGetLastError();
@@ -1166,7 +1356,7 @@ bool Gemm::native_mmq(const uint16_t* X, int type, const void* W, float* Y, int6
             return false;
         }
         mmq_ctx_ = new mmq::Context();
-        mmq::iota((int32_t*) ((uint8_t*) mmq_buf_ + ident_off), kRows, stream_);
+        mmq::iota((int32_t*) ((uint8_t*) mmq_buf_ + ident_off), (int64_t) ids_rows, stream_);
         std::fprintf(stderr, "prefill gemm: dense MMQ on (STRATA_DENSE_MMQ=1)\n");
     }
     void* xq = mmq_buf_;
@@ -1237,7 +1427,10 @@ void Gemm::native(const uint16_t* X, int ggml_type, const void* W_blocks, float*
     static const bool pad_on = [] { const char* v = std::getenv("STRATA_PF_PAD"); return v && v[0] == '1'; }();
     static const bool pf_on = [] { const char* v = std::getenv("STRATA_PF_GEMM"); return v && v[0] == '1'; }();
     static const int64_t pf_min_t = [] { const char* v = std::getenv("STRATA_PF_SWITCH_MIN_T"); return v ? (int64_t) std::atoll(v) : (int64_t) 0; }();
-    if (pad_on && pf_on && T >= pf_min_t && T >= 64 && N >= 512 && K % 32 == 0 && N * (K + 64) <= scratch_elems_) {
+    // (strata_pf_padded_gemm_available(): the CURRENT device runs the padded gfx11 product.  On a gfx1151 + gfx1201 split the process-wide switch
+    // is on for both stages; the gfx12 stage would dequantize the weight padded, find no product, and do it again unpadded below.)
+    if (pad_on && pf_on && T >= pf_min_t && T >= 64 && N >= 512 && K % 32 == 0 && N * (K + 64) <= scratch_elems_ &&
+        strata_pf_padded_gemm_available()) {
         const int64_t ldw = K + 64;
         if (strata::kernels::dequant_f16_ld(ggml_type, W_blocks, 0, N, K, ldw, scratch_, stream_) &&
             strata_pf_gemm_f16_ld(X, ldx > 0 ? ldx : K, scratch_, ldw, Y, T, N, K, ldy, beta, stream_)) {
@@ -1250,7 +1443,7 @@ void Gemm::native(const uint16_t* X, int ggml_type, const void* W_blocks, float*
         // X arrived padded but the weight cannot be (an i-quant without a strided dequant, or the scratch is too
         // small for N x (K + 64)): the weight unpadded, X read at its stride - the same products, the same bits
         const int64_t rows = scratch_elems_ / K;
-        bool ok = rows > 0;
+        bool ok = rows > 0 && strata_pf_padded_gemm_available();
         if (ldy <= 0) ldy = N;
         for (int64_t r0 = 0; ok && r0 < N; r0 += rows) {
             const int64_t n = (N - r0 < rows) ? N - r0 : rows;
@@ -1259,12 +1452,128 @@ void Gemm::native(const uint16_t* X, int ggml_type, const void* W_blocks, float*
         }
         if (ok) return;
 #endif
-        std::fprintf(stderr, "prefill gemm: a padded X (ldx %lld, K %lld) needs STRATA_PF_PAD's path\n",
-                     (long long) ldx, (long long) K);
+        // Nothing took a padded X: the padded product is the gfx11 matrix cores' (STRATA_PF_PAD asks
+        // strata_pf_padded_gemm_available() before padding now, so this is a stale producer or another card's
+        // activation).  Copy the rows unpadded and run the ordinary paths - the same products, the same bits - rather
+        // than ending the engine.
+        const uint16_t* Xu = unpad_x(X, T, K, ldx);
+        if (Xu != nullptr) {
+            native(Xu, ggml_type, W_blocks, Y, T, N, K, ldy, beta, 0);
+            return;
+        }
+        std::fprintf(stderr, "prefill gemm: a padded X (ldx %lld, K %lld) has no path on this card and could not be "
+                             "copied unpadded (no device memory)\n", (long long) ldx, (long long) K);
         std::exit(1);
     }
 #if defined(STRATA_PREFILL_MMQ) && defined(__HIPCC__)
     if (beta == 0.0f && (ldx == 0 || ldx == K) && native_mmq(X, ggml_type, W_blocks, Y, T, N, K, ldy)) return;
+#endif
+#if !defined(__HIPCC__)
+    if (ggml_type == 40 && (ldx == 0 || ldx == K) &&
+        strata::prefill::dense_fp4_tc::gemm_f16_nvfp4(X, W_blocks, Y, T, N, K, ldy, beta, stream_)) {
+        return;
+    }
+#endif
+#if !defined(__HIPCC__) && defined(STRATA_CUBLASLT_MXFP8)
+    if ((ldx == 0 || ldx == K) && T >= 128 && N >= 128 && K >= 128 && (N & 15) == 0 && (K & 31) == 0 &&
+        N * K <= scratch_elems_ && strata::prefill::mxfp8::enabled()) {
+        auto* ms = static_cast<strata::prefill::mxfp8::State*>(mxfp8_state_);
+        if (ms == nullptr) {
+            ms = new strata::prefill::mxfp8::State();
+            mxfp8_state_ = ms;
+        }
+        struct DeqCtx {
+            int type;
+            const void* w;
+            int64_t n, k;
+            void* st;
+            void* side_ready;
+            void* side_free;
+            bool used_scratch = false;
+        } dctx{ggml_type, W_blocks, N, K, stream_, side_scratch_ ? side_ready_[0] : nullptr,
+               side_scratch_ ? side_free_[0] : nullptr, false};
+        auto deq_fn = [](void* p, uint16_t* dst) -> bool {
+            auto* c = static_cast<DeqCtx*>(p);
+            if (c->side_ready) (void) cudaStreamWaitEvent((cudaStream_t) c->st, (cudaEvent_t) c->side_ready, 0);
+            strata::kernels::dequant_f16(c->type, c->w, 0, c->n, c->k, dst, c->st);
+            c->used_scratch = true;
+            return true;
+        };
+        if (ms->init(workspace_, ws_bytes_) &&
+            ms->run_16(X, false, W_blocks, ggml_type, nullptr, false, Y, T, N, K, ldy, beta, (cudaStream_t) stream_,
+                       deq_fn, &dctx, scratch_)) {
+            if (dctx.used_scratch && dctx.side_free)
+                (void) cudaEventRecord((cudaEvent_t) dctx.side_free, (cudaStream_t) stream_);
+            const int64_t T_al = T & ~15ll;
+            const int64_t T_rem = T - T_al;
+            if (T_rem > 0) {
+                const int64_t ldy_eff = ldy > 0 ? ldy : N;
+                native(X + T_al * K, ggml_type, W_blocks, Y + T_al * ldy_eff, T_rem, N, K, ldy, beta, ldx);
+            }
+            return;
+        }
+        if (dctx.used_scratch && dctx.side_free)
+            (void) cudaEventRecord((cudaEvent_t) dctx.side_free, (cudaStream_t) stream_);
+    }
+#endif
+#ifndef STRATA_USE_HIP
+    // The FP16 weight kept on the device after its first dequant.  NOT bit-exact against the uncached sliced form on every
+    // card (see the default below): off unless STRATA_PF_W16_CACHE_MIB is set.  When on it is sized by the card, never by the user.  It takes only VRAM nobody else holds: a weight is
+    // cached while the card keeps kW16AutoReserve free afterwards (the MTP prompt capture, the batch windows and a long
+    // prompt's buffers are allocated later, out of that room; a replica with 309 MiB free ran out of memory at 14K tokens),
+    // so a card whose expert cache fills it caches nothing and a card with room (all experts resident) caches what the
+    // prompt path uses (~6 GB for Qwen3.8).  STRATA_PF_W16_CACHE_MIB=N is an explicit budget (2 GiB kept free, as before),
+    // =0 turns it off.
+    if (w16_budget_ < 0) {
+        const char* v = std::getenv("STRATA_PF_W16_CACHE_MIB");
+        if (v != nullptr && std::strcmp(v, "auto") == 0) {
+            // STRATA_PF_W16_CACHE_MIB=auto (tester switch, round0212 item 7): the automatic sizing - weights are cached while the card
+            // keeps kW16AutoReserve free afterwards, so a card whose expert cache fills it caches nothing.  Not bit-exact (see below),
+            // so it is not the default until the owner says yes.
+            w16_budget_ = 16ll << 30;
+            w16_reserve_ = kW16AutoReserve;
+        } else if (v != nullptr) {
+            w16_budget_ = (int64_t) std::atoll(v) * (1ll << 20);
+            w16_reserve_ = 2ll << 30;
+        } else {
+            // INT3 turned the default off (11-01) because gemm_dequant_side_parity failed with it on sm_86 / sm_120 / sm_121.  That test builds its Gemm
+            // with a 10.5 M-element scratch, smaller than four of its weights, so uncached those take the sliced path (several GEMMs) and cached they
+            // take one full-N GEMM: not the engine.  The engine's scratch is GEMM_SCRATCH = 32 M elements and every dense projection of Qwen3.8
+            // (largest attn_q, 31.5 M) fits it, so cached and uncached are the same GEMM on the same FP16 values (gemm_w16_parity: the engine's scratch,
+            // shapes and types, bitwise).  Round0212 item 7: on when the engine says so (set_w16_auto_default: Linux CUDA with batch slots), else off
+            // as in v0.2.9.  It takes only VRAM beyond kW16AutoReserve, so a card whose expert cache fills it caches nothing.  =0 turns it off.
+            w16_budget_ = w16_auto_default_().load() ? (16ll << 30) : 0;
+            w16_reserve_ = kW16AutoReserve;
+        }
+    }
+    if (w16_budget_ > 0 && !side_scratch_) {
+        const int64_t bytes = N * K * 2;
+        uint16_t* cw = nullptr;
+        for (const W16Entry& e : w16_)
+            if (e.p == W_blocks && e.type == ggml_type && e.n == N && e.k == K) { cw = e.d; break; }
+        if (cw == nullptr && w16_used_ + bytes <= w16_budget_) {
+            size_t fb = 0, tb = 0;
+            if (cudaMemGetInfo(&fb, &tb) == cudaSuccess && fb > (size_t) bytes + (size_t) w16_reserve_ &&
+                cudaMalloc((void**) &cw, (size_t) bytes) == cudaSuccess) {
+                strata::kernels::dequant_f16(ggml_type, W_blocks, 0, N, K, cw, stream_);
+                w16_.push_back({W_blocks, ggml_type, N, K, cw});
+                w16_used_ += bytes;
+            } else {
+                (void) cudaGetLastError();
+                cw = nullptr;
+                if (w16_budget_ > 0 && !w16_logged_) {
+                    w16_logged_ = true;
+                    std::fprintf(stderr, "strata prefill: FP16 weight cache %lld MiB (the card keeps %lld MiB free; STRATA_PF_W16_CACHE_MIB=0 turns it off)\n",
+                                 (long long) (w16_used_ >> 20), (long long) (w16_reserve_ >> 20));
+                }
+                w16_budget_ = w16_used_ > 0 ? w16_used_ : 0;   // out of room: stop trying
+            }
+        }
+        if (cw != nullptr) {
+            f16(X, cw, Y, T, N, K, ldy, beta);
+            return;
+        }
+    }
 #endif
     if (N * K > scratch_elems_) {
         // Too large for the scratch at once: in row slices.
@@ -1276,6 +1585,24 @@ void Gemm::native(const uint16_t* X, int ggml_type, const void* W_blocks, float*
             strata::kernels::dequant_f16(ggml_type, W_blocks, r0, n, K, scratch_, stream_);
             f16(X, scratch_, Y + r0, T, n, K, ldy, beta);
         }
+        // the side stream's next dequant into scratch_ waits for these slices' reads and writes of it
+        if (side_scratch_) (void) cudaEventRecord((cudaEvent_t) side_free_[0], (cudaStream_t) stream_);
+        return;
+    }
+    if (side_scratch_) {
+        // STRATA_DEQUANT_SIDE: the dequant on the side stream, into the scratch the compute stream read last but one.
+        // free[cur] -> dequant -> ready[cur] -> GEMM -> free[cur] orders the dequant after the GEMM that last read
+        // this scratch and the GEMM after the dequant that filled it, so every read and write of a scratch is where
+        // the serial form had it - the same kernels, the same bits - and the dequant runs while the kernels queued
+        // ahead of this GEMM do.
+        uint16_t* const s = side_cur_ == 0 ? scratch_ : side_scratch_;
+        (void) cudaStreamWaitEvent((cudaStream_t) side_stream_, (cudaEvent_t) side_free_[side_cur_], 0);
+        strata::kernels::dequant_f16(ggml_type, W_blocks, 0, N, K, s, side_stream_);
+        (void) cudaEventRecord((cudaEvent_t) side_ready_[side_cur_], (cudaStream_t) side_stream_);
+        (void) cudaStreamWaitEvent((cudaStream_t) stream_, (cudaEvent_t) side_ready_[side_cur_], 0);
+        f16(X, s, Y, T, N, K, ldy, beta);
+        (void) cudaEventRecord((cudaEvent_t) side_free_[side_cur_], (cudaStream_t) stream_);
+        side_cur_ ^= 1;
         return;
     }
     strata::kernels::dequant_f16(ggml_type, W_blocks, 0, N, K, scratch_, stream_);

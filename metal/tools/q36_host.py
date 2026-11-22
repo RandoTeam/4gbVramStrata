@@ -138,7 +138,7 @@ inline int atomicAdd(device int* p,int v){return atomic_fetch_add_explicit((devi
             code=code.replace(table+'['+index+']','reinterpret_cast<device float*>('+table+'['+index+'])')
         code=code.replace('__shared__ const float* pk[16];','device const float* threadgroup pk[16];')
         code=code.replace('__shared__','threadgroup').replace('__restrict__','')
-        code=re.sub(r'(?<![\w*])((?:const\s+)?(?:float|int32_t|uint8_t|__half|unsigned long long)\s*\*\s*(?:const\s*\*)?)',lambda m:metal_type(m[1]),code)
+        code=re.sub(r'(?<![\w*])((?:const\s+)?(?:float4|float|int32_t|uint8_t|__half|unsigned long long)\s*\*\s*(?:const\s*\*)?)',lambda m:metal_type(m[1]),code)
         code=code.replace('threadgroup device const float* threadgroup','device const float* threadgroup').replace('device device ','device ')
         for old,new in [('__syncthreads()','threadgroup_barrier(mem_flags::mem_threadgroup | mem_flags::mem_device)'),('__float2half_rn','half'),('__float2half','half'),('__half2float','float'),('__expf','exp'),('expf','exp'),('rsqrtf','rsqrt'),('fmaf','fma'),('fmaxf','max'),('fminf','min'),('powf','pow'),('sqrtf','sqrt'),('sinf','sin'),('cosf','cos'),('fabsf','abs'),('__half','half'),('int32_t','int'),('uint8_t','uchar')]:code=code.replace(old,new)
         code=re.sub(r'__shfl_xor_sync\(0xffffffffu,\s*([^,]+),\s*([^,)]+)(?:,\s*32)?\)',r'simd_shuffle_xor(\1,\2)',code)

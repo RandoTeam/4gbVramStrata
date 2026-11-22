@@ -4,8 +4,12 @@
 // (fattn_mma.cuh, change 2).
 #include "fattn.hpp"
 
-#if !defined(GGML_USE_HIP)
+#if !defined(GGML_USE_HIP) && !defined(STRATA_FOURGBVRAM_OWN)
 #include "fattn_mma.cuh"
+#elif !defined(GGML_USE_HIP)   // STRATA_FOURGBVRAM_OWN: the decode kernels below are this project's own and need no more than these
+#include <cuda_fp16.h>
+#include <cuda_runtime.h>
+#define WARP_SIZE 32
 #endif
 
 #include <algorithm>
@@ -28,6 +32,7 @@ struct Setup {
 
 int grid(long long n, int per) { return (int) ((n + per - 1) / per); }
 
+#if !defined(STRATA_FOURGBVRAM_OWN)
 // The launch's shape and shared memory as ggml_cuda_flash_attn_ext_mma_f16_case() works them out, for the
 // current card.  Ampere or later: on Turing the kernel has no 64-column tile.
 template <int Group>
@@ -110,24 +115,27 @@ Layout layout(int n, int dim, int n_head, int kv_heads, int nbatch_fa, size_t sc
     if (rows >= (long long) n + nbatch_fa) L.rows = rows;
     return L;
 }
+#endif   // !STRATA_FOURGBVRAM_OWN
+
 
 void ck(const char* what) {
     const cudaError_t e = cudaGetLastError();
     if (e != cudaSuccess) throw std::runtime_error(std::string("fattn: ") + what + ": " + cudaGetErrorString(e));
 }
 
+#if !defined(STRATA_FOURGBVRAM_OWN)   // the prompt batch's side: llama.cpp's kernel and what is launched around it
 // rows [row, row + valid) of a q8_0 cache (or an fp16 one, f16) as fp16, and zeros on to `blockIdx.y`'s last row:
 // the kernel reads whole steps of keys, and the causal mask removes the zero rows' weights, but a NaN would get
 // through it
 __global__ void dequant_kernel(const int8_t* __restrict__ codes, const uint16_t* __restrict__ scales,
                                const half* __restrict__ f16, half* __restrict__ out, int width, long long row,
-                               int valid) {
+                               int valid, size_t rs) {
     const int i = blockIdx.x * blockDim.x + threadIdx.x;
     if (i >= width) return;
     const int r = blockIdx.y;
     half x = __float2half(0.0f);
     if (r < valid) {
-        const size_t at = size_t(row + r) * width;
+        const size_t at = size_t(row + r) * rs;   // rs: a row's values in the cache (Kvq8::rs), a multiple of 32
         x = f16 ? f16[at + i]
                 : __float2half((float) codes[at + i] * __half2float(__ushort_as_half(scales[at / 32 + i / 32])));
     }
@@ -201,9 +209,9 @@ bool run(const float* q, Kvq8 kq8, Kvq8 vq8, const half* keys, const half* vals,
             kb = keys, vb = vals;
         } else {
             dequant_kernel<<<dim3(grid(width, 256), nk), 256, 0, s>>>(kq8.codes, kq8.scales, keys, kw, width, k0,
-                                                                      (int) m);
+                                                                      (int) m, kq8.rs ? kq8.rs : size_t(width));
             dequant_kernel<<<dim3(grid(width, 256), nk), 256, 0, s>>>(vq8.codes, vq8.scales, vals, vw, width, k0,
-                                                                      (int) m);
+                                                                      (int) m, vq8.rs ? vq8.rs : size_t(width));
         }
         if (last) kv_max_kernel<kCols1><<<grid(tiles, 128), 128, 0, s>>>(kv_max, tiles, n, delta, nk, S.nbatch_fa);
         float* dst = b == 0 ? out : part;
@@ -223,9 +231,14 @@ bool run(const float* q, Kvq8 kq8, Kvq8 vq8, const half* keys, const half* vals,
     return true;
 }
 
+#endif   // !STRATA_FOURGBVRAM_OWN
+
 // ---- decode (fdec_q8): a few tokens over the whole cache, split by keys, on the tensor cores ----
 
-constexpr int kSplit = 1024;   // keys a CUDA block takes, counted from the cache's first row
+// keys a CUDA block takes, counted from the cache's first row.  1024 gave 4,833 tokens of context 5 blocks a group
+// (16 in a launch recorded for 8,192), on a card with 188 multiprocessors: Qwen3.6 wrote 433 tokens/s after them
+// at 24 GB with 1024, 477 with 256, 415 with 128.
+constexpr int kSplit = 256;
 constexpr int kTile = 64;      // keys a block takes at a time: 16 a warp
 constexpr int kDecWarps = 4;
 constexpr int kDecRows = 32;   // 4 tokens x 8 heads, or 2 x 16; the scratch has the same size
@@ -278,15 +291,17 @@ template <int MT, bool F16, int Group>
 __global__ void __launch_bounds__(kDecWarps * WARP_SIZE)
 fdec_kernel(const float* __restrict__ q, const void* __restrict__ kc, const uint16_t* __restrict__ ks,
             const void* __restrict__ vc, const uint16_t* __restrict__ vs, long long pos,
-            const long long* __restrict__ at, int first, int tokens, int n_head, int kv_heads, float scale,
-            float* __restrict__ part, float* __restrict__ ml) {
+            const long long* __restrict__ at, int first, int tokens, int total_tokens, bool whole, int n_head,
+            int kv_heads, float scale, float* __restrict__ part, float* __restrict__ ml, size_t rs) {
     constexpr int Q = MT * 16, QS = kD + 8, PS = kTile + 8;
     __shared__ __align__(16) half Qs[Q * QS];
     __shared__ __align__(16) half Ps[Q * PS];
     __shared__ float red[2][kDecWarps][Q];
     const int w = threadIdx.x / WARP_SIZE, lane = threadIdx.x % WARP_SIZE, g8 = lane / 4, t = lane % 4;
     const int grp = blockIdx.y, split = blockIdx.x;
-    const long long p0 = (at ? *at : pos) + first, last = p0 + tokens - 1, r0 = (long long) split * kSplit;
+    const long long base_pos = at ? *at : pos;
+    const long long p0 = base_pos + first, last = whole ? (base_pos + total_tokens - 1) : (p0 + tokens - 1),
+                    r0 = (long long) split * kSplit;
     if (r0 > last) return;
     const long long r1 = r0 + kSplit < last + 1 ? r0 + kSplit : last + 1;
     for (int i = threadIdx.x; i < Q * kD; i += blockDim.x) {
@@ -296,7 +311,7 @@ fdec_kernel(const float* __restrict__ q, const void* __restrict__ kc, const uint
     }
     constexpr int E = F16 ? 2 : 1;                         // bytes a value
     constexpr uint32_t kZero = F16 ? 0u : 0x80808080u;     // a zero (a q8 code's once flipped)
-    const size_t width = (size_t) kv_heads * kD, swidth = width / 32;
+    const size_t width = rs, swidth = rs / 32;             // a row's values in the cache (Kvq8::rs)
     const char* kg = (const char*) kc + (size_t) grp * kD * E;
     const char* vg = (const char*) vc + ((size_t) grp * kD + 64 * w + 8 * g8) * E;
     const uint16_t* ksg = F16 ? nullptr : ks + (size_t) grp * (kD / 32);
@@ -405,7 +420,8 @@ fdec_kernel(const float* __restrict__ q, const void* __restrict__ kc, const uint
                     for (int j = 0; j < 2; ++j) {
                         const long long key = tb + 16 * w + 8 * nt + 2 * t + j;
                         float& x = s[mt][nt][2 * r + j];
-                        x = tok < tokens && key <= p0 + tok ? x * scale : -INFINITY;
+                        const long long tok_last = whole ? last : (p0 + tok);
+                        x = tok < tokens && key <= tok_last ? x * scale : -INFINITY;
                         mx = fmaxf(mx, x);
                     }
                 mx = fmaxf(mx, __shfl_xor_sync(0xffffffffu, mx, 1));
@@ -522,20 +538,27 @@ fdec_kernel(const float* __restrict__ q, const void* __restrict__ kc, const uint
 // a head and token, a thread a dimension.  A token reads only the splits up to its own row.
 template <int Group>
 __global__ void fdec_merge_kernel(const float* __restrict__ part, const float* __restrict__ ml, float* __restrict__ out,
-                                  long long pos, const long long* __restrict__ at, int first, int n_head, int kv_heads) {
+                                  long long pos, const long long* __restrict__ at, int first, int total_tokens,
+                                  bool whole, int n_head, int kv_heads, float* __restrict__ ml_out) {
     const int h = blockIdx.x, tok = blockIdx.y, d = threadIdx.x, grp = h / Group;
-    const long long p = (at ? *at : pos) + first + tok;
+    const long long base_pos = at ? *at : pos;
+    const long long p = whole ? (base_pos + total_tokens - 1) : (base_pos + first + tok);
     const int splits = int(p / kSplit) + 1, row = tok * Group + h % Group;
     float top = -INFINITY;
     for (int i = 0; i < splits; ++i) top = fmaxf(top, ml[2 * (((size_t) i * kv_heads + grp) * kDecRows + row)]);
     float sum = 0.f, acc = 0.f;
     for (int i = 0; i < splits; ++i) {
         const size_t idx = ((size_t) i * kv_heads + grp) * kDecRows + row;
-        const float e = expf(ml[2 * idx] - top);
+        const float e = top == -INFINITY ? 0.f : expf(ml[2 * idx] - top);
         sum += ml[2 * idx + 1] * e;
         acc += part[idx * kD + d] * e;
     }
-    out[((size_t) (first + tok) * n_head + h) * kD + d] = acc / sum;
+    const size_t out_row = (size_t) (first + tok) * n_head + h;
+    if (ml_out && d == 0) {
+        ml_out[2 * out_row + 0] = top;
+        ml_out[2 * out_row + 1] = sum;
+    }
+    out[out_row * kD + d] = sum > 0.f ? acc / sum : 0.f;
 }
 
 // splits of 1,024 keys up to `rows`, each with its results for kDecRows query rows and a max and a sum each
@@ -543,6 +566,7 @@ size_t fdec_floats(int rows, int kv_heads) { return (size_t) grid(rows, kSplit) 
 
 }  // namespace
 
+#if !defined(STRATA_FOURGBVRAM_OWN)
 bool fattn_fits(int dim, int n_head, int kv_heads, int rows, size_t scratch_floats) {
     if (dim != kD || kv_heads <= 0 || rows <= 0) return false;
     if (n_head == 8 * kv_heads) {
@@ -576,10 +600,30 @@ bool fattn_f16(const float* q, const uint16_t* keys, const uint16_t* vals, int64
                          kv_heads, scale, scratch, scratch_floats, stream));
 }
 
+#else   // STRATA_FOURGBVRAM_OWN: no llama.cpp kernel in this build; a prompt batch's attention is attend_batch()'s
+
+bool fattn_fits(int, int, int, int, size_t) { return false; }
+
+bool fattn_q8(const float*, Kvq8, Kvq8, int64_t, int, float*, int, int, int, float, float*, size_t, void*) { return false; }
+
+bool fattn_f16(const float*, const uint16_t*, const uint16_t*, int64_t, int, float*, int, int, int, float, float*, size_t,
+               void*) {
+    return false;
+}
+
+#endif
+
 bool fdec_fits(int dim, int n_head, int kv_heads, int rows, size_t scratch_floats) {
     if (dim != kD || kv_heads <= 0 || (n_head != 8 * kv_heads && n_head != 16 * kv_heads) || rows <= 0) return false;
+#if !defined(STRATA_FOURGBVRAM_OWN)
     const int cc = ggml_cuda_info().devices[ggml_cuda_get_device()].cc;
     return GGML_CUDA_CC_IS_NVIDIA(cc) && ampere_mma_available(cc) && fdec_floats(rows, kv_heads) <= scratch_floats;
+#else   // Ampere or later, which is what llama.cpp's ampere_mma_available() asks
+    int dev = 0, major = 0;
+    return cudaGetDevice(&dev) == cudaSuccess &&
+           cudaDeviceGetAttribute(&major, cudaDevAttrComputeCapabilityMajor, dev) == cudaSuccess && major >= 8 &&
+           fdec_floats(rows, kv_heads) <= scratch_floats;
+#endif
 }
 
 namespace {
@@ -587,9 +631,10 @@ namespace {
 template <bool F16, int Group>
 bool run_dec(const float* q, const void* kc, const uint16_t* ks, const void* vc, const uint16_t* vs, int64_t pos, int n,
              const long long* at, int room, float* out, int dim, int n_head, int kv_heads, float scale, float* scratch,
-             size_t scratch_floats, void* stream) {
+             size_t scratch_floats, void* stream, bool whole, float* ml_out, size_t rs = 0) {
     const int rows = (int) (at ? room : pos + n);   // a recorded launch is sized for `room` rows
-    if (n <= 0 || !kc || !vc || !fdec_fits(dim, n_head, kv_heads, rows, scratch_floats)) return false;
+    if (n <= 0 || rows <= 0 || !kc || !vc || !fdec_fits(dim, n_head, kv_heads, rows, scratch_floats)) return false;
+    if (!rs) rs = size_t(kv_heads) * dim;
     const int splits = grid(rows, kSplit);
     float* ml = scratch + (size_t) splits * kv_heads * kDecRows * kD;
     const cudaStream_t s = (cudaStream_t) stream;
@@ -598,10 +643,10 @@ bool run_dec(const float* q, const void* kc, const uint16_t* ks, const void* vc,
         const int c = std::min(kDecTokens, n - first);
         const dim3 blocks(splits, kv_heads);
         const auto kernel = c * Group <= 16 ? fdec_kernel<1, F16, Group> : fdec_kernel<2, F16, Group>;
-        kernel<<<blocks, kDecWarps * WARP_SIZE, 0, s>>>(q, kc, ks, vc, vs, (long long) pos, at, first, c, n_head, kv_heads,
-                                                        scale, scratch, ml);
-        fdec_merge_kernel<Group><<<dim3(n_head, c), kD, 0, s>>>(scratch, ml, out, (long long) pos, at, first, n_head,
-                                                         kv_heads);
+        kernel<<<blocks, kDecWarps * WARP_SIZE, 0, s>>>(q, kc, ks, vc, vs, (long long) pos, at, first, c, n, whole,
+                                                        n_head, kv_heads, scale, scratch, ml, rs);
+        fdec_merge_kernel<Group><<<dim3(n_head, c), kD, 0, s>>>(scratch, ml, out, (long long) pos, at, first, n, whole,
+                                                                n_head, kv_heads, ml_out);
     }
     ck("decode attention");
     return true;
@@ -610,23 +655,25 @@ bool run_dec(const float* q, const void* kc, const uint16_t* ks, const void* vc,
 }  // namespace
 
 bool fdec_q8(const float* q, Kvq8 kq8, Kvq8 vq8, int64_t pos, int n, const long long* at, int room, float* out,
-             int dim, int n_head, int kv_heads, float scale, float* scratch, size_t scratch_floats, void* stream) {
-    return kq8.scales && vq8.scales &&
+             int dim, int n_head, int kv_heads, float scale, float* scratch, size_t scratch_floats, void* stream,
+             bool whole, float* ml_out) {
+    // the keys' and the values' rows are one stride apart: a layout either interleaves both or neither
+    return kq8.scales && vq8.scales && kq8.rs == vq8.rs &&
            (n_head == 16 * kv_heads
                 ? run_dec<false, 16>(q, kq8.codes, kq8.scales, vq8.codes, vq8.scales, pos, n, at, room, out, dim,
-                                     n_head, kv_heads, scale, scratch, scratch_floats, stream)
+                                     n_head, kv_heads, scale, scratch, scratch_floats, stream, whole, ml_out, kq8.rs)
                 : run_dec<false, 8>(q, kq8.codes, kq8.scales, vq8.codes, vq8.scales, pos, n, at, room, out, dim,
-                                    n_head, kv_heads, scale, scratch, scratch_floats, stream));
+                                    n_head, kv_heads, scale, scratch, scratch_floats, stream, whole, ml_out, kq8.rs));
 }
 
 bool fdec_f16(const float* q, const uint16_t* keys, const uint16_t* vals, int64_t pos, int n, const long long* at,
               int room, float* out, int dim, int n_head, int kv_heads, float scale, float* scratch,
-              size_t scratch_floats, void* stream) {
+              size_t scratch_floats, void* stream, bool whole, float* ml_out) {
     return n_head == 16 * kv_heads
                ? run_dec<true, 16>(q, keys, nullptr, vals, nullptr, pos, n, at, room, out, dim, n_head, kv_heads,
-                                  scale, scratch, scratch_floats, stream)
+                                  scale, scratch, scratch_floats, stream, whole, ml_out)
                : run_dec<true, 8>(q, keys, nullptr, vals, nullptr, pos, n, at, room, out, dim, n_head, kv_heads,
-                                 scale, scratch, scratch_floats, stream);
+                                 scale, scratch, scratch_floats, stream, whole, ml_out);
 }
 
 #else
@@ -636,12 +683,12 @@ bool fattn_fits(int, int, int, int, size_t) { return false; }
 bool fdec_fits(int, int, int, int, size_t) { return false; }
 
 bool fdec_q8(const float*, Kvq8, Kvq8, int64_t, int, const long long*, int, float*, int, int, int, float, float*, size_t,
-             void*) {
+             void*, bool, float*) {
     return false;
 }
 
 bool fdec_f16(const float*, const uint16_t*, const uint16_t*, int64_t, int, const long long*, int, float*, int, int, int,
-              float, float*, size_t, void*) {
+              float, float*, size_t, void*, bool, float*) {
     return false;
 }
 

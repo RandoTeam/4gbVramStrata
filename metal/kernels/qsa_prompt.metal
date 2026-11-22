@@ -153,6 +153,32 @@ kernel void qsa_q_f16(device const float* q [[buffer(0)]], device half* qh [[buf
     if (gid < n) qh[gid] = half(q[gid]);
 }
 
+// qsa_merge for a prompt chunk with the fp16 output the attn_output GEMM reads: qsa_merge's y, as half, at [t][h][d]
+// (qsa_merge writes y into the first plane of the prepared activations and act_f16 rounds that plane to half; here one
+// pass, bitwise the same halves, and no other plane or sum).  grid (QH, n_tok), 256 threads.
+kernel void qsa_merge_h(device const float* part [[buffer(0)]], device const float* qfull [[buffer(1)]],
+                        device half* xh [[buffer(2)]], constant QsaArgs& a [[buffer(3)]],
+                        uint3 tg [[threadgroup_position_in_grid]], ushort tid [[thread_index_in_threadgroup]]) {
+    const int h = int(tg.x), t = int(tg.y);
+    const int nchunks = (QBUDGET + QCH - 1) / QCH;
+    const uint n_kv = a.pos0 + uint(t) + 1, width = min(n_kv, uint(QBUDGET));
+    const int nc = int((width + QCH - 1) / QCH);
+    device const float* pp = part + (uint(t) * nchunks * QH + uint(h)) * (QD + 2);
+    float M = -INFINITY;
+    for (int k = 0; k < nc; ++k) M = max(M, pp[k * QH * (QD + 2) + QD]);
+    float L = 0.0f, o = 0.0f;
+    for (int k = 0; k < nc; ++k) {
+        device const float* q = pp + k * QH * (QD + 2);
+        const float e = exp(q[QD] - M);
+        L = fma(q[QD + 1], e, L);
+        o = fma(q[tid], e, o);
+    }
+    o = (L > 0.0f) ? o / L : 0.0f;   // an empty row (M stays -INFINITY) makes exp(-inf - -inf) NaN; see qsa.metal
+    const float gate = qfull[(t * QH + h) * 2 * QD + QD + tid];
+    const float y = o * (1.0f / (1.0f + exp(-gate)));
+    xh[(uint(t) * QH + uint(h)) * QD + tid] = half(y);
+}
+
 // qsa_score as a GEMM (fp32 operands, so the selection sees qsa_score's values to fp32 rounding): S[(t, h)][b] =
 // qidx[t][h] . pooled[b] for 16 tokens x IH heads (64 rows) by 64 blocks a threadgroup; the epilogue sums relu over
 // the heads.  The tail block n_bid (the `dead` key, + 1e9 when it has cells) and blocks past it are left to the
@@ -342,7 +368,12 @@ kernel void qsa_flash(device const half* qh [[buffer(0)]], device const char* kq
             if (h < HPG) {
                 const int hh = g * HPG + h;
                 const float gate = qfull[(uint(t) * QH + hh) * 2 * QD + QD + d];
-                xqh[(uint(t) * QH + hh) * QD + d] = half(tot[i] / lsum[h] * (1.0f / (1.0f + exp(-gate))));
+                // lsum starts at 0 and is only advanced by the online-softmax step, whose rescale is exp(mrun - m).
+                // With no finite score in the row (mrun and m both -INFINITY) that is exp(NaN), so lsum stays 0 or
+                // becomes NaN and this divide writes a canonical qNaN into xqh and from there into the residual.
+                // An empty row attends to nothing, so zero is the answer the rest of the path expects.
+                const float ls = lsum[h];
+                xqh[(uint(t) * QH + hh) * QD + d] = half((ls > 0.0f ? tot[i] / ls : 0.0f) * (1.0f / (1.0f + exp(-gate))));
             }
         }
 }

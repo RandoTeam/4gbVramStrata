@@ -3,6 +3,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include "strata/ngram/ple_reader.hpp"
+#include "strata/core/progress.hpp"   // #4682: a completed table read is progress for the serve watchdog
 
 #include <algorithm>
 #include <chrono>
@@ -237,6 +238,7 @@ struct PleReader::Impl {
             free_slots.push_back(s);
             return false;
         }
+        strata::core::progress_beat();   // #4682: a slow drive that still returns rows is not a stopped engine (--ple-io direct: random 4 KiB reads, 16 a token)
         record_latency(now_us() - j.issued_us);
         stats.bytes += c.bytes;
         const uint8_t* buf = slot_buf(s);
@@ -442,6 +444,13 @@ PleReader::Ticket PleReader::issue(const uint32_t* rows, size_t n, uint8_t* out_
     const bool rearm = m.keep_us > 0 && (m.last_issue_us <= 0 || now - m.last_issue_us > m.keep_window_us);
     m.last_issue_us = now;
     TicketState& ts = m.tickets[id];
+    // After a failed read the reader stays failed (`collect` reports `error` until the next `open`) and its worker has
+    // parked (worker_loop). A ticket queued now would never be read and `collect` would wait for it for ever, so it
+    // is not queued: it has no jobs, and `collect` returns the error at once.
+    if (!m.error.empty()) {
+        ts.pending = 0;
+        return Ticket{id};
+    }
     std::unordered_map<uint64_t, size_t> by_page;     // aligned offset -> index in `jobs`
     std::vector<Job> jobs;
     for (size_t i = 0; i < n; ++i) {
@@ -510,7 +519,7 @@ bool PleReader::collect(Ticket t, std::string& err) {
         });
         it = m.tickets.find(t.id);
         if (it == m.tickets.end()) { err = "PleReader: unknown ticket"; return false; }
-        if (!m.error.empty()) { err = m.error; return false; }
+        if (!m.error.empty()) { err = m.error; m.tickets.erase(it); return false; }
         m.stats.wait_us += now_us() - start;
         if (ple_trace() && it->second.jobs > 0 && it->second.jobs < 200) {
             const TicketState& ts = it->second;
@@ -530,7 +539,7 @@ bool PleReader::collect(Ticket t, std::string& err) {
         it = m.tickets.find(t.id);
         if (it == m.tickets.end()) { err = "PleReader: unknown ticket"; return false; }
     }
-    if (!m.error.empty()) { err = m.error; return false; }
+    if (!m.error.empty()) { err = m.error; m.tickets.erase(it); return false; }
     m.stats.wait_us += now_us() - start;
     m.tickets.erase(it);
     return true;

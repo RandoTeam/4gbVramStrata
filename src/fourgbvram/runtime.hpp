@@ -32,9 +32,10 @@ constexpr int kStageRows = 32;
 // outside the cache a layer's are copied to the card once for all of a read's tokens, so more is faster: GLM 5.3
 // Flash reads 7,788 tokens at 606 to 616 tokens/s in one read and at 517 to 531 in reads of 2,048, and on an
 // 8 GB card Qwen3.6 reads 30,836 at 1,386 to 1,399 in one read and at 1,101 to 1,233 in reads of 8,192.  A read
-// of more than two calls keeps those rows in pinned host memory, 64 KiB a token for GLM and 8 for Qwen3.6: this
-// much is 8,192 tokens of GLM's and 65,536 of Qwen3.6's.
-constexpr size_t kReadBytes = size_t(512) << 20;
+// of more than two calls keeps those rows in pinned host memory, 64 KiB a token for GLM and DeepSeek V4 Flash and 8
+// for Qwen3.6: this much is 32,768 tokens of GLM's and DeepSeek's.  At 512 MiB DeepSeek V4 Flash UD-IQ2_XXS on a
+// 5090 (7,900 of its 11,008 experts outside VRAM, 56 GiB) copied them three times for 18,000 tokens.
+constexpr size_t kReadBytes = size_t(2048) << 20;
 constexpr size_t kChunkBytes = size_t(64) << 20;   // one upload, and each of the two pinned buffers
 // Zero bytes behind every matrix the batched kernels may multiply (Mmq::fits): they read up to a step of 256
 // columns past a row that ends inside one, which is at most 7 blocks of 34 bytes.
@@ -44,6 +45,7 @@ constexpr size_t kTail = 256;
 // noisy, and an upload gets in the way of the work: a slot goes to an expert that will clearly be used more.
 constexpr float kSwapMin = 2.f;
 constexpr int kSwapHalf = 128;
+constexpr int kFarTrades = 4;   // card_far_: trades a window asks (Engine::follow())
 // Engine::pick_way(): each way of a window is timed this many times before the faster one is taken.  What a way
 // takes moves, most in an answer's first windows, while the cache comes to hold the answer's experts, so the way
 // behind is timed again after kWayAgain windows of that size, then after twice as many each time it is still
@@ -61,6 +63,10 @@ constexpr int kSnapPlaces = 7;
 // gives them VRAM for rows kKvGrow at a time, kKvAhead past the call, and the expert cache gives that up in pieces
 // of kArenaPiece.
 constexpr int64_t kKvGrow = 4096, kKvAhead = 1024;
+// The same with batch slots (Options::batch): a sequence of a 512-token chat held 4,096 rows of Qwen3.6's q8 KV, 48 MB,
+// and 16 of them most of a GiB the expert cache did without.  One answer at a time keeps the larger steps: a long
+// prompt asks the expert cache for VRAM fewer times.
+constexpr int64_t kKvGrowBatch = 1024, kKvAheadBatch = 256;
 constexpr size_t kArenaPiece = size_t(64) << 20;
 
 using Clock = std::chrono::steady_clock;
