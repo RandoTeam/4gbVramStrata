@@ -73,7 +73,7 @@ int main(int argc,char**) {
         #include <metal_stdlib>
         using namespace metal;
         struct A { device void* table; device int* out; };
-        kernel void read_table(constant A& a [[buffer(0)]]) { a.out[0]=static_cast<device int* const*>(a.table)[0][0]; }
+        kernel void read_table(constant A& a [[buffer(0)]]) { a.out[0]=static_cast<device int* device const*>(a.table)[0][0]; }
     )","read_table",error);
     if(!pipeline)throw std::runtime_error(error);
     struct IndirectArgs {void* table;void* out;} indirect{table.ptr,y.ptr};

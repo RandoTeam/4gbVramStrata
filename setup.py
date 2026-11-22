@@ -6629,7 +6629,7 @@ def fourgbvram_verdict(d, ram, vram_gb, hip, windows=False) -> str:
 
 # --kv for a model of strata-fourgbvram (docs/Q8_KV.md): the formats its architecture's attention caches have beside
 # fp16, the default.  The other engine's own are STRATA_KV.
-FOURGBVRAM_KV = {"q8_0": ("qwen36", "ornith", "ornith122", "tiel", "minicpmv", "kolibri", "flint", "lfm25", "clover", "groot"),
+FOURGBVRAM_KV = {"q8_0": ("qwen36", "ornith", "ornith122", "tiel", "minicpmv", "kolibri", "flint", "lfm25", "groot"),
                  "int8": ("gemma4",), "int8k": ("gemma4",), "fp8": ("inkling",)}
 STRATA_KV = ("int8", "q4_0", "k8v4")
 

@@ -58,13 +58,15 @@ kernel void fourgbvram_elementwise(constant BasicArgs& a [[buffer(0)]], uint i [
     if (a.kind == 0) a.p[1][i] = as_type<float>(uint(reinterpret_cast<device ushort*>(a.p[0])[i]) << 16);
     else if (a.kind == 1) a.p[1][i] = a.p[0][i] * a.scale;
     else if (a.kind == 2) a.p[1][i] += a.p[0][i] * a.scale;
-    else if (a.kind == 3) a.p[0][i] = a.scale * tanh(a.p[0][i] / a.scale);
+    // precise::tanh in both: the library's tanh is the fast one even under MathModeSafe, and it gave nan where GELU's
+    // gate was large (14 of the 63 rows of Gemma 4's first layer in a prompt batch), where CUDA's tanhf gives 1
+    else if (a.kind == 3) a.p[0][i] = a.scale * precise::tanh(a.p[0][i] / a.scale);
     else if (a.kind == 4) a.p[1][i] += a.p[0][i % a.n];
     else if (a.kind == 5 || a.kind == 6) {
         ulong at = a.p[1] ? i : (i / a.n) * 2 * a.n + i % a.n;
         float g = a.p[0][at], u = a.p[1] ? a.p[1][i] : a.p[0][at+a.n];
         if (a.kind == 5) { g=min(g,a.scale); u=clamp(u,-a.scale,a.scale); a.p[2][i]=g/(1.0f+exp(-g))*u; }
-        else a.p[2][i]=0.5f*g*(1.0f+tanh(0.7978845608028654f*g*(1.0f+0.044715f*g*g)))*u;
+        else a.p[2][i]=0.5f*g*(1.0f+precise::tanh(0.7978845608028654f*g*(1.0f+0.044715f*g*g)))*u;
     } else if (a.kind == 7) {
         ulong row=i/a.n, col=i%a.n; float sum=0;
         for (int k=0;k<a.stride;++k) sum += a.p[1][row*a.stride+k]*a.p[0][(row*a.stride+k)*a.n+col];
@@ -218,4 +220,31 @@ kernel void fourgbvram_likeliest(constant BasicArgs& a [[buffer(0)]],uint tid [[
     sum=0; at=a.n;
     for(uint g=0;g<groups;++g) { sum+=ts[g]; at=min(at,ta[g]); }
     reinterpret_cast<device int*>(a.p[1])[0]=at<a.n?at:0; a.p[1][1]=1.0f/sum;
+}
+
+// The global scales of NVFP4 experts (ExpertScales; mirrors ExpertArgs in basic.cpp), as CUDA's activations put them
+// on: rows of n gate values and then n up values (gu), row r's expert ids[r], or e[r] without ids; a missing scale is
+// 1.  kind 0: out = the rows scaled (out may be gu); 5 and 6: fourgbvram_elementwise's kinds 5 and 6 (SwiGLU clamped at
+// limit, GELU) of the scaled rows, n values a row; 1: out[r] *= gate[ids[r]], expert_weights()'s product.
+struct ExpertArgs {
+    device const float* gu;
+    device float* out;
+    device const float* gate;
+    device const float* up;
+    device const int* ids;
+    int e[32];
+    int n, rows, kind;
+    float limit;
+};
+kernel void fourgbvram_expert_rows(constant ExpertArgs& a [[buffer(0)]], uint i [[thread_position_in_grid]]) {
+    if (a.kind == 1) { if (i < uint(a.rows)) a.out[i] *= a.gate[a.ids[i]]; return; }
+    const uint per = a.kind ? a.n : 2 * a.n, row = i / per, col = i % per;
+    if (row >= uint(a.rows)) return;
+    const int e = a.gate || a.up ? (a.ids ? a.ids[row] : a.e[row]) : 0;
+    const float sg = a.gate ? a.gate[e] : 1.0f, su = a.up ? a.up[e] : 1.0f;
+    device const float* x = a.gu + ulong(row) * 2 * a.n;
+    if (!a.kind) { a.out[i] = x[col] * (col < uint(a.n) ? sg : su); return; }
+    float g = x[col] * sg, u = x[a.n + col] * su;
+    if (a.kind == 5) { g = min(g, a.limit); u = clamp(u, -a.limit, a.limit); a.out[i] = g / (1.0f + exp(-g)) * u; }
+    else a.out[i] = 0.5f * g * (1.0f + precise::tanh(0.7978845608028654f * g * (1.0f + 0.044715f * g * g))) * u;
 }

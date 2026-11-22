@@ -1,8 +1,8 @@
 // metal/src/fourgbvram/unported.cpp - the entry points of the shared strata-fourgbvram host code that have no Metal kernel yet.
 // None of them is on a Mac family's default path: llama.cpp's flash attention (which falls back to attend() and
-// attend_batch() by its own contract), Gemma 4's opt-in int8 attention caches, Clover's block guesses and coreset
-// routing, and the half-sum guard of Flint's MMQ.  A call that would need a kernel says what is missing instead of
-// computing something else.
+// attend_batch() by its own contract), Gemma 4's opt-in int8 attention caches, Qwen35's opt-in q4_0 cache and cache
+// streaming, Clover's block guesses and coreset routing, and the half-sum guard of Flint's MMQ.  A call that would
+// need a kernel says what is missing instead of computing something else.
 #include "fattn.hpp"
 #include "mmq.hpp"
 #include "strata/kernels/native_mmvq.hpp"
@@ -28,12 +28,24 @@ bool fattn_f16(const float*, const uint16_t*, const uint16_t*, int64_t, int, flo
     return false;
 }
 bool fdec_q8(const float*, Kvq8, Kvq8, int64_t, int, const long long*, int, float*, int, int, int, float, float*,
-             size_t, void*) {
+             size_t, void*, bool, float*) {
     return false;
 }
 bool fdec_f16(const float*, const uint16_t*, const uint16_t*, int64_t, int, const long long*, int, float*, int, int,
-              int, float, float*, size_t, void*) {
+              int, float, float*, size_t, void*, bool, float*) {
     return false;
+}
+
+// Qwen35's --kv q4_0 and --kv-resident (Engine::open() turns both down on Metal)
+void store_q4(const float*, block_q4_0*, int, int64_t, int, void*) { unported("q4_0 attention cache (--kv q4_0)"); }
+void store_q4_at(const float*, block_q4_0*, int, const long long*, int, int, void*) {
+    unported("q4_0 attention cache (--kv q4_0)");
+}
+void dequant_q4_to_q8(const block_q4_0*, int8_t*, uint16_t*, int, int, void*, const long long*) {
+    unported("q4_0 attention cache (--kv q4_0)");
+}
+void merge_attn_piece(float*, float*, const float*, const float*, int, int, int, void*) {
+    unported("attention cache streaming (--kv-resident)");
 }
 
 void store_int8(const float*, int8_t*, uint16_t*, int, int, int64_t, int, void*) {
@@ -65,6 +77,8 @@ void coreset_mask(float*, int, int, int, float, void*) { unported("coreset routi
 
 // the guard is Flint's (Flint::Flint() turns it on), and Flint is no Mac family: false keeps it from being asked for
 bool Mmq::half_sums(int) { return false; }
+// down's rows in gemm_iq_i8_quantize's form: only with Mmq::int8(), which is false here
+void swiglu_clamp_i8_rows(const float*, void*, int, int, float, void*, const ExpertScales*) { unported("int8 down rows"); }
 void guard_half_sums(float*, int64_t, int, int, float*, void*) { unported("half-sum guard (Flint)"); }
 void scale_rows(float*, int64_t, int, int, const int32_t*, const float*, bool, void*) {
     unported("half-sum guard (Flint)");

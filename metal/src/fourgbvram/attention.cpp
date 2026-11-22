@@ -30,12 +30,22 @@ void head_norm_rope(const float* x,int stride,const float* w,float* y,int dim,in
 }
 void store_f16(const float* x,uint16_t* cache,int n,int64_t pos,int rows,void* s) { store(x,cache,nullptr,n,pos,nullptr,rows,0,0,s); }
 void store_f16_at(const float* x,uint16_t* cache,int n,const long long* at,int rows,int ring,void* s) { store(x,cache,nullptr,n,0,at,rows,ring,0,s); }
-void store_q8(const float* x,int8_t* codes,uint16_t* scales,int n,int64_t pos,int rows,void* s) { store(x,codes,scales,n,pos,nullptr,rows,0,1,s); }
-void store_q8_at(const float* x,int8_t* codes,uint16_t* scales,int n,const long long* at,int rows,int ring,void* s) { store(x,codes,scales,n,0,at,rows,ring,1,s); }
+// The Metal kernels read a q8 cache's rows back to back (Kvq8::rs 0 or n); Qwen35 interleaves its layers on CUDA only.
+void store_q8(const float* x,int8_t* codes,uint16_t* scales,int n,int64_t pos,int rows,void* s,size_t rs) {
+    if(rs && rs!=size_t(n)) throw std::invalid_argument("Metal q8 cache rows are n codes apart");
+    store(x,codes,scales,n,pos,nullptr,rows,0,1,s);
+}
+void store_q8_at(const float* x,int8_t* codes,uint16_t* scales,int n,const long long* at,int rows,int ring,void* s,size_t rs) {
+    if(rs && rs!=size_t(n)) throw std::invalid_argument("Metal q8 cache rows are n codes apart");
+    store(x,codes,scales,n,0,at,rows,ring,1,s);
+}
 void attend(const float* q,const uint16_t* k,const uint16_t* v,int64_t pos,int rows,float*,int,float* out,
             int dim,int heads,int kv,float scale,void* s,int window,int ring,bool whole,const long long* at,int room,size_t,
-            Kvq8 kq,Kvq8 vq,const float* sinks,size_t) {
+            Kvq8 kq,Kvq8 vq,const float* sinks,size_t,float* ml_out) {
     if(dim<=0 || dim>1024 || dim%4 || kv<=0 || heads%kv) throw std::invalid_argument("Metal attention shape");
+    if(ml_out) throw std::invalid_argument("Metal attention has no streamed pieces (--kv-resident)");
+    if((kq.rs && kq.rs!=size_t(kv)*dim) || (vq.rs && vq.rs!=size_t(kv)*dim))
+        throw std::invalid_argument("Metal q8 cache rows are kv_heads * dim codes apart");
     if(sinks) throw std::invalid_argument("Metal attention has no attention sinks (Flint)");
     if(rows<=0) return;
     Args a;a.p[0]=q;a.p[1]=k;a.p[2]=v;a.p[3]=out;a.p[4]=at;
@@ -76,7 +86,10 @@ size_t attend_split_floats(int,int,int,int) { return 0; } // online softmax has 
 // else attend()
 void attend_batch(void*,const float* q,const uint16_t* k,const uint16_t* v,int64_t pos,int rows,float* score,
                   size_t score_n,float*,float* out,int dim,int heads,int kv,float scale,void* s,int window,int ring,
-                  bool whole,Kvq8 kq,Kvq8 vq,uint16_t*,uint16_t*,size_t,const float* sinks) {
+                  bool whole,Kvq8 kq,Kvq8 vq,uint16_t*,uint16_t*,size_t,const float* sinks,float* ml_out,
+                  const AttnBias* bias) {
+    if(ml_out) throw std::invalid_argument("Metal attention has no streamed pieces (--kv-resident)");
+    if(bias) throw std::invalid_argument("Metal attention has no bias by distance (Inkling 2)");
     static const std::string source=metal_detail::read_source(STRATA_FOURGBVRAM_FLASH_SOURCE);
     static const bool ready=[] {
         std::string error;
@@ -91,6 +104,22 @@ void attend_batch(void*,const float* q,const uint16_t* k,const uint16_t* v,int64
     Args a;a.p[0]=q;a.p[1]=k;a.p[2]=v;a.p[3]=out;
     a.p[5]=kq.codes;a.p[6]=kq.scales;a.p[7]=vq.codes;a.p[8]=vq.scales;
     a.dim=dim;a.heads=heads;a.kv=kv;a.pos=pos;a.rows=rows;a.scale=scale;a.window=window;a.ring=ring;a.whole=whole;
+    // A q8 cache or a ring: fourgbvram_flash_kv copies the call's keys and values in fp16 for fourgbvram_flash to read as tensors,
+    // into a buffer grown to the largest call and kept (as attend()'s scratch, its address stays)
+    if(kq.codes || ring) {
+        static void* kv16=nullptr;
+        static size_t kv16_bytes=0;
+        const int64_t first=window>0?std::max<int64_t>(0,pos-window+1):0;
+        const size_t n=size_t(pos+rows-first)*size_t(kv)*size_t(dim),need=4*n;
+        if(need>kv16_bytes) {
+            if(kv16) { gpu::stream_synchronize(static_cast<gpu::Stream>(s)); gpu::free_device(kv16); }
+            kv16=nullptr;kv16_bytes=0;
+            if(gpu::malloc_device_raw(&kv16,need)!=gpu::kSuccess) throw std::runtime_error("Metal attention: fp16 keys");
+            kv16_bytes=need;
+        }
+        a.p[9]=kv16;a.p[4]=static_cast<uint16_t*>(kv16)+n;
+        metal_detail::dispatch("fourgbvram_flash",source,"fourgbvram_flash_kv",a,s,{uint32_t((n+255)/256),1,1},256);
+    }
     const std::string name="fourgbvram_flash_"+std::to_string(dim);
     metal_detail::dispatch("fourgbvram_flash",source,name.c_str(),a,s,{uint32_t(heads),uint32_t((rows+15)/16),1},
                            uint32_t(32*(dim/64)));

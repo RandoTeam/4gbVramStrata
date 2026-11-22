@@ -1,5 +1,11 @@
 #include "test_utils.hpp"
 #include "q36_launch.hpp"
+#include "strata/kernels/iq_kernels.hpp"
+#include "strata/kernels/native_mmvq.hpp"
+#include "strata/prefill/moe_mmq.hpp"
+#include "ggml.h"
+#include <algorithm>
+#include <cstdint>
 int main(){
  int bad=0;g::Stream s;ck(g::stream_create(&s));
  int n=2048,rows=3;auto x=values(n*rows),w=values(n,.1f);for(auto&v:w)v+=1;
@@ -39,5 +45,43 @@ int main(){
  launch_k_attn_part(dim3(2,1),256,s,dq.as(),nullptr,nullptr,dp.as<int32_t>(),0,1,1,ctx,1.f/16,2,pa.as(),pm.as(),pl.as(),rs);
  launch_k_attn_merge(1,256,s,pa.as(),pm.as(),pl.as(),dgate.as(),dp.as<int32_t>(),0,1,2,ao.as(),rs);
  ck(g::stream_synchronize(s));bad+=compare(ao.read(256),ar,"q36 split-K session attention");
+ // The routed experts' SwiGLU is unclamped, silu(g) * u: the prompt chunks' (mmq::swiglu) and the grouped experts' of a decode step.
+ {const int F=512,R=2;auto gu=values(2*F*R,3.f);std::vector<float> ref(F*R);
+  for(int r=0;r<R;++r)for(int i=0;i<F;++i){float a=gu[r*2*F+i];ref[r*F+i]=a/(1+std::exp(-a))*gu[r*2*F+F+i];}
+  Buffer dgu(gu),dhh(ref.size()*4);strata::prefill::mmq::swiglu(dgu.as(),dhh.as(),R,F,false,s);
+  ck(g::stream_synchronize(s));bad+=compare(dhh.read(ref.size()),ref,"q36 prompt expert SwiGLU");}
+ {namespace K=strata::kernels;const int N=256,F=128,E=2;
+  auto L=K::native_expert_layout(GGML_TYPE_Q8_0,GGML_TYPE_Q8_0,N,F);
+  std::vector<uint8_t> blob(L.bytes*E);std::vector<float> wg(F*N*E),wu(F*N*E),wd(N*F*E),x(N);
+  auto fill=[](std::vector<float>& v,float ph,float sc){for(size_t i=0;i<v.size();++i)v[i]=sc*std::sin(float(i)*.37f+ph);};
+  fill(wg,.1f,.05f);fill(wu,.7f,.05f);fill(wd,1.3f,.08f);fill(x,2.f,.5f);
+  const auto* q8=ggml_get_type_traits(GGML_TYPE_Q8_0);
+  for(int e=0;e<E;++e){uint8_t* b=blob.data()+e*L.bytes;   // the GGUF's bytes, and the values the reference reads back from them
+   ggml_quantize_chunk(GGML_TYPE_Q8_0,&wg[e*F*N],b,0,F,N,nullptr);q8->to_float(b,&wg[e*F*N],F*N);
+   ggml_quantize_chunk(GGML_TYPE_Q8_0,&wu[e*F*N],b+L.up_off,0,F,N,nullptr);q8->to_float(b+L.up_off,&wu[e*F*N],F*N);
+   ggml_quantize_chunk(GGML_TYPE_Q8_0,&wd[e*N*F],b+L.down_off,0,N,F,nullptr);q8->to_float(b+L.down_off,&wd[e*N*F],N*F);}
+  // x and h are read in Q8_1 (32 values to an fp16 scale): the reference rounds them the same way
+  auto q8_1=[](std::vector<double>& v){for(size_t b=0;b<v.size();b+=32){double m=0;for(int j=0;j<32;++j)m=std::max(m,std::abs(v[b+j]));
+   const double d=ggml_fp16_to_fp32(ggml_fp32_to_fp16(float(m/127)));for(int j=0;j<32;++j)v[b+j]=d?std::nearbyint(v[b+j]/d)*d:0;}};
+  std::vector<double> xr(x.begin(),x.end());q8_1(xr);std::vector<float> ref(N*E);
+  for(int e=0;e<E;++e){std::vector<double> hh(F);
+   for(int i=0;i<F;++i){double gs=0,us=0;for(int k=0;k<N;++k){gs+=wg[(e*F+i)*N+k]*xr[k];us+=wu[(e*F+i)*N+k]*xr[k];}hh[i]=gs/(1+std::exp(-gs))*us;}
+   q8_1(hh);
+   for(int j=0;j<N;++j){double y=0;for(int i=0;i<F;++i)y+=wd[(e*N+j)*F+i]*hh[i];ref[e*N+j]=float(y);}}
+  Buffer dblob(blob.size()),dx(x),xq(K::native_q8_1_bytes(N,1)),scr(K::native_expert_scratch_bytes(E,F)),dout(ref.size()*4),
+         tab(8*E),bounds(4*(E+1)),count(4),dst(4*E),tok(4*E);
+  dblob.put(blob.data(),blob.size());
+  unsigned long long ptr[E];for(int e=0;e<E;++e)ptr[e]=(unsigned long long)(uintptr_t)(dblob.as<uint8_t>()+e*L.bytes);
+  int32_t bnd[E+1]={0,1,2},cnt=E,dsts[E]={0,1},toks[E]={0,0};
+  tab.put(ptr,sizeof ptr);bounds.put(bnd,sizeof bnd);count.put(&cnt,4);dst.put(dsts,sizeof dsts);tok.put(toks,sizeof toks);
+  K::native_quantize_q8_1(dx.as(),xq.as(),N,1,s);
+  K::native_expert_grouped(L,tab.as<unsigned long long>(),bounds.as<int32_t>(),count.as<int32_t>(),dst.as<int32_t>(),
+                           tok.as<int32_t>(),E,E,xq.as(),scr.as(),dout.as(),s);
+  ck(g::stream_synchronize(s));auto got=dout.read(ref.size());float most=0,big=0;
+  for(size_t i=0;i<ref.size();++i){most=std::max(most,std::abs(got[i]-ref[i]));big=std::max(big,std::abs(ref[i]));}
+  // gate and up agree to ~5e-4; an h value that rounds to the next Q8_1 step on one side moves its outputs by about 0.4% of
+  // the largest (measured on an M5 Ultra: 0.6% at most).  An expert that adds nothing is off by 100%.
+  const bool ok=most<=.02f*big;bad+=!ok;
+  std::printf("q36 grouped Q8_0 experts: max error %g of %g %s\n",most,big,ok?"ok":"FAILED");}
  ck(g::stream_destroy(s));return bad?1:0;
 }

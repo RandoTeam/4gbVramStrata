@@ -145,19 +145,46 @@ static void activation(const float* gate, const float* up, float* out, int n, in
     element(a,stream);
 }
 void swiglu_clamp(const float* g,const float* u,float* o,int n,float limit,void* s) { activation(g,u,o,n,1,limit,5,s); }
-// NVFP4 has no Metal kernels, so no layer here has expert scales
-static void no_scales(const ExpertScales* sc) {
-    if (sc && (sc->gate || sc->up)) throw std::runtime_error("Metal: NVFP4 expert scales are not supported");
+// NVFP4 experts' global scales (ExpertScales) on their rows: basic.metal's fourgbvram_expert_rows, its `kind`
+namespace {
+struct ExpertArgs {
+    const void* p[5];   // gu, out, gate, up, ids
+    int32_t e[32];
+    int n, rows, kind;
+    float limit;
+};
+static_assert(sizeof(ExpertArgs) == 184);
+bool scaled(const ExpertScales* sc) { return sc && (sc->gate || sc->up); }
+void expert_rows(const float* gu, float* out, int n, int rows, const ExpertScales& sc, int kind, float limit, void* stream) {
+    if (n <= 0 || rows <= 0) return;
+    if ((sc.gate || sc.up) && !sc.ids && rows > 32) throw std::invalid_argument("ExpertScales without ids: 32 rows at most");
+    ExpertArgs a{{gu, out, sc.gate, sc.up, sc.ids}, {}, n, rows, kind, limit};
+    std::copy(std::begin(sc.e), std::end(sc.e), a.e);
+    for (auto& ptr : a.p) if (ptr) {
+        void* mapped = nullptr;
+        if (gpu::host_device_pointer_raw(&mapped, const_cast<void*>(ptr)) != gpu::kSuccess)
+            throw std::runtime_error("unmapped expert row or scale");
+        ptr = mapped;
+    }
+    const uint64_t count = uint64_t(rows) * n * (kind ? 1 : 2);
+    launch("fourgbvram_expert_rows", a, stream, {uint32_t((count + 255) / 256), 1, 1}, 256, {a.p, 5, true});
+}
+}
+void scale_expert_rows(const float* gu, float* out, int n, int rows, const ExpertScales* sc, void* s) {
+    if (scaled(sc) || out != gu) expert_rows(gu, out, n, rows, scaled(sc) ? *sc : ExpertScales{}, 0, 0, s);
 }
 void swiglu_clamp_rows(const float* gu,float* o,int n,int rows,float limit,void* s,const ExpertScales* sc) {
-    no_scales(sc); activation(gu,nullptr,o,n,rows,limit,5,s);
+    if (scaled(sc)) expert_rows(gu,o,n,rows,*sc,5,limit,s);
+    else activation(gu,nullptr,o,n,rows,limit,5,s);
 }
 void geglu(const float* g,const float* u,float* o,int n,void* s) { activation(g,u,o,n,1,0,6,s); }
 void geglu_rows(const float* gu,float* o,int n,int rows,void* s,const ExpertScales* sc) {
-    no_scales(sc); activation(gu,nullptr,o,n,rows,0,6,s);
+    if (scaled(sc)) expert_rows(gu,o,n,rows,*sc,6,0,s);
+    else activation(gu,nullptr,o,n,rows,0,6,s);
 }
-void expert_weights(float*,const float*,const int32_t*,int,void*) {
-    throw std::runtime_error("Metal: NVFP4 expert scales are not supported");
+void expert_weights(float* w,const float* scale,const int32_t* ids,int rows,void* s) {
+    ExpertScales sc; sc.gate = scale; sc.ids = ids;
+    expert_rows(nullptr,w,1,rows,sc,1,0,s);
 }
 void moe_sum(const float* x,const float* w,float* acc,int n,int used,int rows,void* s) {
     BasicArgs a{{x,w,acc}}; a.n=n; a.stride=used; a.count=uint64_t(n)*rows; a.kind=7; element(a,s);
@@ -185,5 +212,9 @@ void add_scaled(const ScaledRows& rows,int count,int n,void* s) {
 void likeliest(const float* logits,int n,Likeliest* out,void* s) {
     BasicArgs a{{logits,out}}; a.n=n;
     launch("fourgbvram_likeliest",a,s,{1,1,1},uint32_t(std::clamp((n+31)/32*32,32,1024)));
+}
+// a batch step's few rows, one fourgbvram_likeliest each
+void likeliest_rows(const float* logits,int n,int rows,Likeliest* out,void* s) {
+    for(int r=0;r<rows;++r) likeliest(logits+size_t(r)*n,n,out+r,s);
 }
 } // namespace strata::fourgbvram

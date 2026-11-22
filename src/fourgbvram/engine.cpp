@@ -5438,7 +5438,7 @@ void Engine::bell_serve() {
         const cudaError_t q = cudaEventQuery((cudaEvent_t) ev_bell_);
         if (q == cudaSuccess) return;
         if (q != cudaErrorNotReady) ck(q, "the doorbell");
-        _mm_pause();
+        spin_pause();
     }
 #endif
 }

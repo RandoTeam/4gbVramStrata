@@ -182,7 +182,7 @@ size_t rows_differ(const float* a, const float* b, size_t n) {
 
 unsigned core_type() {   // CPUID 1Ah of the calling thread: 40h performance core, 20h E-core, 0 not reported
     unsigned r[4] = {0, 0, 0, 0};
-#if defined(_MSC_VER)
+#if defined(_WIN32)
     int x[4];
     __cpuid(x, 0);
     if ((unsigned) x[0] < 0x1A) return 0;

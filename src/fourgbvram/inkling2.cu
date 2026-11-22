@@ -6,6 +6,7 @@
 // q81_div(): a block's scale divided as native_mmvq.cu's --use_fast_math division does it (q8_1_finite.hpp)
 #define STRATA_Q81_FASTMATH_DIV 1
 #include "inkling2_kernels.hpp"
+#include "strata/kernels/dp4a.hpp"
 #include "strata/kernels/pdl.hpp"
 #include "strata/kernels/q8_1_finite.hpp"
 
@@ -52,6 +53,41 @@ __device__ __forceinline__ float warp_max(float x) {
 #pragma unroll
     for (int o = WARP / 2; o > 0; o >>= 1) x = fmaxf(x, __shfl_xor_sync(0xffffffff, x, o, WARP));
     return x;
+}
+
+template <typename T>
+__device__ __forceinline__ T ink_ldcs(const T* p) {
+#if defined(__HIPCC__)
+    if constexpr (std::is_same_v<T, uint4>) {
+        const auto* u = reinterpret_cast<const unsigned*>(p);
+        return make_uint4(__builtin_nontemporal_load(u), __builtin_nontemporal_load(u + 1),
+                          __builtin_nontemporal_load(u + 2), __builtin_nontemporal_load(u + 3));
+    } else {
+        return __builtin_nontemporal_load(p);
+    }
+#else
+    return __ldcs(p);
+#endif
+}
+
+template <typename T>
+__device__ __forceinline__ T ink_ldcg(const T* p) {
+#if defined(__HIPCC__)
+    static_assert(sizeof(T) == 4 || sizeof(T) == 8, "ink_ldcg: 4 or 8 bytes");
+    if constexpr (sizeof(T) == 4) {
+        const unsigned u = __hip_atomic_load(reinterpret_cast<const unsigned*>(p), __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
+        T r;
+        __builtin_memcpy(&r, &u, 4);
+        return r;
+    } else {
+        const unsigned long long u = __hip_atomic_load(reinterpret_cast<const unsigned long long*>(p), __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
+        T r;
+        __builtin_memcpy(&r, &u, 8);
+        return r;
+    }
+#else
+    return __ldcg(p);
+#endif
 }
 
 // A controller's weight: F32, or BF16 (--loop-bf16) widened as bf16_to_f32() does it.
@@ -2246,10 +2282,10 @@ __device__ __forceinline__ float scr_acc(const uint4 (&w)[NW], const uint32_t (&
             for (int c = 0; c < 2; ++c) {
                 const uint32_t v = ww[2 * hh + c];
                 const int4 x0 = *(const int4*) &xi[g * 8 + c * 4];
-                P = __dp4a((int) (v & 0x03030303u), x0.x, P);
-                P = __dp4a((int) ((v >> 2) & 0x03030303u), x0.y, P);
-                P = __dp4a((int) ((v >> 4) & 0x03030303u), x0.z, P);
-                P = __dp4a((int) ((v >> 6) & 0x03030303u), x0.w, P);
+                P = STRATA_DP4A((int) (v & 0x03030303u), x0.x, P);
+                P = STRATA_DP4A((int) ((v >> 2) & 0x03030303u), x0.y, P);
+                P = STRATA_DP4A((int) ((v >> 4) & 0x03030303u), x0.z, P);
+                P = STRATA_DP4A((int) ((v >> 6) & 0x03030303u), x0.w, P);
             }
             const float sg = __half2float(__ushort_as_half((unsigned short) (hh ? (s[j] >> 16) : (s[j] & 0xffff))));
             acc += sg * (xdd[g] * (float) P - 1.5f * xs[g]);
@@ -2265,7 +2301,7 @@ __device__ __forceinline__ void scr_x(const QB* x, int nb, int* xi, float* xs, f
         const int* q = (const int*) x[b].qs;
         int sum = 0;
 #pragma unroll
-        for (int i = 0; i < 8; ++i) sum = __dp4a(0x01010101, q[i], sum);
+        for (int i = 0; i < 8; ++i) sum = STRATA_DP4A(0x01010101, q[i], sum);
         const float d8 = __low2float(x[b].ds);
         xdd[b] = d8;
         xs[b] = d8 * (float) sum;
@@ -2292,8 +2328,8 @@ __global__ void __launch_bounds__(128) scr_base_kernel(const uint4* __restrict__
         uint32_t s[NW];
 #pragma unroll
         for (int j = 0; j < NW; ++j) {
-            w[j] = __ldcs(wq + base + (size_t) j * 32);
-            s[j] = __ldcs(sc + base + (size_t) j * 32);
+            w[j] = ink_ldcs(wq + base + (size_t) j * 32);
+            s[j] = ink_ldcs(sc + base + (size_t) j * 32);
         }
         __syncthreads();   // the rows are in, and red is free again
 #pragma unroll
@@ -2326,8 +2362,8 @@ __global__ void __launch_bounds__(32 * kScrTilesPerBlock)
 #pragma unroll
     for (int j = 0; j < kNw4; ++j) {
         const size_t at = ((size_t) (live ? tile : 0) * kNw4 + j) * 32 + lane;
-        w[j] = __ldcs(wq + at);
-        s[j] = __ldcs(sc + at);
+        w[j] = ink_ldcs(wq + at);
+        s[j] = ink_ldcs(sc + at);
     }
     const float fb = live ? __ldg(fold_bp + row) : 0.0f;
     scr_x(lat, NB, xi, xs, xdd, tid, 32 * kScrTilesPerBlock);
@@ -2380,7 +2416,7 @@ __device__ unsigned long long scr_kth(ScrFinal& f, int nc, const float2* cand, f
         __syncthreads();
         const unsigned long long want = f.want;
         for (int i = tid; i < nc; i += 512) {
-            const float2 c = __ldcg(&cand[i]);
+            const float2 c = ink_ldcg(&cand[i]);
             if (!(c.x > -INFINITY && c.x >= m - kScrDelta)) continue;
             const unsigned long long k = scr_key(c);
             if ((k & mask) == want) atomicAdd(&f.hist[(int) ((k >> shift) & 255u)], 1);
@@ -2415,7 +2451,7 @@ __device__ unsigned long long scr_kth(ScrFinal& f, int nc, const float2* cand, f
 __device__ int scr_collect(ScrFinal& f, int n_tiles, const float2* cand, const float2* part) {
     const int tid = threadIdx.x, lane = tid & 31, warp = tid >> 5;
     float m = -INFINITY;
-    for (int t = tid; t < n_tiles; t += 512) m = fmaxf(m, __ldcg(&part[t].x));
+    for (int t = tid; t < n_tiles; t += 512) m = fmaxf(m, ink_ldcg(&part[t].x));
     m = warp_max(m);
     if (lane == 0) f.wmax[warp] = m;
     __syncthreads();
@@ -2423,10 +2459,10 @@ __device__ int scr_collect(ScrFinal& f, int n_tiles, const float2* cand, const f
     for (int w = 1; w < 16; ++w) m = fmaxf(m, f.wmax[w]);
     if (m == -INFINITY) return 0;
     for (int t = tid; t < n_tiles; t += 512) {
-        const float tm = __ldcg(&part[t].x);
+        const float tm = ink_ldcg(&part[t].x);
         if (!(tm > -INFINITY && tm >= m - kScrDelta)) continue;
         for (int k = 0; k < kScrPer; ++k) {
-            const float2 c = __ldcg(&cand[t * kScrPer + k]);
+            const float2 c = ink_ldcg(&cand[t * kScrPer + k]);
             if (c.x > -INFINITY && c.x >= m - kScrDelta) {
                 const int p = atomicAdd(&f.cnt, 1);
                 if (p < kScrMaxCand) f.list[p] = __float_as_int(c.y), f.lp[p] = c.x;
@@ -2441,7 +2477,7 @@ __device__ int scr_collect(ScrFinal& f, int n_tiles, const float2* cand, const f
         if (tid == 0) f.cnt = 0;
         __syncthreads();
         for (int i = tid; i < nc; i += 512) {
-            const float2 c = __ldcg(&cand[i]);
+            const float2 c = ink_ldcg(&cand[i]);
             if (c.x > -INFINITY && c.x >= m - kScrDelta && scr_key(c) >= kth) {
                 const int p = atomicAdd(&f.cnt, 1);
                 if (p < kScrMaxCand) f.list[p] = __float_as_int(c.y), f.lp[p] = c.x;
@@ -2473,7 +2509,7 @@ __device__ __forceinline__ float scr_dot(const uint8_t* w, const QB* x, int nb, 
         const int* xq = (const int*) x[b].qs;
         const int w0 = (int) q16[2 * k] | ((int) q16[2 * k + 1] << 16);
         const int w1 = (int) q16[2 * k + 2] | ((int) q16[2 * k + 3] << 16);
-        const int sumi = __dp4a(w1, xq[k + 1], __dp4a(w0, xq[k], 0));
+        const int sumi = STRATA_DP4A(w1, xq[k + 1], STRATA_DP4A(w0, xq[k], 0));
         s += __half2float(*(const __half*) blk) * __low2float(x[b].ds) * (float) sumi;
     }
     return warp_sum(s);
@@ -2524,7 +2560,7 @@ __global__ void __launch_bounds__(512) scr_final_kernel(DsScreen h, const QB* xh
     const int bi = f.cnt;
     float sum = 0.0f;
     for (int t = tid; t < n_tiles; t += 512) {
-        const float2 p = __ldcg(&part[t]);
+        const float2 p = ink_ldcg(&part[t]);
         if (p.y > 0.0f) sum += p.y * __expf(p.x - bv);
     }
     for (int c = tid; c < n; c += 512) sum += __expf(f.ex[c] - bv) - __expf(f.lp[c] - bv);
