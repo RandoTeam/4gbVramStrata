@@ -107,7 +107,7 @@ constexpr int kMaxStagedTiles = 8;   // the most size classes STRATA_FOURGBVRAM_
 // memory-management API has no host location at all (hipMemLocationTypeDevice is the only one it defines), so there is
 // no sibling call to make, and a HIP card keeps its cache and gives VRAM back from it as it always did.  Named once,
 // here, so the three places that branch on it cannot drift.
-#if defined(STRATA_USE_HIP)
+#if defined(STRATA_USE_HIP) || defined(STRATA_GPU_METAL)
 constexpr bool kHostKvFallback = false;
 #else
 constexpr bool kHostKvFallback = true;
@@ -1047,8 +1047,8 @@ void Engine::vmm_map(Mapped& m, size_t bytes, size_t piece, const char* what) {
     // the only one in the API), so there is no sibling call to make.  A HIP card loses this fallback and with it the
     // case that matters most here - a 4 GB card of either vendor - which the HIP job in .github/workflows/backends.yml
     // is the first place to say out loud.  What HIP still has is the `--vram-pool` path and the reserve.
-#if !defined(STRATA_USE_HIP)
-    CUmemAllocationProp host_prop = {};   // kHostKvFallback: absent on HIP, which has no host location
+#if !defined(STRATA_USE_HIP) && !defined(STRATA_GPU_METAL)
+    CUmemAllocationProp host_prop = {};   // kHostKvFallback: absent on HIP/Metal, which have no host location
     host_prop.type = CU_MEM_ALLOCATION_TYPE_PINNED;
     host_prop.location.type = CU_MEM_LOCATION_TYPE_HOST;
 #endif
@@ -1074,7 +1074,11 @@ void Engine::vmm_map(Mapped& m, size_t bytes, size_t piece, const char* what) {
             throw std::runtime_error("no VRAM for " + std::string(what) + " (" + std::to_string(n >> 20) +
                                      " MiB more)");
         } else {
+#if defined(STRATA_GPU_METAL)
+            CUresult res = CUDA_ERROR_NOT_SUPPORTED;
+#else
             CUresult res = CUDA_ERROR_OUT_OF_MEMORY;
+#endif
             bool try_device = true;
             if (is_kv) {
                 size_t free_b = 0, total_b = 0;
@@ -1084,9 +1088,9 @@ void Engine::vmm_map(Mapped& m, size_t bytes, size_t piece, const char* what) {
                 }
             }
             if (try_device) res = cuMemCreate(&h, n, &prop, 0);
-#if !defined(STRATA_USE_HIP)
+#if !defined(STRATA_USE_HIP) && !defined(STRATA_GPU_METAL)
             // If device allocation was skipped or failed, and this is KV cache, fall back to Host RAM (see the
-            // CU_MEM_LOCATION_TYPE_HOST note above: HIP has no such location, so it skips this and says why).
+            // CU_MEM_LOCATION_TYPE_HOST note above: HIP/Metal have no such location, so they skip this).
             if (res != CUDA_SUCCESS && is_kv && kHostKvFallback) {
                 res = cuMemCreate(&h, n, &host_prop, 0);
                 host = res == CUDA_SUCCESS;
