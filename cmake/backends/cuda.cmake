@@ -161,7 +161,7 @@ macro(strata_cuda_prompt_tests)
       # gets 600 s (--tool-timeout), under the test's own limit: a slow cuobjdump ends as a named NOT RUN, not as a test killed with no line.
       find_package(Python3 QUIET COMPONENTS Interpreter)
       if(Python3_Interpreter_FOUND)
-        add_test(NAME no_mmq_symbols COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/../tools/check_no_mmq.py --tool-timeout 600
+        add_test(NAME no_mmq_symbols COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/check_no_mmq.py --tool-timeout 600
                  --cuobjdump ${CUDAToolkit_BIN_DIR}/cuobjdump${CMAKE_EXECUTABLE_SUFFIX} $<TARGET_FILE:strata> $<TARGET_FILE:strata_pf_own> $<TARGET_FILE:strata_pf_fp4>)
         set_tests_properties(no_mmq_symbols PROPERTIES TIMEOUT 2700)
       endif()
@@ -303,12 +303,12 @@ if(STRATA_ENABLE_CUDA AND STRATA_BUILD_TESTS AND NOT STRATA_ENABLE_HIP AND NOT S
         list(APPEND _strata_spill_libs $<TARGET_FILE:${_t}>)
       endif()
     endforeach()
-    add_test(NAME cuda_spill_guard COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/../tools/check_cuda_spills.py
+    add_test(NAME cuda_spill_guard COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/check_cuda_spills.py
              --cuobjdump ${CUDAToolkit_BIN_DIR}/cuobjdump${CMAKE_EXECUTABLE_SUFFIX} ${_strata_spill_libs})
     set_tests_properties(cuda_spill_guard PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 600)
     if(NOT WIN32)   # its stand-in demanglers are sh scripts
       add_test(NAME check_cuda_spills_unit COMMAND ${Python3_EXECUTABLE} -m unittest tools.test_check_cuda_spills
-               WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/..)   # the repository root: tools/ left engine/ in the 0.2.16 layout move
+               WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
     endif()
   else()
     message(STATUS "strata: no python3 - the cuda_spill_guard test is NOT registered")

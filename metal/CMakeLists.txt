@@ -89,8 +89,8 @@ if(EXISTS "${STRATA_FORK_GGML_SRC}/ggml-quants.c")
   target_sources(tqp_parity PRIVATE ${TQP_REF})
 else()
   # no fork checkout: the in-repo copy of the same decoder (ref/tqp/tqp_ref_c.c, verbatim from the fork)
-  set_source_files_properties(${STRATA_ROOT}/../terminal/ref/tqp/tqp_ref_c.c PROPERTIES COMPILE_DEFINITIONS TQP_REF_LIB=1)
-  target_sources(tqp_parity PRIVATE ${STRATA_ROOT}/../terminal/ref/tqp/tqp_ref_c.c)
+  set_source_files_properties(${STRATA_ROOT}/ref/tqp/tqp_ref_c.c PROPERTIES COMPILE_DEFINITIONS TQP_REF_LIB=1)
+  target_sources(tqp_parity PRIVATE ${STRATA_ROOT}/ref/tqp/tqp_ref_c.c)
 endif()
 
 find_package(Python3 COMPONENTS Interpreter QUIET)
@@ -246,7 +246,7 @@ target_include_directories(strata_metal_kernels PRIVATE src ${STRATA_ROOT}/third
 target_compile_definitions(strata_metal_kernels PRIVATE
   STRATA_GGML_COMMON_DEFAULT="${GGML_COMMON}" STRATA_METAL_KERNELS_DEFAULT="${CMAKE_CURRENT_SOURCE_DIR}/kernels"
   STRATA_METAL_ENGINE_KERNELS_DEFAULT="${CMAKE_CURRENT_SOURCE_DIR}/src/engine/msl"
-  STRATA_METAL_DATA_DEFAULT="${STRATA_ROOT}/../terminal/data")
+  STRATA_METAL_DATA_DEFAULT="${STRATA_ROOT}/data")
 target_link_libraries(strata_metal_kernels PUBLIC strata_metal_host mtl_rt)
 
 add_executable(strata ${S}/program/generate.cpp)

@@ -6,6 +6,7 @@ install removing a stale strata_kq library.
 """
 from __future__ import annotations
 
+import re
 import sys
 import tempfile
 import unittest
@@ -20,9 +21,9 @@ import setup  # noqa: E402
 class FamilyOrder(unittest.TestCase):
     def test_the_menu_order_on_nvidia(self):
         fams = setup.menu_families(False) + list(setup.OWN_PATH_FAMILIES)
-        self.assertEqual(fams, ["qwen", "swift", "coder", "unsloth", "nvfp4", "glm", "deepseek", "lfm25", "flint",
-                                "kolibri", "qwen36", "clover", "ornith", "gemma4", "tiel", "minicpmv", "ornith122",
-                                "qwen36-strata"])
+        self.assertEqual(fams, ["qwen", "swift", "coder", "unsloth", "nvfp4", "glm", "deepseek", "lfm25", "inkling",
+                                "flint", "kolibri", "groot", "qwen36", "clover", "ornith", "gemma4", "tiel", "minicpmv",
+                                "ornith122", "qwen36-strata"])
 
     def test_the_default_stays_the_first_family(self):
         self.assertEqual(setup.menu_families(False)[0], "qwen")
@@ -31,8 +32,9 @@ class FamilyOrder(unittest.TestCase):
     def test_nvfp4_is_not_listed_on_amd_and_intel(self):
         fams = setup.menu_families(True)
         self.assertNotIn("nvfp4", fams)
-        self.assertEqual(fams, ["qwen", "swift", "coder", "unsloth", "glm", "deepseek", "lfm25", "flint", "kolibri",
-                                "qwen36", "clover", "ornith", "gemma4", "tiel", "minicpmv", "ornith122"])
+        self.assertEqual(fams, ["qwen", "swift", "coder", "unsloth", "glm", "deepseek", "lfm25", "inkling", "flint",
+                                "kolibri", "groot", "qwen36", "clover", "ornith", "gemma4", "tiel", "minicpmv",
+                                "ornith122"])
         self.assertIn("nvfp4", setup.FAMILIES)             # --family nvfp4 still exists, and says why not
 
     def test_the_unsloth_line_names_the_alternative_on_amd_and_intel(self):
@@ -154,7 +156,12 @@ class EnginePlaceholders(unittest.TestCase):
         self.assertEqual(setup.MIN_ENGINE, (0, 1, 45))
         for m in ("UD-Q5_K_XL", "UD-Q6_K_XL", "NVFP4", "NVFP4-NVIDIA"):
             self.assertEqual(setup.MODELS[m]["engine"], (0, 1, 44), m)
-        self.assertIn("0.1.45", (ROOT / "CMakeLists.txt").read_text(encoding="utf-8").split("project(strata VERSION", 1)[1][:12])
+        text = (ROOT / "CMakeLists.txt").read_text(encoding="utf-8")
+        tree = tuple(int(n) for n in re.search(r"project\(strata VERSION ([0-9.]+)", text).group(1).split("."))
+        for what, minimum in [("MIN_ENGINE", setup.MIN_ENGINE), ("NVFP4_ENGINE", setup.NVFP4_ENGINE)] + [
+            (m, setup.MODELS[m]["engine"]) for m in setup.MODELS if "engine" in setup.MODELS[m]
+        ]:
+            self.assertLessEqual(tuple(minimum), tree[:len(minimum)], f"{what} {minimum} is ahead of the tree {tree}")
 
 
 class KqLibrary(unittest.TestCase):

@@ -86,6 +86,7 @@ HF_REVISIONS = {
     "unsloth/Qwen3.6-35B-A3B-MTP-GGUF": "5bc3e238d916f48a861bac2f8a1990a0e9b7e98d",                  # 2026-10-12
     "unsloth/DeepSeek-V4-Flash-0731-GGUF": "fbbb5b93fb787c21338159b0af3318bb3f4d9768",               # 2026-10-15
     "unsloth/LFM2.5-24B-A2B-GGUF": "aacc77834f6aa568c93b4dbd6d295059736be98c",                        # 2026-10-20
+    "unsloth/Inkling-2-Mini-GGUF": "ea0c79b2ecd73669e774c8519b79bfabfddbc027",                        # 2026-11-21
     "LiquidAI/LFM2.5-24B-A2B-GGUF": "0912d33141f77e10705345a6732bfd83f0252fdc",                       # 2026-10-15
     "unsloth/flint-GGUF": "20468edfc38ab43d6914cc88b08cbecb05d0fc62",                                 # 2026-10-21
     "openbmb/MiniCPM-V-4.7-35B-A3B-gguf": "77f6d8cb08b2b115ce27d2e2ac1359e126921689",                   # 2026-10-12
@@ -95,6 +96,7 @@ HF_REVISIONS = {
     "Diffuspace/Clover-35B-A3B-Preview": "4b0402b65e523d0183a14c431955438714cb16ff",                     # 2026-10-28
     "unsloth/Ornith-1.5-122B-GGUF": "3842d003341507c216295c6f28dfcd30349925c6",                          # 2026-10-20
     "ornith-ai/Ornith-1.5-122B": "dfa07bab90e90746ffbfc0b0cba3126eb9265de2",                              # 2026-10-20
+    "bartowski/GrootTeam_Groot-19B-A3B-261023-GGUF": "0025df0d03fb385344394f4e5afd73ce47da0680",
 }
 
 
@@ -568,6 +570,45 @@ FAMILIES = {
                          (21861204224, "abcb7e21e006eb4c826a2b75fb91c0804db7b20f908a61beeebdbdd07c88f41d"),
                          "LFM2.5-24B-A2B-Q8_0.gguf":
                          (25493733344, "97cd912b01124793a69ddebc309abbbad7ebb38ac2fb9c2bc55dfc1ad9d1809e")}},
+    # Inkling 2 Mini (llama.cpp's inkling2_loop): 24 layers of weights run as 48, the middle twelve three times, so a
+    # context token is the rows of the eight full-attention applications ("row_bytes"); the forty window ones keep
+    # rings.  The files are the repository's Mainline_Support ones, the layout llama.cpp runs: the repository names them
+    # .gguf_file ("remote_suffix") and its top-level files are another layout (architecture inkling2), which the
+    # engine refuses.  The engine keeps one sequence's state for it, so it answers one request at a time
+    # ("one_request": setup writes "parallel": 1).  "vram_beside_gb" is the peak VRAM measured on an RTX 5090 with no
+    # expert on the card, a 10,081-token prompt read 1,024 tokens at a time at a 32K context (2,916 MiB), plus the rows
+    # of the context's other tokens.
+    "inkling": {"title": "Inkling 2 Mini", "by": "Thinking Machines; quantized by Unsloth",
+                "about": "experimental, on the strata-fourgbvram engine: one NVIDIA card, Linux or Windows, or a Mac (beta), "
+                         "reads pictures; a 17.6 GB file, or 13.6 or 9.1 GB",
+                "hf": hf("unsloth/Inkling-2-Mini-GGUF") + "Mainline_Support/", "file": "Inkling-2-Mini-{q}.gguf",
+                "remote_suffix": "_file", "shards": 1,
+                "tag": "inkling-", "name": "inkling-2-mini", "engine": "fourgbvram", "vision": True, "experimental": True,
+                "windows": True, "ran_on_gb": 8, "row_bytes": 32768, "one_request": True, "kv": "fp8",
+                "mmproj_hf": hf("unsloth/Inkling-2-Mini-GGUF"), "mmproj": "mmproj-F16.gguf", "mac_vision_cpu": True,
+                "mac_measured": ("UD-Q3_K_XL", "UD-Q2_K_XL"),
+                "vision_gb": 0.7, "vision_vram_gb": 1.3,
+                # UD-Q3_K_XL on the RTX 4070 Laptop (8 GB), the README's benchmark, medians of 3 rounds: 43.7 -> 55.8
+                # tokens/s written in the short chat, 439 -> 466 read and 33.6 -> 41.9 written after the long prompt;
+                # the same most likely token as without them at 96.7% of 1,280 steps, the default run again at 98.3%
+                "small_card_args": ["--attn-requant", "q5_0", "--loop-bf16", "--tail-skip", "4", "--expert-swaps", "0"],
+                "models": {"UD-Q4_K_XL": {"about": "4-bit experts (NVFP4, Unsloth Dynamic), 8-bit where they write",
+                                          "download_gb": 17.6, "ram_gb": 21, "arena_gb": 15.797846016,
+                                          "vram_beside_gb": 3.7},
+                           "UD-Q3_K_XL": {"about": "3-bit i-quant and 4-bit experts mixed",
+                                          "download_gb": 13.6, "ram_gb": 17, "arena_gb": 12.198739968,
+                                          "vram_beside_gb": 3.6},
+                           "UD-Q2_K_XL": {"about": "1- to 2-bit experts: the smallest",
+                                          "download_gb": 9.1, "ram_gb": 13, "arena_gb": 7.888306176,
+                                          "vram_beside_gb": 3.5}},
+                "sha256": {"Inkling-2-Mini-UD-Q4_K_XL.gguf":
+                           (17629760736, "e64276656f072e9b2197a61723667cbdb71da66a716ffd966e572c21088f3cd3"),
+                           "Inkling-2-Mini-UD-Q3_K_XL.gguf":
+                           (13631779296, "e2d03e8c92ac21cff0e3309b95f40dfd27d1825184f0d2bc09db249797273639"),
+                           "Inkling-2-Mini-UD-Q2_K_XL.gguf":
+                           (9138716608, "b42841608ea380ddde5a3f1125081357128a3c71b80d006246de4e31292fc6c1"),
+                           "mmproj-F16.gguf":
+                           (639348160, "3bff75ffeb2d6e0371ba7bd42e30d26a7d98aea681fa44b03b5a20891cfa2c5f")}},
     # Flint (llama.cpp's flint): no draft block and no image encoder.  Its window layers' caches are rings, so a context
     # token is the full layers' rows only.  UD-Q4_K_XL is taken unasked only with 15 GB of RAM past its estimate,
     # about 40 GB beside an 8 GB card: on the 32 GB laptop its file did not stay in RAM beside the desktop's programs,
@@ -630,6 +671,38 @@ FAMILIES = {
                            (28634017760, "de2fac5230621125f0309046175a17f8cc554ee2fc2a199c0e6528f2e4aadd79"),
                            "Kolibri-1-Q3_K_M.gguf":
                            (37523996640, "b797de9cebb5f8b6e12e32a57c76776c83c2c077e6804fa4835aa6ab5e9e79da")}},
+    "groot": {"title": "Groot 19B-A3B 261023", "by": "GrootTeam; quantized by bartowski",
+              "about": "experimental qwen35moe on strata-fourgbvram; 3 sizes, 12.5 to 20.2 GB; "
+                       "Q4_K_M text measured on an 8 GB RTX 5060",
+              "hf": hf("bartowski/GrootTeam_Groot-19B-A3B-261023-GGUF"),
+              "file": "GrootTeam_Groot-19B-A3B-261023-{q}.gguf",
+              "shards": 1, "tag": "groot-", "name": "groot-19b-a3b-261023", "engine": "fourgbvram",
+              "pack_tag": "groot-bartowski-",
+              "vision": True, "experimental": True, "windows": True, "ran_on_gb": 8, "row_bytes": 22528,
+              "batch_gb": 0.5, "laptop_tps": {32768: "95-97"},
+              "mmproj_hf": hf("bartowski/GrootTeam_Groot-19B-A3B-261023-GGUF"),
+              "mmproj": "mmproj-GrootTeam_Groot-19B-A3B-261023-bf16.gguf", "vision_gb": 0.9, "vision_vram_gb": 1.6,
+              "models": {"Q4_K_M": {"about": "4-bit mixed precision; the default, with embedded MTP; text measured "
+                                            "on an 8 GB RTX 5060 (peak 7.05 GiB VRAM, 21.8 GiB RAM)",
+                                    "download_gb": 12.5, "ram_gb": 17, "arena_gb": 9.937354752,
+                                    "vram_beside_gb": 4.9,
+                                    "memory_basis": "a conservative budget over the 7.05 GiB peak measured on an "
+                                                    "8 GB RTX 5060; RAM beside is a fit estimate",
+                                    "draft": "own"},
+                         "Q6_K": {"about": "6-bit K-quant, with embedded MTP",
+                                  "download_gb": 16.8, "ram_gb": 21, "arena_gb": 14.121172992,
+                                  "vram_beside_gb": 5.0, "memory_basis": "estimated, not measured", "draft": "own"},
+                         "Q8_0": {"about": "8-bit throughout, the largest and highest quality, including MTP",
+                                  "download_gb": 20.2, "ram_gb": 24, "arena_gb": 17.540579328,
+                                  "vram_beside_gb": 5.0, "memory_basis": "estimated, not measured", "draft": "own"}},
+              "sha256": {"GrootTeam_Groot-19B-A3B-261023-Q4_K_M.gguf":
+                         (12484339584, "c941e12a231b40b8fb9f6ad7f6601878d72db39c2c62aefb185fbe5c7d0c2e29"),
+                         "GrootTeam_Groot-19B-A3B-261023-Q6_K.gguf":
+                         (16791324544, "f784a74600c6a2986006909330aed5eeb1b931893c84505077f2595ad8e861fc"),
+                         "GrootTeam_Groot-19B-A3B-261023-Q8_0.gguf":
+                         (20230129536, "7e414a5e4dbb5aa3074a69b36104b2c8cdc188432527956a6ed9c916906a1882"),
+                         "mmproj-GrootTeam_Groot-19B-A3B-261023-bf16.gguf":
+                         (902822208, "0140cef0473d63595a030c68b75b2c8d110bb623bb12ae5993c0cfdfb2d2b0a7")}},
     "qwen36": {"title": "Qwen3.6-35B-A3B", "by": "Qwen; quantized by Unsloth",
                "about": "on the strata-fourgbvram engine: one NVIDIA card, Linux or Windows; a 17 GB file, ~21 GB of RAM "
                         "beside an 8 GB card; a smaller and a larger size too",
@@ -2407,7 +2480,8 @@ def verify_sha256(s: Path, size: int, sha: str, own: bool = False) -> None:
 # general.architecture of each strata-fourgbvram family's GGUFs, the name Engine::open() (src/fourgbvram/engine.cpp) picks its
 # code by; the families not listed are qwen35moe
 FOURGBVRAM_GGUF_ARCHS = {"glm": ("glm5-next", "glm5next"), "deepseek": ("deepseek4",), "lfm25": ("lfm2moe",),
-                   "gemma4": ("gemma4",), "flint": ("flint",), "kolibri": ("kolibri1",), "clover": ("clover_moe",)}
+                   "gemma4": ("gemma4",), "flint": ("flint",), "kolibri": ("kolibri1",), "clover": ("clover_moe",),
+                   "inkling": ("inkling2_loop",)}
 
 
 def gguf_arch(s: Path) -> str:
@@ -6555,8 +6629,8 @@ def fourgbvram_verdict(d, ram, vram_gb, hip, windows=False) -> str:
 
 # --kv for a model of strata-fourgbvram (docs/Q8_KV.md): the formats its architecture's attention caches have beside
 # fp16, the default.  The other engine's own are STRATA_KV.
-FOURGBVRAM_KV = {"q8_0": ("qwen36", "ornith", "ornith122", "tiel", "minicpmv", "kolibri", "flint", "lfm25"),
-                 "int8": ("gemma4",), "int8k": ("gemma4",)}
+FOURGBVRAM_KV = {"q8_0": ("qwen36", "ornith", "ornith122", "tiel", "minicpmv", "kolibri", "flint", "lfm25", "clover", "groot"),
+                 "int8": ("gemma4",), "int8k": ("gemma4",), "fp8": ("inkling",)}
 STRATA_KV = ("int8", "q4_0", "k8v4")
 
 
@@ -7045,7 +7119,7 @@ def fourgbvram_setup(a, family, gpu, hip, cuda_tk, multi, ram, data, elsewhere, 
     # so 64K costs the expert cache what 32K in fp16 does, and the experts outside VRAM run on one thread a physical
     # core (rdna1_fourgbvram_args()).  Measured on a Radeon Pro 5500M (8 GB) beside an i9-9980HK: docs/RADEON_PRO_5500M.md.
     rdna1 = bool(hip) and gpu.get("arch") == "gfx1012"
-    if a.context:
+    if a.context is not None:
         ctx = a.context
         if not 16 <= ctx <= 1048576:
             fail(f"--context {ctx}: {title} takes 16 to 1048576 tokens")
@@ -7170,7 +7244,7 @@ def fourgbvram_setup(a, family, gpu, hip, cuda_tk, multi, ram, data, elsewhere, 
                 ok(f"{s.name} already downloaded")
                 continue
             rel = s.relative_to(models_dir).as_posix() if s.is_relative_to(models_dir) else s.name
-            download(d.get("hf", fam["hf"]) + rel, s)
+            download(d.get("hf", fam["hf"]) + rel + fam.get("remote_suffix", ""), s)
     check_shards(shards)
     # a size from another repository can ship a draft model or an image encoder of the family's file names
     sha = {**fam["sha256"], **d.get("sha256", {})}
@@ -7201,7 +7275,8 @@ def fourgbvram_setup(a, family, gpu, hip, cuda_tk, multi, ram, data, elsewhere, 
     ok("model file present")
 
     step(6, "preparing the model for 4gbVramStrata")
-    pack = find_in([data, *elsewhere], f"packs/{tag.lower()}") or data / "packs" / tag.lower()
+    pack_tag = fam.get("pack_tag", fam["tag"]) + custom_gguf_tag(_sg, model)
+    pack = find_in([data, *elsewhere], f"packs/{pack_tag.lower()}") or data / "packs" / pack_tag.lower()
     if not (pack / "tokenizer" / "vocab.json").exists():
         run([sys.executable, str(ROOT / "tools" / "strata_tokenizer.py"), "--gguf", str(gguf), "--out", str(pack)],
             env=dict(os.environ, STRATA_GGUF_PY=str(llama / "gguf-py")))   # writes <pack>/tokenizer/
@@ -7245,6 +7320,10 @@ def fourgbvram_setup(a, family, gpu, hip, cuda_tk, multi, ram, data, elsewhere, 
            "that much less)")
     if fam.get("tail_skip"):
         args += ["--tail-skip", str(fam["tail_skip"])]
+    if fam.get("small_card_args") and not multi and fourgbvram_held_gb(d, vram) < d["arena_gb"]:
+        args += fam["small_card_args"]
+        ok(f"this card holds part of {model}'s experts: {' '.join(fam['small_card_args'])} (fewer bytes a token, "
+           "and the answers move a little)")
     if fam.get("expert_swaps"):
         args += ["--expert-swaps", str(fam["expert_swaps"])]
     if fam.get("no_graphs"):
@@ -7312,11 +7391,18 @@ def fourgbvram_setup(a, family, gpu, hip, cuda_tk, multi, ram, data, elsewhere, 
                          "max_tokens": vt}
         if vision == "cpu":
             cfg["vision"]["threads"] = max(1, (os.cpu_count() or 8) // 2)
-    # requests at once: written only when given, else an earlier "parallel" is carried over (write_setup_config)
-    if a.parallel is not None:
-        cfg["parallel"] = a.parallel if a.parallel >= 2 else 1
-    for line in fourgbvram_parallel_note(a.parallel, d, vram):
-        (ok if a.parallel is not None else say)(line if a.parallel is not None else "  " + line)
+    # requests at once: written only when given, else an earlier "parallel" is carried over (write_setup_config).
+    # A family the engine answers one request at a time ("one_request") is written 1, whatever was asked or kept.
+    if fam.get("one_request"):
+        cfg["parallel"] = 1
+        if (a.parallel or 1) >= 2:
+            warn(f"--parallel {a.parallel}: {title} answers one request at a time on this engine; \"parallel\" is "
+                 "left at 1")
+    else:
+        if a.parallel is not None:
+            cfg["parallel"] = a.parallel if a.parallel >= 2 else 1
+        for line in fourgbvram_parallel_note(a.parallel, d, vram):
+            (ok if a.parallel is not None else say)(line if a.parallel is not None else "  " + line)
     fourgbvram_kv_whole(cfg)
     warm_start_into(cfg, a)
     write_setup_config(cfg_path, cfg, earlier)
@@ -7913,7 +7999,7 @@ def main() -> int:
     ap.add_argument("--rope-scale", type=float,
                     help="the extension factor (default: the final context over the trained 262144, at least 1 - "
                          "1.5 for 384K, 2 for 512K, 1 inside the trained range)")
-    ap.add_argument("--kv", choices=["int8", "q4_0", "k8v4", "fp16", "q8_0", "int8k"],
+    ap.add_argument("--kv", choices=["int8", "q4_0", "k8v4", "fp16", "q8_0", "int8k", "fp8"],
                     help="KV cache precision above 8K context: int8 (default), q4_0 (half the memory, a little less "
                          "precise) or k8v4 (hybrid: INT8 K + 4-bit V, 816 B/cell). For a model of strata-fourgbvram "
                          "(docs/Q8_KV.md): q8_0 (half the KV cache's VRAM: Qwen3.6, Ornith, Tiel Coder, MiniCPM-V, "

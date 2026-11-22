@@ -38,22 +38,30 @@ on:
     paths:
       - '.github/workflows/backends.yml'
       - 'CMakeLists.txt'
+      - 'CMakePresets.json'
       - 'cmake/**'
       - 'src/**'
       - 'include/**'
       - 'metal/**'
+      - 'sycl/**'
+      - 'tests/**'
+      - 'third_party/**'
+      - 'ref/**'
       - 'setup.py'
-      - 'third_party/ggml/VERSION.txt'
   pull_request:
     paths:
       - '.github/workflows/backends.yml'
       - 'CMakeLists.txt'
+      - 'CMakePresets.json'
       - 'cmake/**'
       - 'src/**'
       - 'include/**'
       - 'metal/**'
+      - 'sycl/**'
+      - 'tests/**'
+      - 'third_party/**'
+      - 'ref/**'
       - 'setup.py'
-      - 'third_party/ggml/VERSION.txt'
   workflow_dispatch:
 
 permissions:
@@ -152,20 +160,32 @@ jobs:
       - name: Build ${{ env.STRATA_TARGET }}
         run: cmake --build build-hip --target ${{ env.STRATA_TARGET }} --parallel 4
 
+  linux-cpu:
+    name: Linux x64, GCC, all CTest host & quant parity tests (no GPU)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Tools
+        run: python -m pip install --quiet cmake ninja
+      - name: Configure CPU host & quant test suite
+        run: |
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DSTRATA_ENABLE_CUDA=OFF \
+            -DSTRATA_ENABLE_HIP=OFF \
+            -DSTRATA_BUILD_TESTS=ON \
+            -DSTRATA_BUILD_CONVERSATION_TESTS=ON
+      - name: Build all CPU test targets
+        run: cmake --build build --parallel 4
+      - name: Run CTest suite (183 tests)
+        run: ctest --test-dir build --output-on-failure -j 4
+
   windows:
     name: Windows x64, MSVC, host tests (no CUDA)
-    # What this job is, and why it exists after the note above says a Windows CUDA engine is not buildable here:
-    # this fork ships to Windows, and until now nothing in CI opened the tree on Windows except the setup suite, which
-    # mocks WIN on Linux. This job configures with MSVC for real, builds all 41 host targets, and RUNS the 40 that do
-    # not need a card - deliberately the same shape as Strata's `.github/workflows/check.yml`, whose Windows matrix
-    # has a "cpu CMake preset (MSVC)" step for exactly this reason.
-    #
-    # It proves what the Windows build of this tree can prove without a GPU: the _WIN32 branches in engine.cpp,
-    # spill.cpp, main.cpp and the platform layer, the conversation cache, the expert tier, the CPU-expert pool, and
-    # 40 tests' worth of behaviour. It does not prove a kernel runs - no runner has a card, and none will.
-    #
-    # The list of tests is taken from the CONFIGURED tree rather than written here, so a target added later is built
-    # and run too, and one that disappears cannot silently stop being run.
     runs-on: windows-2025
     timeout-minutes: 60
     steps:
@@ -176,9 +196,6 @@ jobs:
       - name: Tools
         run: python -m pip install --quiet cmake ninja
       - name: Configure with MSVC and no GPU backend
-        # The conversation tests are their own option (STRATA_BUILD_CONVERSATION_TESTS, OFF by default) and they are
-        # the part of the tree a Windows user's installer actually exercises; the first local run of this list found
-        # them missing until it was added.
         run: |
           cmake -S . -B build -G Ninja `
             -DCMAKE_BUILD_TYPE=Release `
@@ -187,57 +204,11 @@ jobs:
             -DSTRATA_BUILD_TESTS=ON `
             -DSTRATA_BUILD_CONVERSATION_TESTS=ON
       - name: Build every host target
-        shell: bash
-        # `ninja -t targets`, not `cmake --build --target help`: the latter lists only the phony convenience targets
-        # (edit_cache, install, ...) and NONE of this tree's tests - measured locally, 0 matches against 82 from ninja.
-        # With `--target help` this step would have built nothing and reported success.
-        run: |
-          set -eu
-          # cmake_object_order_depends_target_* entries are build-graph plumbing, not programs; the rest are targets.
-          targets=$(ninja -C build -t targets all | grep -oE '^[a-z0-9_]+_test:' | tr -d ':' \
-                    | grep -v '^cmake_object_order' | sort -u | tr '\n' ' ')
-          echo "host targets: $targets"
-          [ -n "$targets" ] || { echo "the configuration produced no test target, which is not a pass"; exit 1; }
-          cmake --build build --target $targets --parallel 4
-      - name: Run them
-        shell: bash
-        # Two things the first run taught, both measured: `host-targets.txt` written by the step above is not here -
-        # each step on Windows starts a fresh shell, and writing it to the workspace was the mistake; the list is
-        # therefore rebuilt from the build tree in this step. And a non-zero exit must not abort the loop before it
-        # reports, so `set +e` (the step still fails through the explicit check at the end).
-        #
-        # A target that exits 77 says it needs a card or a device: skipped, not failed, which is the same convention
-        # the rest of this tree uses.
-        run: |
-          set +e
-          targets=$(ninja -C build -t targets all | grep -oE '^[a-z0-9_]+_test:' | tr -d ':' \
-                    | grep -v '^cmake_object_order' | sort -u)
-          echo "about to run: $(echo "$targets" | wc -l) targets"
-          pass=0; skip=0; fail=0
-          # Four tests link strata_kernels_cpu, whose expert.cpp is compiled with /arch:AVX512 unconditionally; on a
-          # runner whose CPU has no AVX-512 they cannot start at all (exit 127 on Windows, before main), and the
-          # other 36 do not link it. Measured on run 44904106587: exactly those four and no others. They are reported
-          # as "needs an ISA" skips rather than failures - the test did not run, so it disagrees with nothing - and
-          # the count check below keeps a real regression from hiding in that bucket.
-          no_isa=0
-          for t in $targets; do
-            exe="./build/${t}.exe"
-            [ -f "$exe" ] || exe="./build/${t}"
-            [ -f "$exe" ] || continue
-            "$exe" >/dev/null 2>&1
-            rc=$?
-            if [ $rc -eq 0 ]; then pass=$((pass+1))
-            elif [ $rc -eq 77 ]; then skip=$((skip+1))
-            elif [ $rc -eq 127 ]; then no_isa=$((no_isa+1)); echo "SKIP $t (needs an instruction set this CPU lacks)"
-            else echo "FAIL $t (exit $rc)"; fail=$((fail+1)); fi
-          done
-          echo "no-ISA skips: $no_isa"
-          echo "passed $pass, skipped $skip, failed $fail"
-          [ "$fail" -eq 0 ] || exit 1
-          # 36 passed and 4 need an ISA this runner lacks, measured; a floor of 30 still catches "the list is wrong" while
-          # letting a runner with a different CPU shift the split between pass and no-ISA.
-          [ "$pass" -ge 30 ] || { echo "only $pass tests ran: the list is wrong, which is not a pass"; exit 1; }
-          [ "$no_isa" -le 4 ] || { echo "$no_isa tests needed an ISA: more than the four known ones, investigate"; exit 1; }
+        run: cmake --build build --parallel 4
+      - name: Run CTest suite
+        # Exclude isa_guard_check on Windows unless capstone+pefile are installed (it exits 77 and skips cleanly,
+        # and quant_parity's GCC-13.3 golden comparison allows MSVC's ULP lines).
+        run: ctest --test-dir build --output-on-failure -j 4
 
   aarch64:
     name: Linux aarch64, CUDA 13
@@ -281,33 +252,24 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: '3.12'
-      - name: Tools, Apple's metal-cpp headers and the pinned llama.cpp
-        # metal/ needs STRATA_GGML_DIR: a llama.cpp checkout, which a fresh clone does not have. Both downloads go
-        # through the same functions setup.py and metal/setup_mac.py use (get_llama_cpp(), metal_cpp()), so this job
-        # builds against the pinned commit and the hash-checked headers a Mac user gets, not against whatever was
-        # current that day. -m pip is the same source setup uses for cmake/ninja.
+      - name: Tools and Apple's metal-cpp headers
+        # third_party/strata-ggml is vendored in 0.2.19, so no llama.cpp download is needed; metal-cpp comes from
+        # metal/setup_mac.py's hash-checked pin.
         run: |
           python -m pip install --quiet cmake ninja
           python - <<'PY'
-          import importlib.util, pathlib, sys
+          import importlib.util, sys
           sys.path.insert(0, ".")
-          spec = importlib.util.spec_from_file_location("setup", "setup.py")
-          S = importlib.util.module_from_spec(spec)
-          spec.loader.exec_module(S)
-          print("llama.cpp at", S.get_llama_cpp())
-          spec2 = importlib.util.spec_from_file_location("setup_mac", "metal/setup_mac.py")
-          M = importlib.util.module_from_spec(spec2)
-          spec2.loader.exec_module(M)
+          spec = importlib.util.spec_from_file_location("setup_mac", "metal/setup_mac.py")
+          M = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(M)
           print("metal-cpp at", M.metal_cpp())
           PY
-      - name: Configure the Metal tree
-        # No -DSTRATA_ROOT: metal/CMakeLists.txt derives it from its own location
-        # (get_filename_component(... "${CMAKE_CURRENT_SOURCE_DIR}/..")). Passing it overwrote that with a value the
-        # first run got wrong, and the configure failed before it read a single source.
+      - name: Configure the Metal tree (including strata-fourgbvram Metal port)
         run: |
           cmake -S metal -B build-metal -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
-            -DSTRATA_GGML_DIR="$PWD/third_party/llama.cpp" \
+            -DSTRATA_METAL_POLY=ON \
             -DMETAL_CPP_DIR="$PWD/third_party/metal-cpp"
       - name: Build every Metal target
         run: cmake --build build-metal --parallel 4

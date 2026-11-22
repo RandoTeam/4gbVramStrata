@@ -1927,7 +1927,8 @@ std::unique_ptr<Engine> Engine::open(const Options& o) {
     if (o.kv_format == KvFmt::kQ4_0 || o.kv_resident > 0)
         throw std::runtime_error("--kv q4_0 and --kv-resident have no Metal kernels yet");
 #endif
-    if (o.kv_format == KvFmt::kFp8 && name != "inkling2_loop")
+    const bool inkling = name == "inkling2_loop" || name == "inkling2";
+    if (o.kv_format == KvFmt::kFp8 && !inkling)
         throw std::runtime_error("--kv fp8 is Inkling 2's; this is a '" + name + "' model");
     // int8 and int8k are Gemma 4's: their readers are not the arithmetic q8_0's are, so a model takes one
     // family or the other rather than a choice between them.
@@ -1937,9 +1938,9 @@ std::unique_ptr<Engine> Engine::open(const Options& o) {
     // moe() weighs the picks as a softmax of their scores, which is how only this architecture's router does
     if (o.cache_bias > 0.f && !qwen35)
         throw std::runtime_error("--cache-bias is supported for qwen35moe models; this is a '" + name + "' model");
-    if ((!o.attn_requant.empty() || o.loop_bf16) && name != "inkling2_loop")
+    if ((!o.attn_requant.empty() || o.loop_bf16) && !inkling)
         throw std::runtime_error("--attn-requant and --loop-bf16 are Inkling 2's; this is a '" + name + "' model");
-    if (o.expert_gpu >= 0 && (name != "inkling2_loop" || !o.layer_split.empty()))
+    if (o.expert_gpu >= 0 && (!inkling || !o.layer_split.empty()))
         throw std::runtime_error("--expert-gpu is Inkling 2's, on one card beside it (no --layer-split); this is a '" +
                                  name + "' model");
     if (!o.attn_requant.empty() && o.attn_requant != "q4_0" && o.attn_requant != "q5_0" && o.attn_requant != "iq4_nl")
@@ -1952,15 +1953,10 @@ std::unique_ptr<Engine> Engine::open(const Options& o) {
         if (name == "lfm2moe") return std::make_unique<Lfm2Moe>();
         if (name == "flint") return std::make_unique<Flint>();
         if (name == "kolibri1") return std::make_unique<Kolibri1>();
-        if (name == "inkling2_loop") return std::make_unique<Inkling2>();
+        if (inkling) return std::make_unique<Inkling2>();
 #if !defined(STRATA_GPU_METAL)
         if (name == "laguna") return std::make_unique<Laguna>();
 #endif
-        // Unsloth's own layout of the model (loop_kv_res_query and the like): no public description of it to follow
-        if (name == "inkling2")
-            throw std::runtime_error(o.model + " is an 'inkling2' file, the layout of Unsloth's own runtime; this engine "
-                                     "runs the 'inkling2_loop' files llama.cpp runs (the repository's Mainline_Support "
-                                     "folder)");
         throw std::runtime_error(o.model + " is a '" + name + "' model, which this engine does not run");
     };
     int cards = 1, devices = 1;

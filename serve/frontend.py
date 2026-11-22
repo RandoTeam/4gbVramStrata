@@ -1819,3 +1819,146 @@ class OutputParser:
         self._reset_scan()
         self.state, self.lead = "content", True
         return [Event("tool_call", call=call)]
+
+
+INK_MSG, INK_END, INK_STOP = "<|message_model|>", "<|end_message|>", "<|content_model_end_sampling|>"
+INK_KINDS = {"<|content_thinking|>": "reasoning", "<|content_text|>": "content", "<|content_invoke_tool_json|>": "call"}
+INK_HEADER_MAX = 512     # a header is the tool's name at most: past this it is not one, and the text goes out as written
+INK_TEXT_OPEN = INK_MSG + "<|content_text|>"     # what a prompt ends with so that the reply is text at once
+
+
+def inkling_forced_call(force: str | None) -> str | None:
+    """forced_call()'s opening of a call, in Inkling 2's spelling: the header and the JSON up to the arguments.  A
+    forced call of no one tool (None here) is left to the model: its header names the tool."""
+    if not force:
+        return None
+    name = force.partition(FUNC_START)[2].partition(">")[0].strip()
+    if not name:
+        return None
+    return INK_MSG + name + '<|content_invoke_tool_json|>{"name":' + json.dumps(name) + ',"args":'
+
+
+def _held_tail(text: str, tags) -> int:
+    """How many characters at the end of `text` may be the start of one of `tags`, and are held until it shows."""
+    for n in range(min(len(text), max(len(t) for t in tags) - 1), 0, -1):
+        if any(t.startswith(text[-n:]) for t in tags):
+            return n
+    return 0
+
+
+class InklingOutputParser(OutputParser):
+    """The parser for Inkling 2's replies (Thinking Machines; the tokenizer's pre-tokenizer `inkling2`).  A reply is a
+    list of blocks, each a message of the model's that ends with <|end_message|>:
+
+        <|message_model|><|content_thinking|>...<|end_message|>
+        <|message_model|><|content_text|>...<|end_message|>
+        <|message_model|>NAME<|content_invoke_tool_json|>{"name":"NAME","args":{...}}<|end_message|>
+
+    The tags are control tokens, so a block's text cannot hold one: nothing here has to tell a quoted tag from a real
+    one.  A call is a call for a tool the request declared (OutputParser's rule); any other is returned as the text
+    it was written as.  Text outside every block is content."""
+
+    def __init__(self, thinking: bool = True, tools: list[dict] | None = None, stream_tools: bool = False,
+                 recover: bool = False, declared_only: bool = False, deferred: bool = False,
+                 call_format: str = "inkling", opened: bool = False):
+        super().__init__(thinking=thinking, tools=tools, stream_tools=stream_tools, recover=False,
+                         call_format="function", opened=False)
+        self.aliases = {}
+        self.ink = ""            # the text not read yet
+        # between | header | reasoning | content | call.  `opened`: the prompt ended on INK_TEXT_OPEN (a reply that
+        # must not think), so the reply starts inside its text block
+        self.mode = "content" if opened else "between"
+        self.header = ""         # the block's header: a call's tool name
+
+    def _callable(self, name: str | None) -> bool:
+        return bool(name) and name in self.schemas
+
+    @property
+    def clean(self) -> bool:
+        return not self.ink
+
+    def feed(self, delta: str) -> list[Event]:
+        self.ink += delta
+        return self._read(False)
+
+    def finish(self, reason: str | None = None) -> list[Event]:
+        return self._read(True)
+
+    def _call(self, body: str) -> list[Event]:
+        """A call block's body, {"name": NAME, "args": {...}}: the call, or the block as text."""
+        raw = INK_MSG + self.header + "<|content_invoke_tool_json|>" + body
+        try:
+            obj = json.loads(body)
+        except ValueError:
+            obj = None
+        if not isinstance(obj, dict):
+            return [Event("content", raw)]
+        name = obj.get("name") if isinstance(obj.get("name"), str) else self.header.strip()
+        name = self.aliases.get(name, name)
+        args = obj.get("args", obj.get("arguments", {}))
+        if not isinstance(args, dict) or not self._callable(name):
+            return [Event("content", raw)]
+        call = ToolCall(name, args)
+        out = []
+        if self.stream_tools:
+            out.append(Event("tool_start", call=call))
+            out.append(Event("tool_args", json.dumps(args, ensure_ascii=False), call=call))
+        out.append(Event("tool_call", call=call))
+        return out
+
+    def _read(self, final: bool) -> list[Event]:
+        out: list[Event] = []
+        while True:
+            s = self.ink
+            if self.mode == "between":
+                if s.startswith(INK_STOP):
+                    self.ink = s[len(INK_STOP):]
+                    continue
+                if s.startswith(INK_MSG):
+                    self.ink, self.mode, self.header = s[len(INK_MSG):], "header", ""
+                    continue
+                at = min((i for i in (s.find(INK_MSG), s.find(INK_STOP)) if i >= 0), default=-1)
+                text = s if at < 0 else s[:at]
+                hold = 0 if final or at >= 0 else _held_tail(text, (INK_MSG, INK_STOP))
+                text = text[:len(text) - hold]
+                if text.strip():                 # written outside a block: the answer's text
+                    out.append(Event("content", text))
+                self.ink = s[len(text):]
+                if at < 0:
+                    if final:
+                        self.ink = ""
+                    return out
+                continue
+            if self.mode == "header":
+                found = [(s.find(tag), tag) for tag in INK_KINDS if s.find(tag) >= 0]
+                if not found:
+                    if final or len(s) > INK_HEADER_MAX:       # no block follows: the text as it was written
+                        out.append(Event("content", INK_MSG + s))
+                        self.ink, self.mode = "", "between"
+                        if final:
+                            return out
+                        continue
+                    return out
+                at, tag = min(found)
+                self.header, self.ink, self.mode = s[:at], s[at + len(tag):], INK_KINDS[tag]
+                continue
+            # inside a block: its text up to <|end_message|> (or the next message's start, where the end was left out)
+            ends = [(i, len(t)) for i, t in ((s.find(INK_END), INK_END), (s.find(INK_MSG), "")) if i >= 0]
+            end = min(ends) if ends else None
+            if self.mode == "call":
+                if end is None and not final:
+                    return out
+                body = s if end is None else s[:end[0]]
+                out += self._call(body.strip())
+            else:
+                text = s if end is None else s[:end[0]]
+                hold = 0 if final or end is not None else _held_tail(text, (INK_END, INK_MSG))
+                text = text[:len(text) - hold]
+                if text:
+                    out.append(Event(self.mode, text))
+                if end is None:
+                    self.ink = "" if final else s[len(text):]
+                    return out
+            self.ink, self.mode = s[end[0] + end[1]:] if end is not None else "", "between"
+            if end is None:
+                return out

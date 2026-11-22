@@ -43,6 +43,8 @@ KEEP = "|".join((
     r"old-StrataRealLowVRAM",
     r"STRATA_POLY_PREBUILT_URL",  # legacy env fallback, kept on purpose (see setup.py)
     r'"strata-poly", "strata-glm"',  # serve compat stems for upgraders, kept on purpose
+    r"strata-poly-windows-x64",      # PolyStrata's own release asset name in docs/RELEASE.md
+    r"No `poly` left",               # the CI step title in .github/workflows/checks.yml
     r"strata-cfg-polystrata",               # record file names (bench/ is skipped anyway)
     r"polystrata-setup",
     r"polystrata_names",                    # donor tool (file is skipped anyway)
@@ -109,7 +111,7 @@ def main() -> int:
                     fh.write(new)
                 print(f"changed {f}")
     print(f"{changed} file(s)")
-    return 0
+    return 1 if check and changed else 0
 
 
 if __name__ == "__main__":

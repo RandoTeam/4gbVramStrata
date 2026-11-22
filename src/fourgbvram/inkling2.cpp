@@ -40,6 +40,16 @@ void Inkling2::load_geometry() {
     need(opt_.kv_format == KvFmt::kFp16 || opt_.kv_format == KvFmt::kFp8, "Inkling 2's attention caches are fp16 or fp8");
     load_shape();
     auto find = [&](const char* key) { return meta_in(*gg_, key); };
+    core_start_ = find("loop.start") ? shape_i("loop.start") : shape_i("loop.core_start");
+    core_end_ = find("loop.end") ? shape_i("loop.end") : shape_i("loop.core_end");
+    n_pass_ = find("loop.count") ? shape_i("loop.count") : shape_i("num_loops");
+    rank_ = shape_i("loop.gate_rank");
+    // Unsloth's top-level 'inkling2' files record the expanded visit count (48) in block_count while storing the 24
+    // physical blocks blk.0 .. blk.23.
+    if (n_pass_ > 1 && core_end_ > core_start_ && !tensor(n_layer_ - 1, "ffn_norm.weight") &&
+        n_layer_ > (n_pass_ - 1) * (core_end_ - core_start_)) {
+        n_layer_ -= (n_pass_ - 1) * (core_end_ - core_start_);
+    }
     auto first_u = [&](const char* key) {   // a number, or a list's first where every layer has the same
         const MetaValue* v = find(key);
         need(v != nullptr, key);
@@ -77,10 +87,6 @@ void Inkling2::load_geometry() {
     const MetaValue* unpadded = find("vocab_size_unpadded");
     n_unpadded_ = unpadded ? (int) unpadded->u : n_vocab_;
     need(n_unpadded_ > 0 && n_unpadded_ <= n_vocab_, "bad vocab_size_unpadded");
-    core_start_ = shape_i("loop.start");
-    core_end_ = shape_i("loop.end");
-    n_pass_ = shape_i("loop.count");
-    rank_ = shape_i("loop.gate_rank");
     const MetaValue* varying = find("loop.varying");
     need(!varying || varying->u == 0, "a loop of a varying number of passes is not supported");
     need(n_pass_ >= 2 && n_pass_ <= 8 && rank_ > 0 && core_start_ > 0 && core_start_ < core_end_ &&
@@ -501,15 +507,39 @@ void Inkling2::load_layer(int il) {
     B.ffn_query = f32("ffn_res_query.weight", e);
     B.ffn_norm = f32("ffn_norm.weight", e);
     if (il >= core_start_ && il < core_end_) {
-        B.msg_query = f32("loop_msg_query.weight", e, kCtrl);
+        if (tensor(il, "loop_msg_query.weight")) {
+            B.msg_query = f32("loop_msg_query.weight", e, kCtrl);
+        } else {
+            // Unsloth's top-level 'inkling2' layout stores the 12 core layers' [Q, K, V, FFN] message queries as
+            // loop_res_query.weight [e, 2 * core] (Q and FFN) and loop_kv_res_query.weight [e, 2 * core] (K and V).
+            const int core = core_end_ - core_start_, k = il - core_start_;
+            const TensorInfo* rq = gg_->find("loop_res_query.weight");
+            const TensorInfo* kq = gg_->find("loop_kv_res_query.weight");
+            if (!rq || !kq || rq->type != kTypeF32 || kq->type != kTypeF32 ||
+                (int64_t) rq->elements() != e * 2 * core || (int64_t) kq->elements() != e * 2 * core)
+                throw std::runtime_error("missing or bad loop_res_query.weight / loop_kv_res_query.weight");
+            const float* r = (const float*) home(*rq).data(*rq);
+            const float* kvq = (const float*) home(*kq).data(*kq);
+            std::vector<float> mq((size_t) kCtrl * e);
+            std::memcpy(&mq[0 * (size_t) e], r + (size_t) (2 * k) * e, (size_t) e * sizeof(float));
+            std::memcpy(&mq[1 * (size_t) e], kvq + (size_t) (2 * k) * e, (size_t) e * sizeof(float));
+            std::memcpy(&mq[2 * (size_t) e], kvq + (size_t) (2 * k + 1) * e, (size_t) e * sizeof(float));
+            std::memcpy(&mq[3 * (size_t) e], r + (size_t) (2 * k + 1) * e, (size_t) e * sizeof(float));
+            void* d = dmalloc(mq.size() * sizeof(float), blk(il, "loop_msg_query.weight").c_str());
+            ck(cudaMemcpy(d, mq.data(), mq.size() * sizeof(float), cudaMemcpyHostToDevice), "loop_msg_query.weight");
+            B.msg_query = Dev{d, kTypeF32, (int) e, kCtrl};
+        }
         // a `fix` takes upload() past the file's F32 to the matrices' BF16
         auto ctl = [&](const std::string& n, int64_t a, int64_t b) {
             return ctrl_bf16_ ? upload(tensor(il, n.c_str()), blk(il, n.c_str()), a, b, kFloatMat,
                                        [](float v) { return v; })
                               : f32(n.c_str(), a, b);
         };
+        static const char* const kAltCtrlName[] = {"attn", "k", "v", "mlp"};
+        const bool mainline = tensor(il, "loop_q_ctrl_down.weight") != nullptr;
         for (int c = 0; c < kCtrl; ++c) {
-            const std::string pre = std::string("loop_") + kCtrlName[c] + "_ctrl_";
+            const std::string pre = mainline ? (std::string("loop_") + kCtrlName[c] + "_ctrl_")
+                                             : (std::string("loop_") + kAltCtrlName[c] + "_");
             B.ctrl[c].down = ctl(pre + "down.weight", 2 * e, rank_);
             B.ctrl[c].gain = ctl(pre + "gain.weight", rank_, e);
             B.ctrl[c].forget = ctl(pre + "forget.weight", rank_, e);

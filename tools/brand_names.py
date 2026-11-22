@@ -80,7 +80,7 @@ def main() -> int:
                     fh.write(new)
                 print(f"changed {f}")
     print(f"{changed} file(s)")
-    return 0
+    return 1 if check and changed else 0
 
 
 if __name__ == "__main__":

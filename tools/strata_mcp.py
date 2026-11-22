@@ -123,6 +123,16 @@ FALLBACK_FAMILIES = {
                                         "download_gb": 21.9, "ram_gb": 27, "arena_gb": 20.9},
                          "Q8_0": {"about": "8-bit throughout: the closest to the model as trained",
                                   "download_gb": 25.5, "ram_gb": 31, "arena_gb": 24.4}}},
+    "inkling": {"title": "Inkling 2 Mini",
+                "about": "experimental, on the strata-fourgbvram engine: one NVIDIA card, Linux or Windows, or a Mac (beta), "
+                         "reads pictures; a 17.6 GB file, or 13.6 or 9.1 GB",
+                "tag": "inkling-", "engine": "fourgbvram", "vision": True, "experimental": True,
+                "models": {"UD-Q4_K_XL": {"about": "4-bit experts (NVFP4, Unsloth Dynamic), 8-bit where they write",
+                                          "download_gb": 17.6, "ram_gb": 21, "arena_gb": 15.797846016},
+                           "UD-Q3_K_XL": {"about": "3-bit i-quant and 4-bit experts mixed",
+                                          "download_gb": 13.6, "ram_gb": 17, "arena_gb": 12.198739968},
+                           "UD-Q2_K_XL": {"about": "1- to 2-bit experts: the smallest",
+                                          "download_gb": 9.1, "ram_gb": 13, "arena_gb": 7.888306176}}},
     "flint": {"title": "Flint 40B-A2.5B", "about": "on the strata-fourgbvram engine: one NVIDIA card, Linux or Windows; a "
                                                     "25 GB file, ~29 GB of RAM beside an 8 GB card; three other sizes "
                                                     "too, no images",
@@ -146,6 +156,17 @@ FALLBACK_FAMILIES = {
                                     "download_gb": 28.6, "ram_gb": 33, "arena_gb": 26.9},
                            "Q3_K_M": {"about": "3-bit: the least RAM that still reads well",
                                       "download_gb": 37.5, "ram_gb": 42, "arena_gb": 35.8}}},
+    "groot": {"title": "Groot 19B-A3B 261023",
+              "about": "experimental qwen35moe on strata-fourgbvram; 3 sizes, 12.5 to 20.2 GB; "
+                       "Q4_K_M text measured on an 8 GB RTX 5060",
+              "tag": "groot-", "engine": "fourgbvram", "vision": True, "experimental": True,
+              "models": {"Q4_K_M": {"about": "4-bit mixed precision; the default, with embedded MTP; text measured "
+                                             "on an 8 GB RTX 5060 (peak 7.05 GiB VRAM, 21.8 GiB RAM)",
+                                    "download_gb": 12.5, "ram_gb": 17, "arena_gb": 9.937354752},
+                         "Q6_K": {"about": "6-bit K-quant, with embedded MTP",
+                                  "download_gb": 16.8, "ram_gb": 21, "arena_gb": 14.121172992},
+                         "Q8_0": {"about": "8-bit throughout, the largest and highest quality, including MTP",
+                                  "download_gb": 20.2, "ram_gb": 24, "arena_gb": 17.540579328}}},
     # a family with sizes of its own ("models"): two of these have a size of one name
     "qwen36": {"title": "Qwen3.6-35B-A3B", "about": "on the strata-fourgbvram engine: one NVIDIA card, Linux or Windows; a "
                                                      "17 GB file, ~21 GB of RAM beside an 8 GB card; a smaller and a "

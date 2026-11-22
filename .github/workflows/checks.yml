@@ -54,10 +54,20 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
 
-      - name: The setup tests (784 of them, no GPU and no downloads)
+      - name: Python packages for tokenizer and server tests
+        run: python -m pip install --quiet jinja2 regex numpy
+
+      - name: The setup tests (805 of them, no GPU and no downloads)
         # -p "test_setup_*.py" is the same discovery AGENTS.md names. The tests mock urllib and subprocess, so a runner
         # with no CUDA, no driver and no network reaches the same code paths a user's PC does.
         run: python -m unittest discover -s tools -p "test_setup_*.py"
+
+      - name: Server, tokenizer and build-guard unit tests (Inkling 2, Laguna, frontend, models, ISA/MMQ/spill guards)
+        run: >
+          python -m unittest
+          serve.test_inkling serve.test_laguna serve.test_frontend serve.test_models
+          tools.test_gdn_mma_sync tools.test_gdn_mma_shared
+          tools.test_check_isa_guard tools.test_check_no_mmq tools.test_check_cuda_spills
 
       - name: The fork's names stay the fork's
         # A merge that brings the donors' strings back is the failure this check exists for: it has happened once.

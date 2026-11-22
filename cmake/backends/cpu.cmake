@@ -572,11 +572,11 @@ if(STRATA_BUILD_TESTS)
     if(Python3_Interpreter_FOUND)
       if(MSVC)
         target_link_options(iq_avx2_parity PRIVATE /MAP)
-        add_test(NAME isa_guard_check COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/../tools/check_isa_guard.py
+        add_test(NAME isa_guard_check COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/check_isa_guard.py
                  $<TARGET_FILE:iq_avx2_parity> --map $<TARGET_FILE_DIR:iq_avx2_parity>/iq_avx2_parity.map)
       else()
         # the library, not the binary: a Linux source build compiles ggml-cpu for the build machine on purpose
-        add_test(NAME isa_guard_check COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/../tools/check_isa_guard.py
+        add_test(NAME isa_guard_check COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/check_isa_guard.py
                  $<TARGET_FILE:strata_kernels_cpu>)
       endif()
       set_tests_properties(isa_guard_check PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 600)

@@ -32,7 +32,8 @@ FILES = [
 # Whole trees, with the filter below applied to every file.
 TREES = ["serve", "tools", "data", "docs", "bench/quality", "bench/speed"]
 # The engine's sources, copied verbatim (no filter: setup.source_hash() covers every file, test sources included).
-SOURCES = ["CMakeLists.txt", "cmake", "src", "include", "third_party/ggml", "tools/vision"]
+SOURCES = ["CMakeLists.txt", "cmake", "src", "include", "third_party/ggml", "third_party/strata-ggml",
+           "third_party/zstd-dec", "ref/tqp", "tools/vision"]
 # Dropped everywhere: test sources, caches, and the paper (it has its own release).
 # `.bat` too: this is the Linux tarball, and the Windows tree ships its launchers in its own zip.
 SKIP_DIRS = {"__pycache__", ".pytest_cache", "paper", "superpowers"}

@@ -431,7 +431,7 @@ if(STRATA_SYCL_PARITY)   # (the option is declared above, next to STRATA_OWN_CPU
     endif()
   endforeach()
   if(NOT _iq_python STREQUAL "")
-    add_test(NAME iq_parity_fixtures COMMAND ${_iq_python} ${STRATA_ROOT}/../terminal/tools/iq_fixture.py
+    add_test(NAME iq_parity_fixtures COMMAND ${_iq_python} ${STRATA_ROOT}/tools/iq_fixture.py
                                              --out ${CMAKE_CURRENT_BINARY_DIR}/iq_fixture)
     set_tests_properties(iq_parity_fixtures PROPERTIES FIXTURES_SETUP iq_fixture_data SKIP_RETURN_CODE 3)
     add_test(NAME iq_parity COMMAND iq_parity ${CMAKE_CURRENT_BINARY_DIR}/iq_fixture)

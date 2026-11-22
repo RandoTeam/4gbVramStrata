@@ -493,7 +493,7 @@ if(STRATA_ENABLE_CUDA OR STRATA_ENABLE_HIP)
     target_compile_definitions(strata_prefill PRIVATE STRATA_HIPBLASLT_AVAILABLE=1)
     target_link_libraries(strata_prefill PRIVATE roc::hipblaslt)
 
-    add_executable(tune_hipblaslt ../terminal/tools/hip/tune_hipblaslt.cpp)
+    add_executable(tune_hipblaslt tools/hip/tune_hipblaslt.cpp)
     target_link_libraries(tune_hipblaslt PRIVATE hip::host roc::hipblas roc::hipblaslt)
   endif()
   if(STRATA_ENABLE_HIP AND STRATA_ROCBLAS_AVAILABLE)
@@ -501,7 +501,7 @@ if(STRATA_ENABLE_CUDA OR STRATA_ENABLE_HIP)
     target_compile_definitions(strata_prefill PRIVATE STRATA_ROCBLAS_AVAILABLE=1)
     target_link_libraries(strata_prefill PRIVATE roc::rocblas)
 
-    add_executable(tune_rocblas ../terminal/tools/hip/tune_rocblas.cpp)
+    add_executable(tune_rocblas tools/hip/tune_rocblas.cpp)
     target_link_libraries(tune_rocblas PRIVATE hip::host roc::rocblas)
   endif()
 
@@ -779,7 +779,7 @@ if(STRATA_ENABLE_CUDA OR STRATA_ENABLE_HIP)
   endforeach()
   if(NOT _iq_python STREQUAL "")
     add_test(NAME iq_parity_fixtures
-             COMMAND ${_iq_python} ${CMAKE_CURRENT_SOURCE_DIR}/../terminal/tools/iq_fixture.py
+             COMMAND ${_iq_python} ${CMAKE_CURRENT_SOURCE_DIR}/tools/iq_fixture.py
                      --out ${CMAKE_CURRENT_BINARY_DIR}/iq_fixture)
     # exit 3: numpy or the vendored gguf-py is missing (a trimmed third_party) - a skip, not a failure
     set_tests_properties(iq_parity_fixtures PROPERTIES FIXTURES_SETUP iq_fixture_data SKIP_RETURN_CODE 3)

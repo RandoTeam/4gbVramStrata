@@ -13,7 +13,7 @@ class SharedGdnBoundary(unittest.TestCase):
         text = header.read_text(encoding='utf-8')
         self.assertNotIn('strata::fourgbvram', text)
         self.assertNotIn('engine.hpp', text)
-        cmake = (ROOT / 'CMakeLists.txt').read_text(encoding='utf-8')
+        cmake = (ROOT / 'cmake/strata_fourgbvram.cmake').read_text(encoding='utf-8')
         target = re.search(r'add_executable\(gdn_mma_test\s+([^)]*)\)', cmake)
         self.assertIsNotNone(target, 'missing standalone shared-kernel consumer')
         self.assertNotIn('src/fourgbvram/', target.group(1))
