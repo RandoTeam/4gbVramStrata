@@ -63,8 +63,10 @@ void dot_bf16(int n, float* s, const void* w, const void* a) {
 
 struct Rows {
     DotFn dot = nullptr;
+    Q::DotX4Fn dot_x4 = nullptr;
     Q::DotRowsFn dots = nullptr;   // the same products for several activation rows at once, where there is one
     ActFn act = nullptr;
+    Q::Arith arith = Q::Arith::Generic;
     int blck = 1;          // values a block of the weights
     int act_blck = 1;      // values a block of the activations
     size_t act_block = 4;  // bytes a block of the activations
@@ -87,7 +89,10 @@ Rows rows_of(int type) {
     const Q::DotKernel* dot = Q::dot_kernel(t->type, arith);
     const Q::ActKernel* act = Q::act_kernel(t->act, arith);
     if (dot == nullptr || act == nullptr) return r;
+    const Q::DotX4Kernel* x4 = Q::dot_x4_kernel(t->type, arith);
+    r.arith = arith;
     r.dot = dot->fn;
+    r.dot_x4 = x4 ? x4->fn : nullptr;
     r.dots = Q::dot_rows_kernel(t->type, arith);
     r.act = act->fn;
     r.blck = t->blck;
@@ -95,6 +100,17 @@ Rows rows_of(int type) {
     r.act_block = a->bytes;
     r.act_type = (int) t->act;
     return r;
+}
+
+inline float activate(float g, float u, float limit, bool gelu, float situ_beta, float situ_lb) {
+    if (situ_beta > 0.f) {
+        if (situ_lb > 0.f) u = situ_lb * std::tanh(u / situ_lb);
+        return situ_beta * std::tanh(g / situ_beta) / (1.f + std::exp(-g)) * u;
+    }
+    if (gelu) return 0.5f * g * (1.f + std::tanh(0.7978845608f * g * (1.f + 0.044715f * g * g))) * u;
+    g = std::min(g, limit);
+    u = std::clamp(u, -limit, limit);
+    return g / (1.f + std::exp(-g)) * u;
 }
 
 thread_local bool in_task = false;   // this thread is running a task of a batch
@@ -342,40 +358,77 @@ void cpu_experts(Workers& workers, const CpuExpert* experts, int n, int rows, in
         if (late && late[byp[i0]]) (*wait)(byp[i0]);
         const CpuExpert& e = experts[byp[i0]];
         const int r0 = (t % gu_tasks) * per, r1 = std::min(n_ff, r0 + per);
-        for (int r = r0; r < r1; ++r) {
-            const uint8_t* gate = e.gate + (size_t) r * gu_row;
-            const uint8_t* up = e.up + (size_t) r * u_row;
-            // The expert's uses kUses at a time: where the format has a kernel for several activation rows
-            // (Rows::dots), the weight row is decoded once for all of them, each product the bits of its own.
+        const int nr = r1 - r0;
+        constexpr int kUses = 8;
+        bool handled = false;
+        if (nr > 0 && gu_type == (int) Q::Type::NVFP4 && u_type == (int) Q::Type::NVFP4) {
+            static thread_local std::vector<float> gbuf, ubuf;
+            gbuf.resize((size_t) kUses * (size_t) nr);
+            ubuf.resize((size_t) kUses * (size_t) nr);
+            handled = true;
             for (int i = i0; i < i1;) {
-                constexpr int kUses = 8;
                 const int m = std::min(kUses, i1 - i);
-                float gs[kUses], us[kUses];
-                const void *as[kUses], *aus[kUses];
-                for (int k = 0; k < m; ++k) {
-                    as[k] = actp + (size_t) experts[byp[i + k]].row * a_bytes;
-                    aus[k] = actup + (size_t) experts[byp[i + k]].row * au_step;
+                const void* as[kUses];
+                for (int k = 0; k < m; ++k) as[k] = actp + (size_t) experts[byp[i + k]].row * a_bytes;
+                if (!Q::nvfp4_gu_rows(tg.arith, e.gate, gu_row, e.up, u_row, n_embd, as, m, gbuf.data(), ubuf.data(),
+                                      r0, r1)) {
+                    handled = false;
+                    break;
                 }
-                if (m > 1 && tg.dots) tg.dots(n_embd, m, gs, gate, as);
-                else for (int k = 0; k < m; ++k) tg.dot(n_embd, gs + k, gate, as[k]);
-                if (m > 1 && tu.dots) tu.dots(n_embd, m, us, up, aus);
-                else for (int k = 0; k < m; ++k) tu.dot(n_embd, us + k, up, aus[k]);
                 for (int k = 0; k < m; ++k, ++i) {
                     const int j = byp[i];
-                    float g = gs[k] * e.gate_scale, u = us[k] * e.up_scale;
-                    if (situ_beta > 0.f) {
-                        if (situ_lb > 0.f) u = situ_lb * std::tanh(u / situ_lb);
-                        hp[(size_t) j * n_ff + r] = situ_beta * std::tanh(g / situ_beta) / (1.f + std::exp(-g)) * u;
-                        continue;
+                    float* dst = hp + (size_t) j * n_ff + r0;
+                    const float* gp = gbuf.data() + (size_t) k * (size_t) nr;
+                    const float* up = ubuf.data() + (size_t) k * (size_t) nr;
+                    for (int dr = 0; dr < nr; ++dr)
+                        dst[dr] = activate(gp[dr] * e.gate_scale, up[dr] * e.up_scale, limit, gelu, situ_beta, situ_lb);
+                }
+            }
+        }
+        if (!handled && i1 - i0 == 1 && tg.dot_x4 && tu.dot_x4) {
+            const int j = byp[i0];
+            const void* ap = actp + (size_t) experts[j].row * a_bytes;
+            const void* aup = actup + (size_t) experts[j].row * au_step;
+            float* dst = hp + (size_t) j * n_ff;
+            int r = r0;
+            for (; r + 4 <= r1; r += 4) {
+                float gs[4], us[4];
+                tg.dot_x4(n_embd, gs, e.gate + (size_t) r * gu_row, gu_row, ap);
+                tu.dot_x4(n_embd, us, e.up + (size_t) r * u_row, u_row, aup);
+                for (int q = 0; q < 4; ++q)
+                    dst[r + q] = activate(gs[q] * e.gate_scale, us[q] * e.up_scale, limit, gelu, situ_beta, situ_lb);
+            }
+            for (; r < r1; ++r) {
+                float g, u;
+                tg.dot(n_embd, &g, e.gate + (size_t) r * gu_row, ap);
+                tu.dot(n_embd, &u, e.up + (size_t) r * u_row, aup);
+                dst[r] = activate(g * e.gate_scale, u * e.up_scale, limit, gelu, situ_beta, situ_lb);
+            }
+            handled = true;
+        }
+        if (!handled) {
+            for (int r = r0; r < r1; ++r) {
+                const uint8_t* gate = e.gate + (size_t) r * gu_row;
+                const uint8_t* up = e.up + (size_t) r * u_row;
+                // The expert's uses kUses at a time: where the format has a kernel for several activation rows
+                // (Rows::dots), the weight row is decoded once for all of them, each product the bits of its own.
+                for (int i = i0; i < i1;) {
+                    const int m = std::min(kUses, i1 - i);
+                    float gs[kUses], us[kUses];
+                    const void *as[kUses], *aus[kUses];
+                    for (int k = 0; k < m; ++k) {
+                        as[k] = actp + (size_t) experts[byp[i + k]].row * a_bytes;
+                        aus[k] = actup + (size_t) experts[byp[i + k]].row * au_step;
                     }
-                    if (gelu) {
+                    if (m > 1 && tg.dots) tg.dots(n_embd, m, gs, gate, as);
+                    else for (int k = 0; k < m; ++k) tg.dot(n_embd, gs + k, gate, as[k]);
+                    if (m > 1 && tu.dots) tu.dots(n_embd, m, us, up, aus);
+                    else for (int k = 0; k < m; ++k) tu.dot(n_embd, us + k, up, aus[k]);
+                    for (int k = 0; k < m; ++k, ++i) {
+                        const int j = byp[i];
                         hp[(size_t) j * n_ff + r] =
-                            0.5f * g * (1.f + std::tanh(0.7978845608f * g * (1.f + 0.044715f * g * g))) * u;
-                        continue;
+                            activate(gs[k] * e.gate_scale, us[k] * e.up_scale, limit, gelu, situ_beta, situ_lb);
                     }
-                    g = std::min(g, limit);
-                    u = std::clamp(u, -limit, limit);
-                    hp[(size_t) j * n_ff + r] = g / (1.f + std::exp(-g)) * u;
                 }
             }
         }
@@ -389,21 +442,55 @@ void cpu_experts(Workers& workers, const CpuExpert* experts, int n, int rows, in
 
     const int d_tasks = (n_embd + kRowsPerDownTask - 1) / kRowsPerDownTask;
     workers.run(d_tasks, [&](int t) {
-        static thread_local std::vector<float> one;   // an output value of every use
-        one.resize((size_t) n);
-        float* s = one.data();
+        static thread_local std::vector<float> block, dtmp;   // L1-resident slice [use][r - r0]
         const int r0 = t * kRowsPerDownTask, r1 = std::min(n_embd, r0 + kRowsPerDownTask);
-        for (int r = r0; r < r1; ++r) {
-            for (int u = 0; u < n_run; ++u) {
-                const uint8_t* down = experts[byp[runp[u]]].down + (size_t) r * d_row;
-                for (int i = runp[u]; i < runp[u + 1]; ++i)
-                    td.dot(n_ff, s + byp[i], down, hqp + (size_t) byp[i] * h_bytes);
+        const int nr = r1 - r0;
+        if (nr <= 0) return;
+        constexpr int kUses = 8;
+        block.resize((size_t) n * (size_t) nr);
+        dtmp.resize((size_t) kUses * (size_t) nr);
+        float* blk = block.data();
+        for (int u = 0; u < n_run; ++u) {
+            const int u0 = runp[u], u1 = runp[u + 1];
+            const uint8_t* down_base = experts[byp[u0]].down;
+            for (int i = u0; i < u1;) {
+                const int m = std::min(kUses, u1 - i);
+                const void* hqs[kUses];
+                for (int k = 0; k < m; ++k) hqs[k] = hqp + (size_t) byp[i + k] * h_bytes;
+                if (d_type == (int) Q::Type::NVFP4 &&
+                    Q::nvfp4_down_rows(td.arith, down_base, d_row, n_ff, hqs, m, dtmp.data(), r0, r1)) {
+                    for (int k = 0; k < m; ++k)
+                        std::memcpy(blk + (size_t) byp[i + k] * (size_t) nr, dtmp.data() + (size_t) k * (size_t) nr,
+                                    (size_t) nr * sizeof(float));
+                } else if (m == 1 && td.dot_x4) {
+                    float* dst = blk + (size_t) byp[i] * (size_t) nr;
+                    int r = r0;
+                    for (; r + 4 <= r1; r += 4) td.dot_x4(n_ff, dst + (r - r0), down_base + (size_t) r * d_row, d_row, hqs[0]);
+                    for (; r < r1; ++r) td.dot(n_ff, dst + (r - r0), down_base + (size_t) r * d_row, hqs[0]);
+                } else if (m > 1 && td.dots) {
+                    float tmp[kUses];
+                    for (int r = r0; r < r1; ++r) {
+                        td.dots(n_ff, m, tmp, down_base + (size_t) r * d_row, hqs);
+                        const int dr = r - r0;
+                        for (int k = 0; k < m; ++k) blk[(size_t) byp[i + k] * (size_t) nr + dr] = tmp[k];
+                    }
+                } else {
+                    for (int r = r0; r < r1; ++r) {
+                        const uint8_t* down = down_base + (size_t) r * d_row;
+                        const int dr = r - r0;
+                        for (int k = 0; k < m; ++k) td.dot(n_ff, &blk[(size_t) byp[i + k] * (size_t) nr + dr], down, hqs[k]);
+                    }
+                }
+                i += m;
             }
-            // a token's sum in the order its experts were given: the order it has in a call of its own
+        }
+        // a token's sum in the order its experts were given: the order it has in a call of its own
+        for (int r = r0; r < r1; ++r) {
+            const int dr = r - r0;
             int j = 0;
             for (int row = 0; row < rows; ++row) {
                 float acc = 0.f;
-                for (; j < n && experts[j].row == row; ++j) acc += experts[j].weight * s[j];
+                for (; j < n && experts[j].row == row; ++j) acc += experts[j].weight * blk[(size_t) j * (size_t) nr + dr];
                 out[(size_t) row * n_embd + r] = acc;
             }
         }

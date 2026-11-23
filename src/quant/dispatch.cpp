@@ -74,6 +74,46 @@ DotRowsFn dot_rows_kernel(Type w, Arith a) noexcept {
     return nullptr;
 }
 
+const DotX4Kernel* dot_x4_kernel(Type w, Arith a, Isa max_isa) noexcept {
+#ifdef STRATA_QUANT_X86_TIERS
+    const DotX4Table tb = avx2_dot_x4_table();
+    const DotX4Kernel* best = nullptr;
+    for (int i = 0; i < tb.n; ++i) {
+        const DotX4Kernel& k = tb.v[i];
+        if (k.weight == w && k.arith == a && (int) k.isa <= (int) max_isa && isa_ok(k.isa)) {
+            if (!best || (int) k.isa > (int) best->isa) best = &k;
+        }
+    }
+    return best;
+#else
+    (void) w, (void) a, (void) max_isa;
+    return nullptr;
+#endif
+}
+
+const DotX4Kernel* dot_x4_kernel(Type w, Arith a) noexcept { return dot_x4_kernel(w, a, best_isa()); }
+
+bool nvfp4_gu_rows(Arith a, const uint8_t* gate, size_t g_row, const uint8_t* up, size_t u_row, int n,
+                   const void* const* act, int nt, float* g_out, float* u_out, int r0, int r1) noexcept {
+#ifdef STRATA_QUANT_X86_TIERS
+    if (a == Arith::Avx2 && isa_ok(Isa::Avx2))
+        return avx2_nvfp4_gu_rows(gate, g_row, up, u_row, n, act, nt, g_out, u_out, r0, r1);
+#endif
+    (void) a, (void) gate, (void) g_row, (void) up, (void) u_row, (void) n, (void) act, (void) nt, (void) g_out,
+        (void) u_out, (void) r0, (void) r1;
+    return false;
+}
+
+bool nvfp4_down_rows(Arith a, const uint8_t* down, size_t d_row, int n,
+                     const void* const* act, int nt, float* out, int r0, int r1) noexcept {
+#ifdef STRATA_QUANT_X86_TIERS
+    if (a == Arith::Avx2 && isa_ok(Isa::Avx2))
+        return avx2_nvfp4_down_rows(down, d_row, n, act, nt, out, r0, r1);
+#endif
+    (void) a, (void) down, (void) d_row, (void) n, (void) act, (void) nt, (void) out, (void) r0, (void) r1;
+    return false;
+}
+
 const ActKernel* act_kernel(Type act, Arith a, Isa max_isa) noexcept {
     const ActKernel* v[kMaxK];
     const int n = collect_acts(act, a, v, kMaxK);

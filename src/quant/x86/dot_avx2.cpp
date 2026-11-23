@@ -6,11 +6,17 @@
 #include "../registry.hpp"
 #include "strata/quant/dot.hpp"
 
+#include <bit>
+#include <cstring>
+
 namespace strata::quant {
 namespace avx2 {
 
 #include "x86_helpers.inc"
 #include "x86_dots.inc"
+#include "strata_opt_avx2.inc"
+#include "q4_0_q8_0_avx2.inc"
+#include "nvfp4_avx2.inc"
 
 // dot_iq3_xxs_q8_K for R activation rows at once.  A block's grid values, signs and scales are looked up once for
 // all of them, and each row's terms, integer sums and float sums are the one-row function's in the same order, so
@@ -274,8 +280,14 @@ void rows_by_four(int n, int rows, float* s, const void* w, const void* const* a
 DotRowsFn avx2_dot_rows(Type w) noexcept {
     using namespace avx2;
     switch (w) {
+    case Type::Q4_0:
+        return rows_by_four<rows_q4_0_q8_0<2>, rows_q4_0_q8_0<3>, rows_q4_0_q8_0<4>, dot_q4_0_q8_0_opt>;
+    case Type::Q8_0:
+        return rows_by_four<rows_q8_0_q8_0<2>, rows_q8_0_q8_0<3>, rows_q8_0_q8_0<4>, dot_q8_0_q8_0_opt>;
+    case Type::NVFP4:
+        return rows_by_four<rows_nvfp4_q8_0<2>, rows_nvfp4_q8_0<3>, rows_nvfp4_q8_0<4>, dot_nvfp4_q8_0_opt>;
     case Type::IQ3_XXS:
-        return rows_by_four<rows_iq3_xxs_q8_K<2>, rows_iq3_xxs_q8_K<3>, rows_iq3_xxs_q8_K<4>, dot_iq3_xxs_q8_K>;
+        return rows_by_four<rows_iq3_xxs_q8_K<2>, rows_iq3_xxs_q8_K<3>, rows_iq3_xxs_q8_K<4>, dot_iq3_xxs_q8_K_opt>;
     case Type::IQ2_XXS:
         return rows_by_four<rows_iq2_xxs_q8_K<2>, rows_iq2_xxs_q8_K<3>, rows_iq2_xxs_q8_K<4>, dot_iq2_xxs_q8_K>;
     case Type::IQ2_S:
@@ -287,20 +299,73 @@ DotRowsFn avx2_dot_rows(Type w) noexcept {
     }
 }
 
+bool avx2_nvfp4_gu_rows(const uint8_t* gate, size_t g_row, const uint8_t* up, size_t u_row, int n,
+                        const void* const* act, int nt, float* g_out, float* u_out, int r0, int r1) noexcept {
+    using namespace avx2::nvfp4_detail;
+    if (n <= 0 || n > kMaxN || n % QK_NVFP4 != 0 || nt <= 0 || r0 >= r1) return false;
+    for (int t0 = 0; t0 < nt; t0 += kMaxT) {
+        const int k = nt - t0 < kMaxT ? nt - t0 : kMaxT;
+        const size_t off = (size_t) t0 * (size_t) (r1 - r0);
+        switch (k) {
+        case 1: gu_rows_nt<1>(gate, g_row, up, u_row, n, act + t0, g_out + off, u_out + off, r0, r1); break;
+        case 2: gu_rows_nt<2>(gate, g_row, up, u_row, n, act + t0, g_out + off, u_out + off, r0, r1); break;
+        case 3: gu_rows_nt<3>(gate, g_row, up, u_row, n, act + t0, g_out + off, u_out + off, r0, r1); break;
+        case 4: gu_rows_nt<4>(gate, g_row, up, u_row, n, act + t0, g_out + off, u_out + off, r0, r1); break;
+        case 5: gu_rows_nt<5>(gate, g_row, up, u_row, n, act + t0, g_out + off, u_out + off, r0, r1); break;
+        case 6: gu_rows_nt<6>(gate, g_row, up, u_row, n, act + t0, g_out + off, u_out + off, r0, r1); break;
+        case 7: gu_rows_nt<7>(gate, g_row, up, u_row, n, act + t0, g_out + off, u_out + off, r0, r1); break;
+        case 8: gu_rows_nt<8>(gate, g_row, up, u_row, n, act + t0, g_out + off, u_out + off, r0, r1); break;
+        }
+    }
+    return true;
+}
+
+bool avx2_nvfp4_down_rows(const uint8_t* down, size_t d_row, int n,
+                          const void* const* act, int nt, float* out, int r0, int r1) noexcept {
+    using namespace avx2::nvfp4_detail;
+    if (n <= 0 || n > kMaxN || n % QK_NVFP4 != 0 || nt <= 0 || r0 >= r1) return false;
+    for (int t0 = 0; t0 < nt; t0 += kMaxT) {
+        const int k = nt - t0 < kMaxT ? nt - t0 : kMaxT;
+        const size_t off = (size_t) t0 * (size_t) (r1 - r0);
+        switch (k) {
+        case 1: down_rows_nt<1>(down, d_row, n, act + t0, out + off, r0, r1); break;
+        case 2: down_rows_nt<2>(down, d_row, n, act + t0, out + off, r0, r1); break;
+        case 3: down_rows_nt<3>(down, d_row, n, act + t0, out + off, r0, r1); break;
+        case 4: down_rows_nt<4>(down, d_row, n, act + t0, out + off, r0, r1); break;
+        case 5: down_rows_nt<5>(down, d_row, n, act + t0, out + off, r0, r1); break;
+        case 6: down_rows_nt<6>(down, d_row, n, act + t0, out + off, r0, r1); break;
+        case 7: down_rows_nt<7>(down, d_row, n, act + t0, out + off, r0, r1); break;
+        case 8: down_rows_nt<8>(down, d_row, n, act + t0, out + off, r0, r1); break;
+        }
+    }
+    return true;
+}
+
 namespace {
-#define ENTRY(T, ACT, NAME) {avx2::dot_##NAME, Type::T, Type::ACT, Arith::Avx2, Isa::Avx2, "avx2_" #NAME}
+#define ENTRY(T, ACT, NAME)     {avx2::dot_##NAME,         Type::T, Type::ACT, Arith::Avx2, Isa::Avx2, "avx2_" #NAME}
+#define ENTRY_OPT(T, ACT, NAME) {avx2::dot_##NAME##_opt,   Type::T, Type::ACT, Arith::Avx2, Isa::Avx2, "avx2_" #NAME}
+#define ENTRY_X4(T, ACT, NAME)  {avx2::dot_##NAME##_x4_avx2, Type::T, Type::ACT, Arith::Avx2, Isa::Avx2, "avx2_" #NAME "_x4"}
 const DotKernel kTable[] = {
-    ENTRY(Q4_0, Q8_0, q4_0_q8_0),   ENTRY(Q4_1, Q8_1, q4_1_q8_1),   ENTRY(Q5_0, Q8_0, q5_0_q8_0),   ENTRY(Q5_1, Q8_1, q5_1_q8_1),
-    ENTRY(Q8_0, Q8_0, q8_0_q8_0),   ENTRY(IQ4_NL, Q8_0, iq4_nl_q8_0), ENTRY(MXFP4, Q8_0, mxfp4_q8_0), ENTRY(NVFP4, Q8_0, nvfp4_q8_0),
-    ENTRY(Q2_K, Q8_K, q2_K_q8_K),   ENTRY(Q3_K, Q8_K, q3_K_q8_K),   ENTRY(Q4_K, Q8_K, q4_K_q8_K),   ENTRY(Q5_K, Q8_K, q5_K_q8_K),
-    ENTRY(Q6_K, Q8_K, q6_K_q8_K),   ENTRY(IQ1_S, Q8_K, iq1_s_q8_K),  ENTRY(IQ1_M, Q8_K, iq1_m_q8_K),  ENTRY(IQ2_XXS, Q8_K, iq2_xxs_q8_K),
-    ENTRY(IQ2_XS, Q8_K, iq2_xs_q8_K), ENTRY(IQ2_S, Q8_K, iq2_s_q8_K), ENTRY(IQ3_XXS, Q8_K, iq3_xxs_q8_K), ENTRY(IQ3_S, Q8_K, iq3_s_q8_K),
-    ENTRY(IQ4_XS, Q8_K, iq4_xs_q8_K),
+    ENTRY_OPT(Q4_0, Q8_0, q4_0_q8_0),   ENTRY(Q4_1, Q8_1, q4_1_q8_1),   ENTRY(Q5_0, Q8_0, q5_0_q8_0),   ENTRY(Q5_1, Q8_1, q5_1_q8_1),
+    ENTRY_OPT(Q8_0, Q8_0, q8_0_q8_0),   ENTRY(IQ4_NL, Q8_0, iq4_nl_q8_0), ENTRY(MXFP4, Q8_0, mxfp4_q8_0), ENTRY_OPT(NVFP4, Q8_0, nvfp4_q8_0),
+    ENTRY(Q2_K, Q8_K, q2_K_q8_K),       ENTRY(Q3_K, Q8_K, q3_K_q8_K),   ENTRY_OPT(Q4_K, Q8_K, q4_K_q8_K), ENTRY_OPT(Q5_K, Q8_K, q5_K_q8_K),
+    ENTRY_OPT(Q6_K, Q8_K, q6_K_q8_K),   ENTRY(IQ1_S, Q8_K, iq1_s_q8_K), ENTRY(IQ1_M, Q8_K, iq1_m_q8_K), ENTRY(IQ2_XXS, Q8_K, iq2_xxs_q8_K),
+    ENTRY(IQ2_XS, Q8_K, iq2_xs_q8_K),   ENTRY(IQ2_S, Q8_K, iq2_s_q8_K), ENTRY_OPT(IQ3_XXS, Q8_K, iq3_xxs_q8_K), ENTRY(IQ3_S, Q8_K, iq3_s_q8_K),
+    ENTRY_OPT(IQ4_XS, Q8_K, iq4_xs_q8_K),
     {generic::dot_q2_0_q8_0_generic, Type::Q2_0, Type::Q8_0, Arith::Avx2, Isa::Scalar, "avx2_q2_0_generic"},
 };
+const DotX4Kernel kX4Table[] = {
+    // Q4_0 stays on 1-row dot_q4_0_q8_0_opt (dot_x4 is ~10.6% slower on Zen 2 AVX2 due to 4 strided L1 streams).
+    ENTRY_X4(Q8_0, Q8_0, q8_0_q8_0),
+    ENTRY_X4(Q4_K, Q8_K, q4_K_q8_K),
+    ENTRY_X4(IQ4_XS, Q8_K, iq4_xs_q8_K),
+};
+#undef ENTRY_X4
+#undef ENTRY_OPT
 #undef ENTRY
 }  // namespace
 
 DotTable avx2_dot_table() noexcept { return {kTable, (int) (sizeof kTable / sizeof kTable[0])}; }
+DotX4Table avx2_dot_x4_table() noexcept { return {kX4Table, (int) (sizeof kX4Table / sizeof kX4Table[0])}; }
 
 }  // namespace strata::quant
