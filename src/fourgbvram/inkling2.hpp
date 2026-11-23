@@ -38,6 +38,9 @@ protected:
     void load_extra(const uint8_t* src, int64_t pos) override;
     void alloc_caches() override;
     void assign_scratch() override;
+#if !defined(STRATA_GPU_METAL) && !defined(STRATA_USE_HIP)
+    bool scratch_layouts() const override { return true; }
+#endif
     int widest() const override;
     int streams() const override { return 1; }
     void layer_head(Layer& L, int il, int n) override;

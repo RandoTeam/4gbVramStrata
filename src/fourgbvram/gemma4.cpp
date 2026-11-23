@@ -409,9 +409,9 @@ void Gemma4::twin_cover(size_t halves) {
     twin_mapped_ = twin_k_.mapped / sizeof(uint16_t);
 }
 
-// Per-token buffers hold rows_ tokens, row after row.
+// Per-token buffers hold buf_rows_ tokens, row after row.
 void Gemma4::assign_scratch() {
-    const size_t n = (size_t) rows_, heads = n * widest();
+    const size_t n = (size_t) buf_rows_, heads = n * widest();
     size_t kv = 0;
     for (const Block& B : blocks_) kv = std::max(kv, n * B.n_kv * B.dim);
     qraw_ = fbuf(heads);
@@ -421,6 +421,10 @@ void Gemma4::assign_scratch() {
     vraw_ = fbuf(kv);
     v_ = fbuf(kv);
     att_ = fbuf(heads);
+    const size_t max_chunk = buf_rows_ >= kStageRows
+                                 ? (size_t) buf_rows_
+                                 : (size_t) std::min(buf_rows_, std::max({opt_.window, (opt_.batch + 1) * (opt_.batch_mtp ? 2 : 1), 1}));
+    chunk_ = (int) std::clamp<size_t>(kScoreFloats / ((size_t) n_head_ * opt_.max_context), 1, max_chunk);
     score_ = fbuf((size_t) chunk_ * n_head_ * opt_.max_context);
     mlp_ = fbuf(n * n_embd_);
     rin_ = fbuf(n * n_embd_);
@@ -438,7 +442,8 @@ void Gemma4::assign_scratch() {
         q8d_ = (uint16_t*) dmalloc((size_t) rows_ * n_head_ * (max_dim_ / kQ8_0Values) * sizeof(uint16_t),
                                    "the queries' deltas");
     }
-    if (rows_ >= kStageRows) awork_ = fbuf(heads + heads / 2 + 1 + 3 * n * n_head_);   // a prompt batch's attention
+    if (buf_rows_ >= kStageRows) awork_ = fbuf(heads + heads / 2 + 1 + 3 * n * n_head_);   // a prompt batch's attention
+    else awork_ = nullptr;
 }
 
 // A sequence's rows are the full layers': a window layer's are part of its state (save_layer()).  Under --kv int8
