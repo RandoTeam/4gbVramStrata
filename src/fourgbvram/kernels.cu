@@ -3969,65 +3969,180 @@ void far_pull(const FarFetch* fetch, const int* count, int most, size_t bytes, v
         throw std::runtime_error(std::string("far_pull: ") + cudaGetErrorString(e));
 }
 
-__global__ void bell_ring_kernel(const void* const* __restrict__ slots, const int32_t* __restrict__ ids,
-                                 const float* __restrict__ w, int n_used, int skip_from, int layer,
-                                 const float* __restrict__ x, float* hx, int n, ExpertBell* bell, uint32_t* seq) {
-    __shared__ int jobs;
-    if (threadIdx.x == 0) {
-        int j = 0;
-        for (int k = 0; k < n_used && j < kBellJobs; ++k)
-            if (!slots[ids[k]] && k < skip_from) {
-                bell->e[j] = ids[k];
-                bell->w[j] = w[k];
-                ++j;
-            }
-        jobs = j;
-    }
-    __syncthreads();
-    if (jobs == 0) {
-        if (threadIdx.x == 0) seq[1] = 0;
-        return;
-    }
-    for (int i = threadIdx.x; i < n; i += blockDim.x) hx[i] = x[i];
-    __threadfence_system();   // the input and the jobs are the host's before the ring
-    __syncthreads();
-    if (threadIdx.x == 0) {
-        bell->layer = layer;
-        bell->n = jobs;
-        __threadfence_system();
-        const uint32_t s = ++seq[0];
-        bell->ring = s;
-        __threadfence_system();
-        seq[1] = s;
+__device__ __forceinline__ uint32_t bell_load_relaxed(const uint32_t* p) {
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 700
+    uint32_t v;
+    asm volatile("ld.relaxed.sys.u32 %0, [%1];" : "=r"(v) : "l"(p) : "memory");
+    return v;
+#else
+    return *(const volatile uint32_t*) p;
+#endif
+}
+
+__device__ __forceinline__ uint32_t bell_load_acquire(const uint32_t* p) {
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 700
+    uint32_t v;
+    asm volatile("ld.acquire.sys.u32 %0, [%1];" : "=r"(v) : "l"(p) : "memory");
+    return v;
+#else
+    const uint32_t v = *(const volatile uint32_t*) p;
+    __threadfence_system();
+    return v;
+#endif
+}
+
+__device__ __forceinline__ void bell_store_release(uint32_t* p, uint32_t v) {
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 700
+    asm volatile("st.release.sys.u32 [%0], %1;" : : "l"(p), "r"(v) : "memory");
+#else
+    __threadfence_system();
+    *(volatile uint32_t*) p = v;
+    __threadfence_system();
+#endif
+}
+
+__device__ __forceinline__ bool bell_spin(const uint32_t* flag, uint32_t want, const uint32_t* abort, int abort_every) {
+    int until_abort = 1;
+    for (;;) {
+        if (abort && --until_abort == 0) {
+            if (bell_load_relaxed(abort)) return false;
+            until_abort = abort_every;
+        }
+        if (bell_load_relaxed(flag) == want) {
+            __threadfence_system();
+            return true;
+        }
+        strata_spin_pause();
     }
 }
 
-// One block: one thread asks the bell every half microsecond or so, the others sleep at the barrier (a spinning card
-// draws power that a laptop's CPU, computing the experts meanwhile, would rather have).
-__global__ void bell_add_kernel(const ExpertBell* bell, const uint32_t* __restrict__ seq, const float* hy,
-                                float* __restrict__ acc, int n) {
-    const uint32_t s = seq[1];
-    if (s == 0) return;
-    if (threadIdx.x == 0)
-        while (bell->ack != s && !bell->abort) {
-#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 700
-            __nanosleep(500);
-#endif
+__global__ void bell_ring_kernel(const void* const* __restrict__ slots, const int32_t* __restrict__ ids,
+                                 const float* __restrict__ w, int n_used, int skip_from, int layer,
+                                 const float* __restrict__ x, float* hx, int n, int rows, ExpertBell* bell,
+                                 uint32_t* seq) {
+    __shared__ uint32_t s_ram_rows, s_stopped, s_ticket;
+    __shared__ int s_jobs;
+    if (threadIdx.x == 0) {
+        uint32_t ram_rows = 0;
+        int j = 0;
+        for (int r = 0; r < rows && j < kBellJobs; ++r) {
+            const int base = r * n_used;
+            for (int k = 0; k < n_used && j < kBellJobs; ++k) {
+                const int p = base + k;
+                const int32_t e = ids[p];
+                if (slots[e]) continue;
+                bool keep = k < skip_from;
+                for (int r2 = 0; r2 < rows && !keep; ++r2)
+                    for (int k2 = 0; k2 < skip_from && k2 < n_used && !keep; ++k2)
+                        keep = ids[r2 * n_used + k2] == e;
+                if (!keep) continue;
+                bell->e[j] = e;
+                bell->w[j] = w[p];
+                bell->row[j] = r;
+                ++j;
+                ram_rows |= 1u << r;
+            }
         }
+        s_jobs = j;
+        s_ram_rows = ram_rows;
+        if (j == 0) {
+            seq[1] = 0;
+            seq[2] = 0;
+            s_stopped = 1;
+        } else {
+            uint32_t s = seq[0] + 1;
+            if (!s) s = 1;
+            seq[0] = s;
+            seq[1] = s;
+            seq[2] = ram_rows;
+            s_ticket = s;
+            s_stopped = bell_load_acquire(&bell->abort);
+            if (!s_stopped) {
+                bell->layer = layer;
+                bell->n = j;
+                bell->rows = rows;
+            }
+        }
+    }
     __syncthreads();
+    if (s_jobs == 0 || s_stopped) return;
+    const uint32_t ram_rows = s_ram_rows;
+    const bool vec4 = (((uintptr_t) x | (uintptr_t) hx) & 15) == 0 && (n & 3) == 0;
+    for (int r = 0; r < rows; ++r) {
+        if (!(ram_rows >> r & 1u)) continue;
+        const float* xr = x + (size_t) r * n;
+        float* hxr = hx + (size_t) r * n;
+        if (vec4) {
+            const float4* x4 = reinterpret_cast<const float4*>(xr);
+            float4* hx4 = reinterpret_cast<float4*>(hxr);
+            const int n4 = n >> 2;
+            for (int i = threadIdx.x; i < n4; i += blockDim.x) hx4[i] = x4[i];
+        } else {
+            for (int i = threadIdx.x; i < n; i += blockDim.x) hxr[i] = xr[i];
+        }
+    }
     __threadfence_system();
-    for (int i = threadIdx.x; i < n; i += blockDim.x) acc[i] += *(volatile const float*) (hy + i);
+    __syncthreads();
+    if (threadIdx.x == 0) bell_store_release(&bell->ring, s_ticket);
+}
+
+// One block: one thread asks the bell every 100 ns or so, checking abort periodically, the others sleep at the barrier
+// (a spinning card draws power that a laptop's CPU, computing the experts meanwhile, would rather have).
+__global__ void bell_add_kernel(const ExpertBell* bell, const uint32_t* __restrict__ seq, const float* hy,
+                                float* __restrict__ acc, int n, int rows) {
+    const uint32_t s = seq[1];
+    const uint32_t mask = seq[2];
+    if (s == 0 || mask == 0) return;
+    __shared__ uint32_t taken;
+    if (threadIdx.x == 0) taken = bell_spin(&bell->ack, s, &bell->abort, 8) ? 1u : 0u;
+    __syncthreads();
+    if (!taken) return;
+#if defined(__CUDA_ARCH__) && !defined(__HIPCC__)
+    const bool vec4 = (((uintptr_t) hy | (uintptr_t) acc) & 15) == 0 && (n & 3) == 0;
+#else
+    constexpr bool vec4 = false;
+#endif
+    for (int r = 0; r < rows; ++r) {
+        if (!(mask >> r & 1u)) continue;
+        const float* hyr = hy + (size_t) r * n;
+        float* accr = acc + (size_t) r * n;
+        if (vec4) {
+#if defined(__CUDA_ARCH__) && !defined(__HIPCC__)
+            const int n4 = n >> 2;
+            for (int i = threadIdx.x; i < n4; i += blockDim.x) {
+                const float4 v = __ldcv(reinterpret_cast<const float4*>(hyr) + i);
+                float4 a = reinterpret_cast<float4*>(accr)[i];
+                a.x += v.x;
+                a.y += v.y;
+                a.z += v.z;
+                a.w += v.w;
+                reinterpret_cast<float4*>(accr)[i] = a;
+            }
+#endif
+        } else {
+            for (int i = threadIdx.x; i < n; i += blockDim.x) {
+#if defined(__CUDA_ARCH__) && !defined(__HIPCC__)
+                accr[i] += __ldcv(hyr + i);
+#else
+                accr[i] += *(const volatile float*) (hyr + i);
+#endif
+            }
+        }
+    }
 }
 
 void bell_ring(const void* const* slots, const int32_t* ids, const float* w, int n_used, int skip_from, int layer,
-               const float* x, float* hx, int n, ExpertBell* bell, uint32_t* seq, void* stream) {
-    bell_ring_kernel<<<1, 256, 0, cs(stream)>>>(slots, ids, w, n_used, skip_from, layer, x, hx, n, bell, seq);
+               const float* x, float* hx, int n, int rows, ExpertBell* bell, uint32_t* seq, void* stream) {
+    if (rows < 1 || rows > kBellRows || rows * n_used > kBellJobs)
+        throw std::invalid_argument("bell_ring: rows");
+    bell_ring_kernel<<<1, 256, 0, cs(stream)>>>(slots, ids, w, n_used, skip_from, layer, x, hx, n, rows, bell, seq);
     if (const cudaError_t e = cudaGetLastError(); e != cudaSuccess)
         throw std::runtime_error(std::string("bell_ring: ") + cudaGetErrorString(e));
 }
 
-void bell_add(const ExpertBell* bell, const uint32_t* seq, const float* hy, float* acc, int n, void* stream) {
-    bell_add_kernel<<<1, 512, 0, cs(stream)>>>(bell, seq, hy, acc, n);
+void bell_add(const ExpertBell* bell, const uint32_t* seq, const float* hy, float* acc, int n, int rows, void* stream) {
+    if (rows < 1 || rows > kBellRows) throw std::invalid_argument("bell_add: rows");
+    bell_add_kernel<<<1, 512, 0, cs(stream)>>>(bell, seq, hy, acc, n, rows);
     if (const cudaError_t e = cudaGetLastError(); e != cudaSuccess)
         throw std::runtime_error(std::string("bell_add: ") + cudaGetErrorString(e));
 }

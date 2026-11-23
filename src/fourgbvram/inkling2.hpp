@@ -141,7 +141,7 @@ private:
     bool shared_recorded() const override { return false; }
 #endif
     // routed on the card in that recording: the host reads neither
-    bool router_rows_to_host(int n) const override { return !(n == 1 && whole_rec_); }
+    bool router_rows_to_host(int) const override { return !whole_rec_; }
 #if !defined(STRATA_GPU_METAL)
     // Both GGUFs' routers are F32 of BF16 values: as BF16 a token reads half of their bytes, the same scores
     // (gemv_bf16() is gemv_f32()'s sums, a prompt batch's gemm_f32() takes them widened).  Idea: merbanan's Strata

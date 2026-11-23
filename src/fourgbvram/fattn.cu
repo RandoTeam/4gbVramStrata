@@ -1,14 +1,14 @@
 // src/fourgbvram/fattn.cu - see the header.  The kernel is fattn_mma.cuh's, launched here in place of llama.cpp's
 // launch_fattn(): one CUDA block a tile of 64 query rows (8 tokens x 8 heads, or 4 x 16), attending to a whole
 // block of keys. The stream-k fixup is never needed; each tile leaves its softmax max and sum behind
-// (fattn_mma.cuh, change 2).
+// (fattn_mma.cuh, change 2).  A build without llama.cpp (STRATA_FOURGBVRAM_OWN) has the same kernel cut down to this
+// launch, from fattn_mma_d256.cuh.  Both builds compile this file with --use_fast_math, as llama.cpp's kernels are.
 #include "fattn.hpp"
 
 #if !defined(GGML_USE_HIP) && !defined(STRATA_FOURGBVRAM_OWN)
 #include "fattn_mma.cuh"
-#elif !defined(GGML_USE_HIP)   // STRATA_FOURGBVRAM_OWN: the decode kernels below are this project's own and need no more than these
-#include <cuda_fp16.h>
-#include <cuda_runtime.h>
+#elif !defined(GGML_USE_HIP)   // STRATA_FOURGBVRAM_OWN: no llama.cpp headers; the decode kernels below are this project's own
+#include "fattn_mma_d256.cuh"
 #define WARP_SIZE 32
 #endif
 
@@ -36,7 +36,8 @@ int grid(long long n, int per) { return (int) ((n + per - 1) / per); }
 // The launch's shape and shared memory as ggml_cuda_flash_attn_ext_mma_f16_case() works them out, for the
 // current card.  Ampere or later: on Turing the kernel has no 64-column tile.
 template <int Group>
-Setup make_setup(int cc) {
+Setup make_setup(int device) {
+    const int cc = ggml_cuda_info().devices[device].cc;
     constexpr int kCols1 = kCols / Group, kCols2 = Group;
     const auto kKernel = flash_attn_ext_f16<kD, kD, kCols1, kCols2, false, false, false>;
     Setup r;
@@ -66,18 +67,37 @@ Setup make_setup(int cc) {
     cudaGetLastError();
     return r;
 }
+#else
+using fattn_d256::flash_attn_ext_f16;
+using fattn_d256::init_fastdiv_values;
+
+// fattn_mma_d256.cuh's launch, the same on every card it has an Ampere or later image for
+template <int Group>
+Setup make_setup(int) {
+    const auto kKernel = flash_attn_ext_f16<kD, kD, kCols / Group, Group, false, false, false>;
+    Setup r;
+    if (!fattn_d256::runs_here(kKernel)) return r;
+    r.nwarps = fattn_d256::kWarps;
+    r.nbatch_fa = fattn_d256::kBatchFa;
+    r.smem = fattn_d256::smem_bytes<kCols / Group>();
+    r.ok = cudaFuncSetAttribute(kKernel, cudaFuncAttributeMaxDynamicSharedMemorySize, (int) r.smem) == cudaSuccess;
+    cudaGetLastError();
+    return r;
+}
+#endif   // !STRATA_FOURGBVRAM_OWN
 
 // Each card's own, worked out the first time it asks: a layer split may put cards of different generations in one
 // process, and cudaFuncSetAttribute() holds for the current card only.
 template <int Group>
 const Setup& setup() {
     static std::mutex mu;
-    static Setup s[GGML_CUDA_MAX_DEVICES];
-    static bool done[GGML_CUDA_MAX_DEVICES] = {};
-    const int d = ggml_cuda_get_device();
+    static Setup s[16];   // GGML_CUDA_MAX_DEVICES
+    static bool done[16] = {};
+    int d = 0;
+    cudaGetDevice(&d);
     std::lock_guard<std::mutex> lock(mu);
     if (!done[d]) {
-        s[d] = make_setup<Group>(ggml_cuda_info().devices[d].cc);
+        s[d] = make_setup<Group>(d);
         done[d] = true;
     }
     return s[d];
@@ -115,15 +135,12 @@ Layout layout(int n, int dim, int n_head, int kv_heads, int nbatch_fa, size_t sc
     if (rows >= (long long) n + nbatch_fa) L.rows = rows;
     return L;
 }
-#endif   // !STRATA_FOURGBVRAM_OWN
-
 
 void ck(const char* what) {
     const cudaError_t e = cudaGetLastError();
     if (e != cudaSuccess) throw std::runtime_error(std::string("fattn: ") + what + ": " + cudaGetErrorString(e));
 }
 
-#if !defined(STRATA_FOURGBVRAM_OWN)   // the prompt batch's side: llama.cpp's kernel and what is launched around it
 // rows [row, row + valid) of a q8_0 cache (or an fp16 one, f16) as fp16, and zeros on to `blockIdx.y`'s last row:
 // the kernel reads whole steps of keys, and the causal mask removes the zero rows' weights, but a NaN would get
 // through it
@@ -230,8 +247,6 @@ bool run(const float* q, Kvq8 kq8, Kvq8 vq8, const half* keys, const half* vals,
     ck("merge");
     return true;
 }
-
-#endif   // !STRATA_FOURGBVRAM_OWN
 
 // ---- decode (fdec_q8): a few tokens over the whole cache, split by keys, on the tensor cores ----
 
@@ -566,7 +581,6 @@ size_t fdec_floats(int rows, int kv_heads) { return (size_t) grid(rows, kSplit) 
 
 }  // namespace
 
-#if !defined(STRATA_FOURGBVRAM_OWN)
 bool fattn_fits(int dim, int n_head, int kv_heads, int rows, size_t scratch_floats) {
     if (dim != kD || kv_heads <= 0 || rows <= 0) return false;
     if (n_head == 8 * kv_heads) {
@@ -599,19 +613,6 @@ bool fattn_f16(const float* q, const uint16_t* keys, const uint16_t* vals, int64
                 : run<8>(q, Kvq8{}, Kvq8{}, (const half*) keys, (const half*) vals, pos, n, out, dim, n_head,
                          kv_heads, scale, scratch, scratch_floats, stream));
 }
-
-#else   // STRATA_FOURGBVRAM_OWN: no llama.cpp kernel in this build; a prompt batch's attention is attend_batch()'s
-
-bool fattn_fits(int, int, int, int, size_t) { return false; }
-
-bool fattn_q8(const float*, Kvq8, Kvq8, int64_t, int, float*, int, int, int, float, float*, size_t, void*) { return false; }
-
-bool fattn_f16(const float*, const uint16_t*, const uint16_t*, int64_t, int, float*, int, int, int, float, float*, size_t,
-               void*) {
-    return false;
-}
-
-#endif
 
 bool fdec_fits(int dim, int n_head, int kv_heads, int rows, size_t scratch_floats) {
     if (dim != kD || kv_heads <= 0 || (n_head != 8 * kv_heads && n_head != 16 * kv_heads) || rows <= 0) return false;

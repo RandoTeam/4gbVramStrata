@@ -1,0 +1,121 @@
+# Manual release builder for Windows x86-64 (CUDA 13.0, portable AVX2, sm_75;80;86;89;120).
+#
+# GitHub's hosted windows-2025 runners carry MSVC Build Tools, not the CUDA toolkit, so normal CI compiles
+# host-only MSVC checks in backends.yml. Run this workflow manually when cutting a Windows binary asset and
+# Windows installer zip, or run `python tools/make_fourgbvram_release.py dist` directly on a Windows 10/11 PC.
+name: Build Windows x64 CUDA 13 Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Optional existing GitHub release tag to upload the built Windows assets to'
+        required: false
+        default: ''
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows-cuda13:
+    name: Windows x64 CUDA 13.0 (sm_75, sm_80, sm_86, sm_89, sm_120)
+    runs-on: windows-2025
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 1
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Install Python build tools
+        run: python -m pip install --quiet cmake ninja jinja2 regex numpy
+
+      - name: Install CUDA Toolkit 13.0.0
+        uses: Jimver/cuda-toolkit@v0.2.23
+        with:
+          cuda: '13.0.0'
+
+      - name: Verify nvcc and MSVC environment
+        shell: pwsh
+        run: |
+          nvcc --version
+          python -c "import setup; nvcc, v = setup.find_nvcc(); print('nvcc:', nvcc, v, 'vcvars:', setup.find_vcvars(v))"
+
+      - name: Build portable CUDA 13 engine zip (make_fourgbvram_release.py)
+        run: python tools/make_fourgbvram_release.py dist
+
+      - name: Package Windows installer zip and SHA256SUMS
+        shell: pwsh
+        run: |
+          python - <<'PY'
+          import hashlib, shutil, zipfile
+          from pathlib import Path
+          import sys
+          sys.path.insert(0, str(Path("tools")))
+          import package_release_131k as P
+
+          root = Path(".").resolve()
+          dist = root / "dist"
+          eng_zips = sorted(dist.glob("strata-fourgbvram-windows-x64-*.zip"))
+          assert len(eng_zips) == 1, eng_zips
+          eng_dir = root / "engine-fourgbvram"
+          shutil.rmtree(eng_dir, ignore_errors=True)
+          eng_dir.mkdir(parents=True, exist_ok=True)
+          with zipfile.ZipFile(eng_zips[0]) as zf:
+              zf.extractall(eng_dir)
+
+          ver = P.version()
+          rel_name = f"4gbVramStrata-v{ver}-131k-win-x64"
+          stage = dist / rel_name
+          shutil.rmtree(stage, ignore_errors=True)
+          stage.mkdir(parents=True)
+
+          win_files = ["START-HERE.bat", "SETUP.bat", "UPDATE.bat", "BENCH.bat",
+                       "setup.py", "fourgbvramstrata.py", "chat.py", "requirements.txt", "LICENSE", "README.md"]
+          plan = [Path(f) for f in win_files if (root / f).is_file()]
+          for tree in P.TREES:
+              for rel in P.tree_files(tree):
+                  plan.append(rel)
+          plan += [p for p in P.source_files()]
+          plan = list(dict.fromkeys(plan))
+          eng_files = P.engine_files(eng_dir)
+          for rel in plan + eng_files:
+              src = root / rel if rel.parts[0] != "engine-fourgbvram" else eng_dir / rel.name
+              dst = stage / rel
+              dst.parent.mkdir(parents=True, exist_ok=True)
+              shutil.copy2(src, dst)
+
+          zip_path = dist / f"{rel_name}.zip"
+          with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+              for p in sorted(stage.rglob("*")):
+                  if p.is_file():
+                      zf.write(p, p.relative_to(dist).as_posix())
+
+          lines = []
+          for asset in (zip_path, eng_zips[0]):
+              h = hashlib.sha256(asset.read_bytes()).hexdigest()
+              lines.append(f"{h}  {asset.name}")
+              print(f"{asset.name}: {asset.stat().st_size:,} bytes, sha256 {h}")
+          (dist / "SHA256SUMS-windows.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
+          PY
+
+      - name: Upload Windows release artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-x64-cuda13-release
+          path: |
+            dist/4gbVramStrata-v*-131k-win-x64.zip
+            dist/strata-fourgbvram-windows-x64-*.zip
+            dist/SHA256SUMS-windows.txt
+
+      - name: Upload assets to GitHub release (if release_tag provided)
+        if: ${{ inputs.release_tag != '' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: pwsh
+        run: |
+          $tag = "${{ inputs.release_tag }}"
+          gh release upload $tag dist/4gbVramStrata-v*-131k-win-x64.zip dist/strata-fourgbvram-windows-x64-*.zip dist/SHA256SUMS-windows.txt --clobber

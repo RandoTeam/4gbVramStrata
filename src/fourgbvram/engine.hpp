@@ -356,7 +356,11 @@ public:
     int32_t picked(int i) const;
     /// The same for the next eval() of one token with its logits: picked(0) is its most likely token, and logits()
     /// are not copied to the host (Inkling 2's 201,024 scores are 0.8 MB to copy and to search a token).
-    void eval_picks() { eval_picks_ = !next_; }
+    /// On a layer split the last card picks: it has the logits.
+    void eval_picks() {
+        if (next_) next_->eval_picks();
+        else eval_picks_ = true;
+    }
     void keep(int n);
 
     /// Some files carry a block that guesses ahead: one layer that takes a token and the model's output for the
@@ -1154,15 +1158,13 @@ protected:
     int32_t* d_use_ = nullptr;                    ///< per (layer, expert): picks of calls routed on the card
     std::vector<int32_t> h_use_;
     bool card_routes() const { return all_cached() || card_far_; }
-    // The doorbell (bells()): a token routed on the card with experts outside VRAM.  moe_card() rings h_bell_ with the
-    // ones the card lacks and multiplies the others, their misses reading zero_slot_ (d_zslots_); the host's threads
+    // The doorbell (bells()): a call routed on the card with experts outside VRAM.  moe_card() rings h_bell_ with the
+    // ones the card lacks and multiplies the others, their misses skipping in native_mmvq_ids(); the host's threads
     // compute the misses (bell_serve()) while the card goes on, and the card adds their sum (bell_add()) before the
-    // layer's tail.  No host wait inside the token, so its layers are one recording.
+    // layer's tail.  No host wait inside the call, so its layers are one recording.
     ExpertBell* h_bell_ = nullptr;                ///< pinned, the card's and the host's
-    uint32_t* d_bell_seq_ = nullptr;              ///< the card's rings so far, and the ring of the layer under way
+    uint32_t* d_bell_seq_ = nullptr;              ///< [0] rings so far, [1] this layer's ticket, [2] active row mask
     uint32_t bell_seen_ = 0;                      ///< the last ring the host answered
-    void** d_zslots_ = nullptr;                   ///< d_slots_ with zero_slot_ for every expert outside VRAM
-    uint8_t* zero_slot_ = nullptr;                ///< an expert of zeros: a miss's products are 0 on the card
     void* ev_bell_ = nullptr;
     bool bell_ = false;                           ///< this call rings (run())
     bool bell_counts_ = false;                    ///< a call since follow() last read d_use_ rang: picks to read

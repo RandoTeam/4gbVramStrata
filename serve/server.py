@@ -59,7 +59,7 @@ from urllib.parse import parse_qs, urlsplit
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
 sys.path.insert(0, str(ROOT))   # run as a script (run-<model>.sh) as well as a module
-from serve.frontend import (INK_TEXT_OPEN, THINK_END, ChatTemplate, Event, InklingOutputParser,  # noqa: E402
+from serve.frontend import (INK_END, INK_MSG, INK_TEXT_OPEN, THINK_END, ChatTemplate, Event, InklingOutputParser,  # noqa: E402
                             OutputParser, anthropic_to_messages, forced_call, gemma_model_turn, images_of,
                             inkling_forced_call, literal_tags, mark_think_literals, openai_to_messages,
                             tool_choice_of, unmark_think_literals)
@@ -4980,7 +4980,6 @@ class Service:
         opened = bool(self.think_open_ids) and ids[-len(self.think_open_ids):] == self.think_open_ids
         if self.text_open_ids:                          # Inkling 2: the prompt opened the reply's text block
             opened = ids[-len(self.text_open_ids):] == self.text_open_ids
-            budget = None                               # its thinking is a block of its own: no </think> to close it with
         parser = self.parser_cls(thinking=thinking, tools=tools, stream_tools=True, recover=self.tool_call_recovery,
                                  call_format=self.call_format, opened=opened)
         detok, n, finish = Detokenizer(self.tok), 0, "length"
@@ -5290,7 +5289,16 @@ class Service:
                         # thinking ended, after the blank line the template puts before a call.
                         if wrap:
                             budget = st["thinking_budget"] = None
-                            text = closed_with(REASONING_WRAP_UP, parser.think_end) + (force or "")
+                            if self.call_format == "inkling":
+                                # #273: Inkling 2's thinking is a block of its own.  End it as the model does and open
+                                # the next one, whose kind (text, or a call's tool name) the model writes; a forced
+                                # call's opening starts with that INK_MSG itself.
+                                text = (REASONING_WRAP_UP.partition("\n" + THINK_END)[0] + INK_END
+                                        + (force or INK_MSG))
+                            else:
+                                text = closed_with(REASONING_WRAP_UP, parser.think_end) + (force or "")
+                        elif self.call_format == "inkling":     # a block of its own: no blank line before it
+                            text = force
                         else:
                             text = "\n" * (2 - (len(tail) - len(tail.rstrip("\n")))) + force
                         force = None

@@ -135,6 +135,21 @@ class ServiceForInkling(unittest.TestCase):
                        if kind == "event"]
                 self.assertEqual((said(evs, "reasoning"), said(evs, "content")), (reasoning, "Rome"))
 
+    def test_the_thinking_budget_closes_the_thinking_block(self):
+        # #273: the budget used to be dropped for Inkling 2, so a model that thought in circles wrote until max_tokens
+        # and the reply had no answer.  At the budget the server ends the thinking block as the model would and opens
+        # the next one; the model writes the text block.
+        ids = self.svc.encode_prompt(self.chat, None, {})
+        self.svc.engine = MockEngine(self.tok, ["<|message_model|><|content_thinking|>" + "round and round " * 20,
+                                                "<|content_text|>Rome" + END + STOP])
+        evs = [e for kind, e in self.svc.run(ids, True, None, 512, {"reasoning_budget_tokens": 40}, threading.Event())
+               if kind == "event"]
+        written = self.tok.decode(self.svc.engine.last_prompt[len(ids):])
+        self.assertTrue(written.endswith(END + "<|message_model|>"), written[-80:])
+        self.assertNotIn("</think>", written)
+        self.assertEqual(said(evs, "content"), "Rome")
+        self.assertNotIn("</think>", said(evs, "reasoning"))
+
 
 if __name__ == "__main__":
     unittest.main()

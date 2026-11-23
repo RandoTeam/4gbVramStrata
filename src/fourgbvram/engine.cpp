@@ -818,6 +818,9 @@ Engine::~Engine() {
         lock_cv_.notify_all();
         lock_thread_.join();
     }
+#if !defined(STRATA_GPU_METAL) && !defined(STRATA_USE_HIP)
+    if (h_bell_) std::atomic_ref<uint32_t>(h_bell_->abort).store(1, std::memory_order_release);
+#endif
     if (swap_st_) cudaStreamSynchronize(cs(swap_st_));
     if (up_) cudaStreamSynchronize(cs(up_));
     if (rs_) cudaStreamSynchronize(cs(rs_));
@@ -3871,6 +3874,7 @@ void Engine::alloc() {
     h_at_ = (long long*) hmalloc(at_rows * 2 * sizeof(long long), "pinned memory");
     h_rl_ = (float*) hmalloc(n * n_expert_ * sizeof(float), "pinned memory");
     h_x_ = (float*) hmalloc(n * n_embd_ * sizeof(float), "pinned memory");
+    std::memset(h_x_, 0, n * n_embd_ * sizeof(float));
     h_cpu_ = (float*) hmalloc(n * n_embd_ * sizeof(float), "pinned memory");
     h_logits_ = (float*) hmalloc((size_t) n_vocab_ * sizeof(float), "pinned memory");
 
@@ -3974,23 +3978,19 @@ void Engine::alloc() {
         // the doorbell (bell_on()): every layer's experts by picks on the card, or none of them; STRATA_FOURGBVRAM_BELL=0: none
         const char* bell_env = std::getenv("STRATA_FOURGBVRAM_BELL");
         bool bell = bells() && !split_ && !(bell_env && bell_env[0] == '0');
-        size_t most = 0;
+        bool any_moe = false;
         for (int il = 0; il < n_layer_ && bell; ++il) {
             const Layer& L = layers_[(size_t) il];
             if (!L.moe) continue;
+            any_moe = true;
             bell = kernels::native_mmvq_ids_supported((int) L.gu_type) &&
                    kernels::native_mmvq_ids_supported((int) L.u_type) && kernels::native_mmvq_ids_supported((int) L.d_type);
-            most = std::max(most, L.gu2() + L.d_bytes);   // (slot_bytes is not known before fill_expert_cache())
         }
-        if (bell && most > 0) {
+        if (bell && any_moe) {
             h_bell_ = (ExpertBell*) hmalloc(sizeof(ExpertBell), "pinned memory");
             std::memset((void*) h_bell_, 0, sizeof(ExpertBell));
-            d_bell_seq_ = (uint32_t*) dmalloc(2 * sizeof(uint32_t), "scratch");
-            ck(cudaMemset(d_bell_seq_, 0, 2 * sizeof(uint32_t)), "the doorbell");
-            d_zslots_ = (void**) dmalloc((size_t) n_layer_ * n_expert_ * sizeof(void*), "scratch");
-            most = (most + 4096 + kTail) / 256 * 256;   // past an expert's bytes, as far as a slot's padding goes
-            zero_slot_ = (uint8_t*) dmalloc(most, "scratch");
-            ck(cudaMemset(zero_slot_, 0, most), "the doorbell");
+            d_bell_seq_ = (uint32_t*) dmalloc(3 * sizeof(uint32_t), "scratch");
+            ck(cudaMemset(d_bell_seq_, 0, 3 * sizeof(uint32_t)), "the doorbell");
             cudaEvent_t ev = nullptr;
             ck(cudaEventCreateWithFlags(&ev, cudaEventDisableTiming), "cudaEventCreate");
             ev_bell_ = ev;
@@ -5520,12 +5520,6 @@ bool Engine::card_moe(int n) {
         }
         ck(cudaMemcpy(d_slots_, h_slots_.data(), h_slots_.size() * sizeof(void*), cudaMemcpyHostToDevice),
            "expert slots");
-        if (d_zslots_) {   // the doorbell's table: a miss reads the expert of zeros
-            std::vector<void*> z(h_slots_);
-            for (void*& p : z)
-                if (!p) p = zero_slot_;
-            ck(cudaMemcpy(d_zslots_, z.data(), z.size() * sizeof(void*), cudaMemcpyHostToDevice), "expert slots");
-        }
         if (mirrored)
             ck(cudaMemcpy(d_far_, h_far_.data(), h_far_.size() * sizeof(void*), cudaMemcpyHostToDevice),
                "expert slots");
@@ -5550,13 +5544,12 @@ bool Engine::moe_card(Layer& L, int il, int n) {
     L.card = 1;
     const int rr = n * n_used_;
     const void* const* table = d_slots_ + (size_t) il * n_expert_;
-    [[maybe_unused]] const bool rings = bell_ && n == 1;
+    [[maybe_unused]] const bool rings = bell_;
 #if !defined(STRATA_GPU_METAL)
-    if (rings) {   // the doorbell: the misses to the host, a token's place under --tail-skip's
+    if (rings) {   // the doorbell: the misses to the host, a call's places under --tail-skip's
         if (!block_pass_) count_picks(d_ids_, rr, n_expert_, d_use_ + (size_t) il * n_expert_, st_);
         bell_ring(table, d_ids_, d_wts_, n_used_, opt_.tail_skip > 0 ? opt_.tail_skip : n_used_, il, xn_, h_x_, n_embd_,
-                  h_bell_, d_bell_seq_, st_);
-        table = d_zslots_ + (size_t) il * n_expert_;
+                  n, h_bell_, d_bell_seq_, st_);
     } else if (!all_cached()) {   // card_far_: the experts it lacks, from the mirror into the staging buffer first
         far_plan(table, d_far_ + (size_t) il * n_expert_, d_ids_, rr, n_expert_, stage_, ahead_stride_, d_tab_,
                  d_fetch_, d_nfetch_, st_);
@@ -5588,7 +5581,7 @@ bool Engine::moe_card(Layer& L, int il, int n) {
     if (moe_sum_later(n)) moe_left_ = true;
     else moe_sum(d_, d_wts_, fo_, n_embd_, n_used_, n, st_);
 #if !defined(STRATA_GPU_METAL)
-    if (rings) bell_add(h_bell_, d_bell_seq_, h_cpu_, fo_, n_embd_, st_);   // (bells(): no sum later then)
+    if (rings) bell_add(h_bell_, d_bell_seq_, h_cpu_, fo_, n_embd_, n, st_);   // (bells(): no sum later then)
 #endif
     return true;
 }
@@ -5598,33 +5591,40 @@ bool Engine::bell_on(int n) const {
     (void) n;
     return false;
 #else
-    return n == 1 && h_bell_ && !all_cached() && !card_far_ && !pool_ && !split_ && !block_pass_ && !opt_.dump;
+    return n >= 1 && n <= std::min(kBellRows, rows_) && n * n_used_ <= std::min(kBellJobs, card_rows()) &&
+           opt_.skip_weight <= 0.f && h_bell_ && !all_cached() && !card_far_ && !pool_ && !split_ && !block_pass_ &&
+           !opt_.dump;
 #endif
 }
 
-// The doorbell's host side, after a token's launches: each ring is a layer's experts that the card lacks, computed by
-// the workers as moe() computes its CPU experts (the token's input in h_x_, their sum into h_cpu_) and answered, until
-// the card is past the token's last launch.  Here, not on threads of its own: the token's launches are all handed
-// over by then, and this thread would wait for the card anyway.
+// The doorbell's host side, after a call's launches: each ring is a layer's experts that the card lacks, computed by
+// the workers as moe() computes its CPU experts (each row's input in h_x_, their sum into h_cpu_) and answered, until
+// the card is past the call's last launch.  Here, not on threads of its own: the call's launches are all handed over
+// by then, and this thread would wait for the card anyway.
 void Engine::bell_serve() {
 #if !defined(STRATA_GPU_METAL) && !defined(STRATA_USE_HIP)
     ck(cudaEventRecord((cudaEvent_t) ev_bell_, cs(st_)), "the doorbell");
+    std::atomic_ref<uint32_t> ring(h_bell_->ring), ack(h_bell_->ack), abort(h_bell_->abort);
+    uint32_t spins = 0;
     for (;;) {
-        const uint32_t r = h_bell_->ring;
+        const uint32_t r = ring.load(std::memory_order_acquire);
         if (r != bell_seen_) {
-            std::atomic_thread_fence(std::memory_order_acquire);
             bell_seen_ = r;
             try {
                 bell_job();
             } catch (...) {
-                h_bell_->abort = 1;   // the card's waits end; what it adds is spoiled, and the call throws
+                abort.store(1, std::memory_order_release);   // the card's waits end; what it adds is spoiled, and the call throws
                 cudaStreamSynchronize(cs(st_));
-                h_bell_->abort = 0;
-                bell_seen_ = h_bell_->ring;
+                abort.store(0, std::memory_order_release);
+                bell_seen_ = ring.load(std::memory_order_acquire);
                 throw;
             }
-            std::atomic_thread_fence(std::memory_order_release);
-            h_bell_->ack = r;
+            ack.store(r, std::memory_order_release);
+            spins = 0;
+            continue;
+        }
+        if ((++spins & 63u) != 0) {
+            spin_pause();
             continue;
         }
         const cudaError_t q = cudaEventQuery((cudaEvent_t) ev_bell_);
@@ -5637,23 +5637,26 @@ void Engine::bell_serve() {
 
 void Engine::bell_job() {
     const int il = h_bell_->layer, n = std::min<int>(h_bell_->n, kBellJobs);
+    const int rows = std::clamp<int>(h_bell_->rows, 1, kBellRows);
     const Layer& L = layers_[(size_t) il];
     CpuExpert host[kBellJobs];
     for (int j = 0; j < n; ++j) {
         const size_t e = (size_t) h_bell_->e[j];
         const float w = L.h_s_down.empty() ? h_bell_->w[j] : h_bell_->w[j] * L.h_s_down[e];   // NVFP4's down scale
         const float gs = L.h_s_gate.empty() ? 1.f : L.h_s_gate[e], us = L.h_s_up.empty() ? 1.f : L.h_s_up[e];
+        const int row = std::clamp<int>(h_bell_->row[j], 0, rows - 1);
         if (const uint8_t* m = mirror(il, (int) e))
-            host[j] = {m, m + L.gu_bytes, m + L.gu2(), w, 0, gs, us};
+            host[j] = {m, m + L.gu_bytes, m + L.gu2(), w, row, gs, us};
         else
-            host[j] = {L.exp_gate + e * L.gu_stride, L.exp_up + e * L.u_stride, L.exp_down + e * L.d_bytes, w, 0, gs, us};
+            host[j] = {L.exp_gate + e * L.gu_stride, L.exp_up + e * L.u_stride, L.exp_down + e * L.d_bytes, w, row, gs,
+                       us};
     }
     const Clock::time_point t0 = Clock::now();
-    cpu_experts(*workers_, host, n, 1, (int) L.gu_type, (int) L.u_type, (int) L.d_type, n_embd_, n_ff_exp_, h_x_,
+    cpu_experts(*workers_, host, n, rows, (int) L.gu_type, (int) L.u_type, (int) L.d_type, n_embd_, n_ff_exp_, h_x_,
                 clamp_exp_[(size_t) il], gelu_, h_cpu_, nullptr, nullptr, nullptr, situ_beta_, situ_lb_);
     stats_.cpu_ms += ms_since(t0);
     stats_.cpu_experts += n;
-    stats_.gpu_experts -= n;   // run() counted every pick of the token as the card's
+    stats_.gpu_experts -= n;   // run() counted every pick of the call as the card's
 }
 
 // m experts from the mapped file into the staging buffer: gate and up of each back to back from the start, the
@@ -7422,6 +7425,7 @@ void Engine::step(const int* seqs, const int32_t* tokens, int n, const int32_t* 
 }
 
 int32_t Engine::picked(int i) const {
+    if (next_) return next_->picked(i);   // a layer split: the last card's pick, or its logits
     return picks_ ? h_picks_[i].token : most_likely(logits_of(i), n_vocab_);
 }
 

@@ -285,25 +285,26 @@ void far_pull(const FarFetch* fetch, const int* count, int most, size_t bytes, v
 /// v0.2.19's Inkling hybrid mode (engine/src/inkling2/cuda/ink_hybrid.cuh): the card rings it with the experts it
 /// lacks and goes on with its own, the host computes those and answers, and the card waits for the answer only where
 /// it adds their sum.  Its fields are each a cache line from the others'.
-constexpr int kBellJobs = 32;
+constexpr int kBellRows = 8, kBellJobs = 64;
 struct ExpertBell {
-    volatile uint32_t ring;    ///< the card's rings so far; a new value is a new job
+    uint32_t ring;             ///< the card's rings so far; a new value is a new job
     uint32_t pad0[15];
-    volatile uint32_t ack;     ///< the ring the host has answered
+    uint32_t ack;              ///< the ring the host has answered
     uint32_t pad1[15];
-    volatile uint32_t abort;   ///< the host gave up: every wait ends at once
+    uint32_t abort;            ///< the host gave up: every wait ends at once
     uint32_t pad2[15];
-    int32_t layer, n;          ///< the job: layer and how many experts
-    int32_t e[kBellJobs];      ///< their ids
+    int32_t layer, n, rows;    ///< the job: layer, how many experts, and rows in the call
+    int32_t e[kBellJobs];      ///< their ids (ordered by row)
+    int32_t row[kBellJobs];    ///< which row of the call each entry belongs to
     float w[kBellJobs];        ///< their router weights
 };
-/// One token's picks ids[0..n_used) with weights w at layer `layer`: the ones whose slots[] entry is null, at a place
-/// under skip_from, go into the bell, x (n floats) into hx, and the bell rings (seq[0] counts the rings; seq[1] is
-/// this one, or 0 when there is none).  One block.  CUDA only.
+/// `rows` tokens' picks ids[0..rows*n_used) with weights w at layer `layer`: the ones whose slots[] entry is null,
+/// kept under `skip_from`, go into the bell, active rows of x (n floats per row) into hx, and the bell rings (seq[0]
+/// counts the rings; seq[1] is this one or 0; seq[2] is the active row mask).  One block.  CUDA only.
 void bell_ring(const void* const* slots, const int32_t* ids, const float* w, int n_used, int skip_from, int layer,
-               const float* x, float* hx, int n, ExpertBell* bell, uint32_t* seq, void* stream);
-/// Where seq[1] is a ring: wait until the bell's ack is that ring (or abort is set), then acc += hy (n floats).
-void bell_add(const ExpertBell* bell, const uint32_t* seq, const float* hy, float* acc, int n, void* stream);
+               const float* x, float* hx, int n, int rows, ExpertBell* bell, uint32_t* seq, void* stream);
+/// Where seq[1] is a ring: wait until the bell's ack is that ring (or abort is set), then acc += hy per active row.
+void bell_add(const ExpertBell* bell, const uint32_t* seq, const float* hy, float* acc, int n, int rows, void* stream);
 /// copy2() with a third run.  CUDA and HIP only.
 void copy3(const void* x0, void* y0, int n0, const void* x1, void* y1, int n1, const void* x2, void* y2, int n2,
            void* stream);

@@ -1999,6 +1999,11 @@ __global__ void native_mmvq_slots_kernel(S slots, int n_in, int n_out) {
     float* y = at.y;
     const int tid = WARP * int(threadIdx.y) + int(threadIdx.x);
     const int row0 = ROWS * int(blockIdx.x);
+    if (!w) {
+        if (threadIdx.y == 0 && threadIdx.x < ROWS && row0 + int(threadIdx.x) < n_out)
+            y[row0 + int(threadIdx.x)] = 0.0f;
+        return;
+    }
     const int blocks_per_row = n_in / F::DIV;
     float tmp[ROWS] = {};
     for (int kbx = tid / F::T; kbx < blocks_per_row; kbx += F::BPI) {
@@ -2048,6 +2053,11 @@ __global__ void native_mmvq_slots_warp_kernel(S slots, int n_in, int n_out) {
     const int warp_row0 = ROWS * (int(blockIdx.x) * WARPS + int(threadIdx.y)) * G;
     if (warp_row0 >= n_out) return;   // whole warps: no barrier below
     const int row0 = warp_row0 + ROWS * grp;
+    if (!w) {
+        for (int i = 0; i < ROWS; ++i)
+            if (local == i && row0 + i < n_out) y[row0 + i] = 0.0f;
+        return;
+    }
     const int blocks_per_row = n_in / F::DIV;
     float tmp[ROWS] = {};
     if (row0 < n_out) {

@@ -5823,6 +5823,10 @@ __global__ void __launch_bounds__(128) mmvq_slots_kernel(S slots, size_t row_byt
     if (row >= n_out) return;
     const int lane = threadIdx.x;
     const SlotPtrs at = slot_ptrs(slots, int(blockIdx.y));
+    if (!at.w) {
+        if (lane == 0) at.y[row] = 0.0f;
+        return;
+    }
     const uint8_t* wr = (const uint8_t*) at.w + (size_t) row * row_bytes;
     const float s = row_dot<TY>(wr, (const block_q8_1*) at.x, n_in / Fmt<TY>::qk, lane);
     if (lane == 0) at.y[row] = s;
@@ -5908,12 +5912,20 @@ template<> struct Iq3Lane<18> {   // vec_dot_iq3_xxs_q8_1
 template<int TY, int R, typename S>
 __global__ void __launch_bounds__(128) mmvq_slots_iq3_kernel(S slots, size_t row_bytes, int n_in, int n_out) {
     using T = Iq3Lane<TY>;
+    const SlotPtrs at = slot_ptrs(slots, int(blockIdx.y));
+    if (!at.w) {
+        const int row0 = (blockIdx.x * 4 + threadIdx.y) * R;
+        if (row0 < n_out && threadIdx.x == 0) {
+            const int rows = min(R, n_out - row0);
+            for (int q = 0; q < rows; ++q) at.y[row0 + q] = 0.0f;
+        }
+        return;
+    }
     __shared__ uint32_t s_grid[T::GRID];
     for (int i = threadIdx.y * 32 + threadIdx.x; i < T::GRID; i += 128) s_grid[i] = T::src()[i];
     __syncthreads();
     const int row0 = (blockIdx.x * 4 + threadIdx.y) * R;
     if (row0 >= n_out) return;
-    const SlotPtrs at = slot_ptrs(slots, int(blockIdx.y));
     const int lane = threadIdx.x, C = (n_in / 256) * 8, rows = min(R, n_out - row0);
     const uint8_t* w = (const uint8_t*) at.w + (size_t) row0 * row_bytes;
     const block_q8_1* x = (const block_q8_1*) at.x;

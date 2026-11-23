@@ -18,7 +18,8 @@ struct SlotPtrs {
 __device__ __forceinline__ SlotPtrs slot_ptrs(const MmvqSlots& s, int j) { return {s.w[j], s.x[j], s.y[j]}; }
 
 __device__ __forceinline__ SlotPtrs slot_ptrs(const MmvqIds& s, int j) {
-    return {static_cast<const uint8_t*>(s.table[s.ids[j]]) + s.offset,
+    const void* base = s.table[s.ids[j]];
+    return {base ? static_cast<const uint8_t*>(base) + s.offset : nullptr,
             static_cast<const uint8_t*>(s.x) + std::size_t(j / s.x_every) * s.x_stride, s.y + std::size_t(j) * s.y_stride};
 }
 
