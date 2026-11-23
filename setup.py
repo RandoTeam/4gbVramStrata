@@ -573,8 +573,8 @@ FAMILIES = {
     # Inkling 2 Mini (llama.cpp's inkling2_loop): 24 layers of weights run as 48, the middle twelve three times, so a
     # context token is the rows of the eight full-attention applications ("row_bytes"); the forty window ones keep
     # rings.  The files are the repository's Mainline_Support ones, the layout llama.cpp runs: the repository names them
-    # .gguf_file ("remote_suffix") and its top-level files are another layout (architecture inkling2), which the
-    # engine refuses.  The engine keeps one sequence's state for it, so it answers one request at a time
+    # .gguf_file ("remote_suffix") and its top-level files are Unsloth's layout (architecture inkling2), which the
+    # engine also reads: a --gguf-dir file of either is taken.  The engine keeps one sequence's state for it, so it answers one request at a time
     # ("one_request": setup writes "parallel": 1).  "vram_beside_gb" is the peak VRAM measured on an RTX 5090 with no
     # expert on the card, a 10,081-token prompt read 1,024 tokens at a time at a 32K context (2,916 MiB), plus the rows
     # of the context's other tokens.
@@ -591,7 +591,7 @@ FAMILIES = {
                 # UD-Q3_K_XL on the RTX 4070 Laptop (8 GB), the README's benchmark, medians of 3 rounds: 43.7 -> 55.8
                 # tokens/s written in the short chat, 439 -> 466 read and 33.6 -> 41.9 written after the long prompt;
                 # the same most likely token as without them at 96.7% of 1,280 steps, the default run again at 98.3%
-                "small_card_args": ["--attn-requant", "q5_0", "--loop-bf16", "--tail-skip", "4", "--expert-swaps", "0"],
+                "small_card_args": ["--attn-requant", "q5_0", "--loop-bf16", "--tail-skip", "4"],
                 "models": {"UD-Q4_K_XL": {"about": "4-bit experts (NVFP4, Unsloth Dynamic), 8-bit where they write",
                                           "download_gb": 17.6, "ram_gb": 21, "arena_gb": 15.797846016,
                                           "vram_beside_gb": 3.7},
@@ -2481,7 +2481,7 @@ def verify_sha256(s: Path, size: int, sha: str, own: bool = False) -> None:
 # code by; the families not listed are qwen35moe
 FOURGBVRAM_GGUF_ARCHS = {"glm": ("glm5-next", "glm5next"), "deepseek": ("deepseek4",), "lfm25": ("lfm2moe",),
                    "gemma4": ("gemma4",), "flint": ("flint",), "kolibri": ("kolibri1",), "clover": ("clover_moe",),
-                   "inkling": ("inkling2_loop",)}
+                   "inkling": ("inkling2_loop", "inkling2")}
 
 
 def gguf_arch(s: Path) -> str:

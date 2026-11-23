@@ -37,8 +37,8 @@ class Pins(unittest.TestCase):
             self.assertEqual(d["ram_gb"], round(setup.fourgbvram_ram_need(d, 8.0)), size)
 
     def test_the_engine_s_name_for_its_files(self):
-        # the repository's top-level files are another layout (general.architecture inkling2), which is not taken
-        self.assertEqual(setup.FOURGBVRAM_GGUF_ARCHS["inkling"], ("inkling2_loop",))
+        # both Mainline_Support (inkling2_loop) and Unsloth top-level (inkling2) layouts are accepted
+        self.assertEqual(setup.FOURGBVRAM_GGUF_ARCHS["inkling"], ("inkling2_loop", "inkling2"))
 
 
 class Main(unittest.TestCase):
@@ -65,14 +65,14 @@ class Main(unittest.TestCase):
                 self.assertNotIn("--parallel", out)                               # not offered
 
     def test_a_card_that_holds_part_of_the_experts_gets_the_small_card_flags(self):
-        # an 8 GB card: Q5_0 attention, BF16 loop controllers, tail skip 4, no expert swaps
+        # an 8 GB card: Q5_0 attention, BF16 loop controllers, tail skip 4 (expert swaps stay enabled)
         code, out, _ = self.main(family="inkling", model="UD-Q3_K_XL", ram=32.0, vram=8188 / 1024)
         self.assertEqual(code, 0, out)
         args = json.loads((self.t / "strata-inkling-ud-q3_k_xl.json").read_text())["args"]
         self.assertEqual(args[args.index("--attn-requant") + 1], "q5_0")
         self.assertIn("--loop-bf16", args)
         self.assertEqual(args[args.index("--tail-skip") + 1], "4")
-        self.assertEqual(args[args.index("--expert-swaps") + 1], "0")
+        self.assertNotIn("--expert-swaps", args)
         self.assertEqual(args.count("--tail-skip"), 1)
         self.assertIn("holds part of", out)
 
