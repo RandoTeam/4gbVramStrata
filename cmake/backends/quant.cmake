@@ -92,8 +92,10 @@ macro(strata_quant_layer)
                                   "-march=armv8.2-a+dotprod+fp16+i8mm;${STRATA_QUANT_NEON_EXTRA}")
     endif()
   endif()
-  add_executable(quant_bench ${_sq}/tests/quant/quant_bench.cpp)   # one-thread GB/s of every kernel (no ggml); not a test
-  target_link_libraries(quant_bench PRIVATE strata_quant)
+  if(EXISTS "${_sq}/tests/quant/quant_bench.cpp")
+    add_executable(quant_bench ${_sq}/tests/quant/quant_bench.cpp)   # one-thread GB/s of every kernel (no ggml); not a test
+    target_link_libraries(quant_bench PRIVATE strata_quant)
+  endif()
   if(STRATA_BUILD_TESTS)
     add_executable(quant_selftest ${_sq}/tests/quant/quant_selftest.cpp)
     target_link_libraries(quant_selftest PRIVATE strata_quant)
