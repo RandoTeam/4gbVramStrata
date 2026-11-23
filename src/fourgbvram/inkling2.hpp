@@ -1,5 +1,6 @@
 // src/fourgbvram/inkling2.hpp - Thinking Machines' Inkling 2 with a looped core (llama.cpp architecture "inkling2_loop"):
-// Inkling 2 Mini.
+// Inkling 2 Mini.  Unsloth's top-level files (architecture "inkling2") are the same weights under other names; the
+// engine reads them through tensor_alias(), meta_alias() and msg_query() (inkling2.cpp).
 //
 // 24 layers of weights make 48 layer applications: the layers before the core run once, the core's run
 // loop.count times, each pass from the output of the layers before it, and the layers after it once.  A layer of a
@@ -31,6 +32,8 @@ public:
 protected:
     void load_geometry() override;
     void load_layer(int il) override;
+    const Names* tensor_alias(const char* name) const override;
+    const Names* meta_alias(const char* key) const override;
     void begin_pass() override;
     size_t recurrent_floats() const override;
     void save_layer(int il, int64_t pos, uint8_t* dst) override;
@@ -38,9 +41,12 @@ protected:
     void load_extra(const uint8_t* src, int64_t pos) override;
     void alloc_caches() override;
     void assign_scratch() override;
-#if !defined(STRATA_GPU_METAL) && !defined(STRATA_USE_HIP)
-    bool scratch_layouts() const override { return true; }
-#endif
+    // A call of a few tokens keeps a scratch of its own, and a prompt batch's is lent to the expert cache between
+    // prompts (Engine::use_scratch()).  Not with the drafter, whose features are a whole call's rows, nor on ROCm on
+    // Linux, nor where nothing would be lent: the experts frozen, or every one of them in VRAM (inkling2.cpp).
+    bool scratch_layouts() const override;
+    bool scores_apart() const;   ///< the attention's scores outside the scratch, for its two layouts to share
+    bool every_expert_fits() const;
     int widest() const override;
     int streams() const override { return 1; }
     void layer_head(Layer& L, int il, int n) override;
@@ -61,6 +67,9 @@ protected:
     void output_rows(int first, int rows, float* h) override;
     void finish_logits(float* logits, int rows) override;
     void route(int il, const float* logits, int32_t token, int* ids, float* w, float* tmp) const override;
+    void route_cached(const Layer& L, int il, const float* logits, int32_t token, int* ids, float* w,
+                      float* tmp) override;
+    void slots_moved() override;
     bool route_card(int il, int n, int32_t* ids, float* w) override;
     void moe_shared(const Layer& L, int il, int n) override;
 
@@ -118,7 +127,7 @@ private:
     void join();
     void control(const float* cur, const float* msg, const Ctrl& c, float* out, int n);
     bool control3(const float* const* cur, float* const* msg, const Ctrl* c, float* const* out, int n);
-    bool project(const Block& B, const float* const* x, int n, bool quantized = false);
+    bool project(const Block& B, const float* const* x, int n, bool quantized = false, bool* extras = nullptr);
     bool control_ffn(const float* msg, const Ctrl& c, const Block& B);
     void guess_block(int32_t token) override;
     bool own_blocks() const override { return ds_file_ != nullptr; }
@@ -126,8 +135,19 @@ private:
     // experts' sum comes in after the card's
     bool moe_sum_later(int n) const override { return n == 1 && whole_rec_ && !bell_; }
     bool bells() const override { return true; }
+#if defined(STRATA_USE_HIP)
+    // the shared expert is one memset (moe_shared()), and a graph launch a layer for it cost an RX 9070 XT's host
+    // more than the memset: with experts on the CPU (no doorbell on HIP) a token's layers are launched one by one
+    bool shared_recorded() const override { return false; }
+#endif
     // routed on the card in that recording: the host reads neither
     bool router_rows_to_host(int n) const override { return !(n == 1 && whole_rec_); }
+#if !defined(STRATA_GPU_METAL)
+    // Both GGUFs' routers are F32 of BF16 values: as BF16 a token reads half of their bytes, the same scores
+    // (gemv_bf16() is gemv_f32()'s sums, a prompt batch's gemm_f32() takes them widened).  Idea: merbanan's Strata
+    // branch inkling2-turing.
+    bool router_bf16() const override { return true; }
+#endif
     void copy_rows(const float* from, float* to, int n);
     void tail_rows(int il, int n);
     /// The application of layer il in pass `pass`, in the order a token runs them.
@@ -136,6 +156,7 @@ private:
         return il < core_start_ ? il : il < core_end_ ? core_start_ + pass * core + il - core_start_
                                                        : il + (n_pass_ - 1) * core;
     }
+    Dev msg_query(int il);
     void ds_open();
     void ds_load();
     void ds_commit(int n);
@@ -154,10 +175,20 @@ private:
     int n_unpadded_ = 0;
     float qk_clip_ = 0, rel_clip_ = 0, log_alpha_ = 0, log_floor_ = 1, softcap_ = 0;
     float w_scale_ = 0;
+    float* cache_b_ = nullptr;   ///< --cache-bias: each layer's pick bias for the card (slots_moved())
+    void route_by(const float* logits, const float* bias, int* ids, float* w, float* probs) const;
+    void cached_bias(const Layer& L, int il, float* b) const;
     uint32_t attn_type_ = 0;   ///< --attn-requant's type for the attention's matrices; 0: the file's
+    bool unsloth_ = false;     ///< an "inkling2" file: block_count counts applications, the loop's names are Unsloth's
     bool ctrl_bf16_ = false;   ///< --loop-bf16: the loop controllers' matrices in BF16
     bool kv8_ = false;         ///< the attention caches in FP8 E4M3 (load_geometry()); else fp16
-    size_t kv_row() const { return kv8_ ? ink_kv8_row(n_kv_, head_dim_) : (size_t) n_kv_ * head_dim_ * sizeof(uint16_t); }
+    bool kvq8_ = false;        ///< the attention caches in Q8_0 (load_geometry(), --kv q8_0)
+    bool int8_dot_ = false;    ///< STRATA_KV_INT8: long rows' scores by __dp4a on the Q8_0 caches (InkAttn::int8_dot)
+    size_t kv_row() const {
+        return kv8_    ? ink_kv8_row(n_kv_, head_dim_)
+               : kvq8_ ? ink_kvq8_row(n_kv_, head_dim_)
+                       : (size_t) n_kv_ * head_dim_ * sizeof(uint16_t);
+    }
     int pass_ = 0;   ///< the core's pass the call under way is in
     // The DSpark drafter (--draft-model, a file of architecture dflash): three dense layers over a block of the
     // anchor token and mask rows, reading keys and values made from four of the target's features of every position
@@ -218,6 +249,10 @@ private:
           *sink_ = nullptr, *gate_ = nullptr, *kdyn_ = nullptr, *vdyn_ = nullptr, *att_ = nullptr, *aoraw_ = nullptr,
           *fc_ = nullptr, *score_ = nullptr, *zeros_ = nullptr, *awork_ = nullptr;
     size_t score_n_ = 0;
+    static constexpr int64_t kKvq8WorkRows = 4096;   ///< the rows of a Q8_0 cache attend_batch() dequantizes at once
+    float* kvw_ = nullptr;                           ///< their halves, keys then values (kvq8_)
+    size_t kvw_halves_ = 0;
+    float* scores_ = nullptr;   ///< score_ where it is apart from the scratch (scores_apart())
 };
 
 }  // namespace strata::fourgbvram

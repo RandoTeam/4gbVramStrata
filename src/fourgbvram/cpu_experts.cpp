@@ -63,8 +63,8 @@ void dot_bf16(int n, float* s, const void* w, const void* a) {
 
 struct Rows {
     DotFn dot = nullptr;
-    Q::DotX4Fn dot_x4 = nullptr;
     Q::DotRowsFn dots = nullptr;   // the same products for several activation rows at once, where there is one
+    Q::DotX4Fn x4 = nullptr;       // four weight rows against one activation row, each value dot's bits, where there is one
     ActFn act = nullptr;
     Q::Arith arith = Q::Arith::Generic;
     int blck = 1;          // values a block of the weights
@@ -89,11 +89,13 @@ Rows rows_of(int type) {
     const Q::DotKernel* dot = Q::dot_kernel(t->type, arith);
     const Q::ActKernel* act = Q::act_kernel(t->act, arith);
     if (dot == nullptr || act == nullptr) return r;
-    const Q::DotX4Kernel* x4 = Q::dot_x4_kernel(t->type, arith);
     r.arith = arith;
     r.dot = dot->fn;
-    r.dot_x4 = x4 ? x4->fn : nullptr;
     r.dots = Q::dot_rows_kernel(t->type, arith);
+    // the layer's four-row kernel of dot's own level only: one of another level (AVX-512 beside the AVX2 Q4_K the
+    // table keeps) need not give dot's bits.  cpu_x4_test checks that each one taken here does.
+    const Q::DotX4Kernel* x4 = Q::dot_x4_kernel(t->type, arith, dot->isa);
+    if (x4 != nullptr && x4->isa == dot->isa) r.x4 = x4->fn;
     r.act = act->fn;
     r.blck = t->blck;
     r.act_blck = a->blck;
@@ -115,7 +117,36 @@ inline float activate(float g, float u, float limit, bool gelu, float situ_beta,
 
 thread_local bool in_task = false;   // this thread is running a task of a batch
 
+constexpr int kUses = 8;   // an expert's uses taken together by the gate and up products
+
+// s[q][k] = weight row q of the nr rows at w (row_bytes apart) times activation row a[k], for k < m: four rows a call
+// where the format has a four-row kernel and no several-activations kernel covers the uses, else a row a call.  Every
+// value is the bits of t.dot's for that pair, whichever way it is taken.
+void products(const Rows& t, int n, int nr, int m, float (*s)[kUses], const uint8_t* w, size_t row_bytes,
+              const void* const* a) {
+    if (nr == 4 && t.x4 && !(m > 1 && t.dots)) {
+        for (int k = 0; k < m; ++k) {
+            float o[4];
+            t.x4(n, o, w, row_bytes, a[k]);
+            for (int q = 0; q < 4; ++q) s[q][k] = o[q];
+        }
+        return;
+    }
+    for (int q = 0; q < nr; ++q) {
+        const uint8_t* row = w + (size_t) q * row_bytes;
+        if (m > 1 && t.dots) t.dots(n, m, s[q], row, a);
+        else for (int k = 0; k < m; ++k) t.dot(n, s[q] + k, row, a[k]);
+    }
+}
+
 }  // namespace
+
+CpuDotX4 cpu_dot_x4(int type) {
+    const Rows r = rows_of(type);
+    CpuDotX4 out;
+    if (r.x4 != nullptr) out.one = r.dot, out.four = r.x4;
+    return out;
+}
 
 Workers::Workers(int threads) : busy_((size_t) std::max(threads - 1, 0)) {
     for (int i = 1; i < threads; ++i) th_.emplace_back([this, i] { loop(i - 1); });
@@ -358,78 +389,58 @@ void cpu_experts(Workers& workers, const CpuExpert* experts, int n, int rows, in
         if (late && late[byp[i0]]) (*wait)(byp[i0]);
         const CpuExpert& e = experts[byp[i0]];
         const int r0 = (t % gu_tasks) * per, r1 = std::min(n_ff, r0 + per);
-        const int nr = r1 - r0;
-        constexpr int kUses = 8;
-        bool handled = false;
-        if (nr > 0 && gu_type == (int) Q::Type::NVFP4 && u_type == (int) Q::Type::NVFP4) {
+        const int nr_tot = r1 - r0;
+        bool handled_nvfp4 = false;
+        if (nr_tot > 0 && gu_type == (int) Q::Type::NVFP4 && u_type == (int) Q::Type::NVFP4) {
             static thread_local std::vector<float> gbuf, ubuf;
-            gbuf.resize((size_t) kUses * (size_t) nr);
-            ubuf.resize((size_t) kUses * (size_t) nr);
-            handled = true;
+            gbuf.resize((size_t) kUses * (size_t) nr_tot);
+            ubuf.resize((size_t) kUses * (size_t) nr_tot);
+            handled_nvfp4 = true;
             for (int i = i0; i < i1;) {
                 const int m = std::min(kUses, i1 - i);
                 const void* as[kUses];
                 for (int k = 0; k < m; ++k) as[k] = actp + (size_t) experts[byp[i + k]].row * a_bytes;
                 if (!Q::nvfp4_gu_rows(tg.arith, e.gate, gu_row, e.up, u_row, n_embd, as, m, gbuf.data(), ubuf.data(),
                                       r0, r1)) {
-                    handled = false;
+                    handled_nvfp4 = false;
                     break;
                 }
                 for (int k = 0; k < m; ++k, ++i) {
                     const int j = byp[i];
                     float* dst = hp + (size_t) j * n_ff + r0;
-                    const float* gp = gbuf.data() + (size_t) k * (size_t) nr;
-                    const float* up = ubuf.data() + (size_t) k * (size_t) nr;
-                    for (int dr = 0; dr < nr; ++dr)
+                    const float* gp = gbuf.data() + (size_t) k * (size_t) nr_tot;
+                    const float* up = ubuf.data() + (size_t) k * (size_t) nr_tot;
+                    for (int dr = 0; dr < nr_tot; ++dr)
                         dst[dr] = activate(gp[dr] * e.gate_scale, up[dr] * e.up_scale, limit, gelu, situ_beta, situ_lb);
                 }
             }
         }
-        if (!handled && i1 - i0 == 1 && tg.dot_x4 && tu.dot_x4) {
-            const int j = byp[i0];
-            const void* ap = actp + (size_t) experts[j].row * a_bytes;
-            const void* aup = actup + (size_t) experts[j].row * au_step;
-            float* dst = hp + (size_t) j * n_ff;
-            int r = r0;
-            for (; r + 4 <= r1; r += 4) {
-                float gs[4], us[4];
-                tg.dot_x4(n_embd, gs, e.gate + (size_t) r * gu_row, gu_row, ap);
-                tu.dot_x4(n_embd, us, e.up + (size_t) r * u_row, u_row, aup);
-                for (int q = 0; q < 4; ++q)
-                    dst[r + q] = activate(gs[q] * e.gate_scale, us[q] * e.up_scale, limit, gelu, situ_beta, situ_lb);
-            }
-            for (; r < r1; ++r) {
-                float g, u;
-                tg.dot(n_embd, &g, e.gate + (size_t) r * gu_row, ap);
-                tu.dot(n_embd, &u, e.up + (size_t) r * u_row, aup);
-                dst[r] = activate(g * e.gate_scale, u * e.up_scale, limit, gelu, situ_beta, situ_lb);
-            }
-            handled = true;
-        }
-        if (!handled) {
-            for (int r = r0; r < r1; ++r) {
+        // Four weight rows at a time (Rows::x4, a format's four-row kernel), the last few one by one.  The expert's
+        // uses kUses at a time: where the format has a kernel for several activation rows (Rows::dots), a weight row
+        // is decoded once for all of them.  Each product is the bits of its own.
+        if (!handled_nvfp4) {
+            for (int r = r0; r < r1;) {
+                const int nr = r + 4 <= r1 ? 4 : 1;
                 const uint8_t* gate = e.gate + (size_t) r * gu_row;
                 const uint8_t* up = e.up + (size_t) r * u_row;
-                // The expert's uses kUses at a time: where the format has a kernel for several activation rows
-                // (Rows::dots), the weight row is decoded once for all of them, each product the bits of its own.
                 for (int i = i0; i < i1;) {
                     const int m = std::min(kUses, i1 - i);
-                    float gs[kUses], us[kUses];
+                    float gs[4][kUses], us[4][kUses];
                     const void *as[kUses], *aus[kUses];
                     for (int k = 0; k < m; ++k) {
                         as[k] = actp + (size_t) experts[byp[i + k]].row * a_bytes;
                         aus[k] = actup + (size_t) experts[byp[i + k]].row * au_step;
                     }
-                    if (m > 1 && tg.dots) tg.dots(n_embd, m, gs, gate, as);
-                    else for (int k = 0; k < m; ++k) tg.dot(n_embd, gs + k, gate, as[k]);
-                    if (m > 1 && tu.dots) tu.dots(n_embd, m, us, up, aus);
-                    else for (int k = 0; k < m; ++k) tu.dot(n_embd, us + k, up, aus[k]);
+                    products(tg, n_embd, nr, m, gs, gate, gu_row, as);
+                    products(tu, n_embd, nr, m, us, up, u_row, aus);
                     for (int k = 0; k < m; ++k, ++i) {
                         const int j = byp[i];
-                        hp[(size_t) j * n_ff + r] =
-                            activate(gs[k] * e.gate_scale, us[k] * e.up_scale, limit, gelu, situ_beta, situ_lb);
+                        for (int q = 0; q < nr; ++q)
+                            hp[(size_t) j * n_ff + r + q] =
+                                activate(gs[q][k] * e.gate_scale, us[q][k] * e.up_scale, limit, gelu, situ_beta, situ_lb);
                     }
                 }
+                r += nr;
             }
         }
         // the last of the run's tasks sees every other one's rows (release by each, acquire by the last)
@@ -446,7 +457,6 @@ void cpu_experts(Workers& workers, const CpuExpert* experts, int n, int rows, in
         const int r0 = t * kRowsPerDownTask, r1 = std::min(n_embd, r0 + kRowsPerDownTask);
         const int nr = r1 - r0;
         if (nr <= 0) return;
-        constexpr int kUses = 8;
         block.resize((size_t) n * (size_t) nr);
         dtmp.resize((size_t) kUses * (size_t) nr);
         float* blk = block.data();
@@ -462,10 +472,10 @@ void cpu_experts(Workers& workers, const CpuExpert* experts, int n, int rows, in
                     for (int k = 0; k < m; ++k)
                         std::memcpy(blk + (size_t) byp[i + k] * (size_t) nr, dtmp.data() + (size_t) k * (size_t) nr,
                                     (size_t) nr * sizeof(float));
-                } else if (m == 1 && td.dot_x4) {
+                } else if (m == 1 && td.x4) {
                     float* dst = blk + (size_t) byp[i] * (size_t) nr;
                     int r = r0;
-                    for (; r + 4 <= r1; r += 4) td.dot_x4(n_ff, dst + (r - r0), down_base + (size_t) r * d_row, d_row, hqs[0]);
+                    for (; r + 4 <= r1; r += 4) td.x4(n_ff, dst + (r - r0), down_base + (size_t) r * d_row, d_row, hqs[0]);
                     for (; r < r1; ++r) td.dot(n_ff, dst + (r - r0), down_base + (size_t) r * d_row, hqs[0]);
                 } else if (m > 1 && td.dots) {
                     float tmp[kUses];

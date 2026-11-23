@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Niko1221 and the Strata contributors
+// SPDX-License-Identifier: MIT
+//
 // q8k_avx2.inc - bit-exact AVX2 activation quantizer for Q8_K (zero EVEX/ZMM instructions).
 // Matches quantize_q8_K_ref byte-for-byte on all inputs including exact ties and degenerate scales.
 

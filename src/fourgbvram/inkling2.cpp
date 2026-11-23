@@ -5,12 +5,19 @@
 #include "runtime.hpp"
 #include "strata/fourgbvram/kernels.hpp"
 #include "strata/kernels/native_mmvq.hpp"
+#if !defined(STRATA_GPU_METAL)
+#include "strata/kernels/iq_kernels.hpp"
+#endif
+
+#include <cuda.h>
 
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <stdexcept>
+#include <string>
 #include <utility>
 
 namespace strata::fourgbvram {
@@ -19,7 +26,75 @@ namespace {
 constexpr size_t kScoreFloats = size_t(16) << 20;   // the attention's scores of the tokens it takes at a time
 const char* const kCtrlName[] = {"q", "k", "v", "ffn"};
 
+// Unsloth's top-level files (architecture "inkling2": unsloth/Inkling-2-Mini-GGUF outside its Mainline_Support folder)
+// name the loop's parts otherwise.  Byte for byte against the inkling2_loop files of the same weights: attn = q,
+// mlp = ffn, and the loop's keys are num_loops, loop.core_start and loop.core_end.
+const Names kUnslothTensors[] = {
+    {"loop_q_ctrl_down.weight", {"loop_attn_down.weight", nullptr}},
+    {"loop_q_ctrl_gain.weight", {"loop_attn_gain.weight", nullptr}},
+    {"loop_q_ctrl_forget.weight", {"loop_attn_forget.weight", nullptr}},
+    {"loop_k_ctrl_down.weight", {"loop_k_down.weight", nullptr}},
+    {"loop_k_ctrl_gain.weight", {"loop_k_gain.weight", nullptr}},
+    {"loop_k_ctrl_forget.weight", {"loop_k_forget.weight", nullptr}},
+    {"loop_v_ctrl_down.weight", {"loop_v_down.weight", nullptr}},
+    {"loop_v_ctrl_gain.weight", {"loop_v_gain.weight", nullptr}},
+    {"loop_v_ctrl_forget.weight", {"loop_v_forget.weight", nullptr}},
+    {"loop_ffn_ctrl_down.weight", {"loop_mlp_down.weight", nullptr}},
+    {"loop_ffn_ctrl_gain.weight", {"loop_mlp_gain.weight", nullptr}},
+    {"loop_ffn_ctrl_forget.weight", {"loop_mlp_forget.weight", nullptr}},
+};
+const Names kUnslothKeys[] = {
+    {"loop.start", {"loop.core_start", nullptr}},
+    {"loop.end", {"loop.core_end", nullptr}},
+    {"loop.count", {"num_loops", nullptr}},
+};
+
 }  // namespace
+
+const Names* Inkling2::tensor_alias(const char* name) const {
+    if (unsloth_)
+        for (const Names& n : kUnslothTensors)
+            if (std::strcmp(n.name, name) == 0) return &n;
+    return nullptr;
+}
+
+const Names* Inkling2::meta_alias(const char* key) const {
+    if (unsloth_)
+        for (const Names& n : kUnslothKeys)
+            if (std::strcmp(n.name, key) == 0) return &n;
+    return nullptr;
+}
+
+// A core layer's message queries, [n_embd, 4] for Q, K, V and the FFN.  An inkling2_loop file has them as the layer's
+// loop_msg_query; an Unsloth file has two tensors of the model, [n_embd, 2 * core] each: rows 2i and 2i + 1 of
+// loop_res_query are core layer start + i's Q and FFN queries, rows 2i and 2i + 1 of loop_kv_res_query its K and V
+// ones.  The four rows go to the dense arena as upload() puts a tensor there, counted on the first pass of the load.
+Dev Inkling2::msg_query(int il) {
+    const int64_t e = n_embd_;
+    if (!unsloth_) return upload(tensor(il, "loop_msg_query.weight"), blk(il, "loop_msg_query.weight"), e, kCtrl, kF32);
+    const TensorInfo* rq = gg_->find("loop_res_query.weight");
+    const TensorInfo* kq = gg_->find("loop_kv_res_query.weight");
+    const int64_t rows = 2 * (int64_t) (core_end_ - core_start_);
+    for (const TensorInfo* t : {rq, kq})
+        if (!t || t->type != kTypeF32 || t->shape.size() != 2 || (int64_t) t->shape[0] != e ||
+            (int64_t) t->shape[1] != rows)
+            throw std::runtime_error(std::string(t ? t->name + " is " + shape_of(*t) : "loop_res_query.weight or "
+                                                 "loop_kv_res_query.weight is missing") +
+                                     ", expected F32 [" + std::to_string(e) + ", " + std::to_string(rows) + "]");
+    const size_t bytes = (size_t) kCtrl * (size_t) e * sizeof(float);
+    const Dev d{dense_ ? dense_ + dense_at_ : nullptr, kTypeF32, (int) e, kCtrl};
+    dense_at_ += pad(bytes) + kTail;
+    if (!dense_) return d;
+    if (dense_at_ > dense_bytes_) throw std::logic_error("the dense arena is too small for " + blk(il, "loop_msg_query"));
+    const float* r = (const float*) home(*rq).data(*rq);
+    const float* k = (const float*) home(*kq).data(*kq);
+    const size_t i = (size_t) (il - core_start_), row = (size_t) e;
+    const float* from[kCtrl] = {r + 2 * i * row, k + 2 * i * row, k + (2 * i + 1) * row, r + (2 * i + 1) * row};
+    std::vector<float> q((size_t) kCtrl * row);
+    for (int c = 0; c < kCtrl; ++c) std::memcpy(q.data() + (size_t) c * row, from[c], row * sizeof(float));
+    h2d(d.p, q.data(), bytes);
+    return d;
+}
 
 void Inkling2::begin_pass() {
     blocks_.assign(layers_.size(), Block{});
@@ -37,8 +112,19 @@ void Inkling2::load_geometry() {
     opt_.draft = false;
     need(opt_.batch == 0, "Inkling 2 runs one sequence (--batch is not supported for it yet)");
     need(opt_.layer_split.empty(), "Inkling 2 runs on one card (--layer-split is not supported for it yet)");
-    need(opt_.kv_format == KvFmt::kFp16 || opt_.kv_format == KvFmt::kFp8, "Inkling 2's attention caches are fp16 or fp8");
+    need(opt_.kv_format == KvFmt::kFp16 || opt_.kv_format == KvFmt::kFp8 || opt_.kv_format == KvFmt::kQ8_0,
+         "Inkling 2's attention caches are fp16, fp8 or q8_0");
+    unsloth_ = gg_->get("general.architecture")->s == "inkling2";
     load_shape();
+    if (unsloth_) {
+        // block_count counts the applications (48), the layers before the core, the core's passes and the layers
+        // after it; the file has tensors for the 24 layers of weights
+        const int passes = shape_i("loop.count"), core = shape_i("loop.end") - shape_i("loop.start");
+        need(passes >= 2 && core > 0 && n_layer_ > (passes - 1) * core, "bad loop");
+        n_layer_ -= (passes - 1) * core;
+        need(tensor(n_layer_ - 1, "ffn_norm.weight") && !tensor(n_layer_, "ffn_norm.weight"),
+             "an inkling2 file's layers are not block_count less the core's later passes");
+    }
     auto find = [&](const char* key) { return meta_in(*gg_, key); };
     core_start_ = find("loop.start") ? shape_i("loop.start") : shape_i("loop.core_start");
     core_end_ = find("loop.end") ? shape_i("loop.end") : shape_i("loop.core_end");
@@ -95,6 +181,17 @@ void Inkling2::load_geometry() {
     need((core_end_ - core_start_) / blk_ - 1 <= 1, "a loop core of more than two blocks is not supported");
     // every expert's scale goes on its joined gate and up product, whatever the experts' type
     joined_scales_ = true;
+    // the cached experts' IQ3_S / IQ3_XXS products through the kernels that keep all lanes busy (CUDA; the same bits)
+    lane_slots_ = true;
+#if !defined(STRATA_GPU_METAL) && !defined(STRATA_USE_HIP)
+    // In a prompt's read of several calls, a call's row tables go to the card by a kernel, not behind the experts'
+    // copies (kernel_tables_).  The same tables reach the same buffers, so the results are the same.  Measured on
+    // CUDA only; STRATA_INK_KERNEL_TABLES=0 turns it off.
+    {
+        const char* v = std::getenv("STRATA_INK_KERNEL_TABLES");
+        kernel_tables_ = !(v && std::string(v) == "0");
+    }
+#endif
     clamp_exp_.assign((size_t) n_layer_ + 1, INFINITY);
     clamp_shexp_ = clamp_exp_;
     // --attn-requant: the attention's six matrices quantized again to that type at load (kGuessMat), fewer bytes a
@@ -103,6 +200,38 @@ void Inkling2::load_geometry() {
     attn_type_ = a == "q4_0" ? 2 : a == "q5_0" ? 6 : a == "iq4_nl" ? 20 : 0;
     if (attn_type_) guess_type_ = attn_type_;
     ctrl_bf16_ = opt_.loop_bf16;
+#if !defined(STRATA_GPU_METAL)
+    // Turing's prompt products on the int8 kernel that Ampere and newer take by default (i8_mma.cuh), only with
+    // --prompt-int8: on Turing it gave the same most likely token as the halves at 560 of 576 steps (97.2%), under
+    // the 97.8% a default change needs, so the halves and cuBLAS stay Turing's default (STRATA_PF_I8MMA=0 turns the
+    // kernel off on every card)
+    kernels::gemm_iq_i8_turing(opt_.prompt_int8 == 1);
+    // STRATA_PREFILL_IQ1S=int8: IQ1_S (UD-Q2_K_XL's gate|up in 6 layers) on the int8 prompt kernel, as the file's
+    // other types are on Ampere and newer (i8_mma.cuh: activations int8 a 32 values).  Opt-in: on a 302-token prompt
+    // it cost more KL a matrix than those types do.  Unset or =fp16: the FP16 kernel, as before.  Other models never
+    // ask, so their IQ1_S products stay on the FP16 kernel.
+    {
+        const char* v = std::getenv("STRATA_PREFILL_IQ1S");
+        kernels::gemm_iq_i8_allow(19, v && std::string(v) == "int8");
+    }
+    // MXFP4 (UD-Q2_K_XL's down in one layer) on the int8 prompt kernel, as the file's other types already are on
+    // Ampere and newer (i8_mma.cuh: activations int8 a 32 values); STRATA_PREFILL_MXFP4=fp16 keeps it on the FP16
+    // kernel.  Other models never ask, so their MXFP4 products stay on the FP16 kernel.
+    {
+        const char* v = std::getenv("STRATA_PREFILL_MXFP4");
+        kernels::gemm_iq_i8_allow(39, !(v && std::string(v) == "fp16"));
+    }
+    // On Turing, int8 products on (--prompt-int8): a prompt batch's cached experts in a launch a class of rows
+    // (Engine::expert_tiles_), the same numbers in fewer launches; STRATA_FOURGBVRAM_EXPERT_TILES=0: a launch a run of slots
+    // again.  Not from Ampere on, where the runs' launches were not measured slower.
+    if (const char* v = std::getenv("STRATA_FOURGBVRAM_EXPERT_TILES"); !(v && v[0] == '0') && opt_.prompt_int8 == 1) {
+        int dev = 0, major = 0, minor = 0;
+        if (cudaGetDevice(&dev) == cudaSuccess &&
+            cudaDeviceGetAttribute(&major, cudaDevAttrComputeCapabilityMajor, dev) == cudaSuccess &&
+            cudaDeviceGetAttribute(&minor, cudaDevAttrComputeCapabilityMinor, dev) == cudaSuccess)
+            expert_tiles_ = major == 7 && minor >= 5;
+    }
+#endif
     // --kv fp8: the attention caches in FP8 E4M3 with a scale a row's head, about half the bytes of fp16, as Strata
     // v0.2.19's Inkling engine has them on small cards (ink_cuda_backend.cu): at 32K tokens the eight full-attention
     // runs' caches are 1 GiB in fp16, VRAM the expert cache does without.  Only where the flash kernel reads prompts
@@ -110,6 +239,25 @@ void Inkling2::load_geometry() {
     kv8_ = opt_.kv_format == KvFmt::kFp8;
     need(!kv8_ || (ink_kv8_ok() && head_dim_ == 128 && n_rel_ == 16),
          "--kv fp8 needs ink_attend_batch(): an NVIDIA card from Ampere on, STRATA_INK_FLASH not 0");
+    // --kv q8_0: the caches in Q8_0, a half scale for each block of 32 values (ink_kvq8_row()): 1,088 bytes a row
+    // for Inkling 2 Mini's 8 heads of 128, where fp16 takes 2,048.  Unlike fp8 it needs no FP8 conversions, so it
+    // works on every card, Turing and HIP included: the token kernels and the flash kernel turn the codes into
+    // floats as they read them, and attend_batch() dequantizes a block of rows at a time into kvw_ (halves) for its
+    // products.  Opt-in, off by default: the codes round the keys and values.
+    kvq8_ = opt_.kv_format == KvFmt::kQ8_0;
+    need(!kvq8_ || head_dim_ % 32 == 0, "--kv q8_0 needs heads of a multiple of 32 values");
+#if defined(STRATA_GPU_METAL)
+    need(!kvq8_, "--kv q8_0 has no Metal kernels for Inkling 2 yet");
+#endif
+    // STRATA_KV_INT8=1 (the name of Kolibri's opt-in and of our first engine's), with --kv q8_0: a decoded token (a
+    // call of one row, or a window's guesses; never a prompt's rows) of a full layer that reads 32,768 keys or more
+    // takes its scores by __dp4a, its queries quantized to Q8_0 codes too (InkAttn::int8_dot).  Opt-in: other bits.
+    if (const char* e = std::getenv("STRATA_KV_INT8"); e && std::atoi(e) != 0) {
+        int8_dot_ = kvq8_;
+        std::fprintf(stderr, "strata-fourgbvram: STRATA_KV_INT8: %s\n",
+                     int8_dot_ ? "scores of tokens past 32K keys by __dp4a on the q8_0 cache"
+                               : "unchanged (the cache is not q8_0)");
+    }
 
     const MetaValue* pattern = find("attention.sliding_window_pattern");
     need(pattern && pattern->type == MetaType::ARRAY && (int) pattern->items.size() >= n_layer_,
@@ -119,7 +267,21 @@ void Inkling2::load_geometry() {
         for (int p = 0; p < (il >= core_start_ && il < core_end_ ? n_pass_ : 1); ++p)
             slots_[(size_t) slot_of(il, p)].il = il;
     swa_.assign((size_t) n_layer_, false);
-    for (int il = 0; il < n_layer_; ++il) swa_[(size_t) il] = pattern->items[(size_t) il].u != 0;
+    // an Unsloth file lists the applications (48 for Inkling 2 Mini), so a layer's value is its first application's;
+    // index il there would be right only while the pattern's period divides the loop's length
+    for (int il = 0; il < n_layer_; ++il) {
+        const size_t v = unsloth_ ? (size_t) visit_of(il, 0) : (size_t) il;
+        need(v < pattern->items.size(), "attention.sliding_window_pattern has no value for every layer");
+        swa_[(size_t) il] = pattern->items[v].u != 0;
+    }
+    // and every other application must be its layer's
+    if (unsloth_)
+        for (int il = 0; il < n_layer_; ++il)
+            for (int p = 0; p < (il >= core_start_ && il < core_end_ ? n_pass_ : 1); ++p) {
+                const size_t v = (size_t) visit_of(il, p);
+                need(v < pattern->items.size() && (pattern->items[v].u != 0) == swa_[(size_t) il],
+                     "attention.sliding_window_pattern differs between a layer's applications");
+            }
     if (!opt_.draft_model.empty()) ds_open();
     if (opt_.window == 0) opt_.window = ds_file_ ? ds_block_ : 1;
 }
@@ -507,28 +669,7 @@ void Inkling2::load_layer(int il) {
     B.ffn_query = f32("ffn_res_query.weight", e);
     B.ffn_norm = f32("ffn_norm.weight", e);
     if (il >= core_start_ && il < core_end_) {
-        if (tensor(il, "loop_msg_query.weight")) {
-            B.msg_query = f32("loop_msg_query.weight", e, kCtrl);
-        } else {
-            // Unsloth's top-level 'inkling2' layout stores the 12 core layers' [Q, K, V, FFN] message queries as
-            // loop_res_query.weight [e, 2 * core] (Q and FFN) and loop_kv_res_query.weight [e, 2 * core] (K and V).
-            const int core = core_end_ - core_start_, k = il - core_start_;
-            const TensorInfo* rq = gg_->find("loop_res_query.weight");
-            const TensorInfo* kq = gg_->find("loop_kv_res_query.weight");
-            if (!rq || !kq || rq->type != kTypeF32 || kq->type != kTypeF32 ||
-                (int64_t) rq->elements() != e * 2 * core || (int64_t) kq->elements() != e * 2 * core)
-                throw std::runtime_error("missing or bad loop_res_query.weight / loop_kv_res_query.weight");
-            const float* r = (const float*) home(*rq).data(*rq);
-            const float* kvq = (const float*) home(*kq).data(*kq);
-            std::vector<float> mq((size_t) kCtrl * e);
-            std::memcpy(&mq[0 * (size_t) e], r + (size_t) (2 * k) * e, (size_t) e * sizeof(float));
-            std::memcpy(&mq[1 * (size_t) e], kvq + (size_t) (2 * k) * e, (size_t) e * sizeof(float));
-            std::memcpy(&mq[2 * (size_t) e], kvq + (size_t) (2 * k + 1) * e, (size_t) e * sizeof(float));
-            std::memcpy(&mq[3 * (size_t) e], r + (size_t) (2 * k + 1) * e, (size_t) e * sizeof(float));
-            void* d = dmalloc(mq.size() * sizeof(float), blk(il, "loop_msg_query.weight").c_str());
-            ck(cudaMemcpy(d, mq.data(), mq.size() * sizeof(float), cudaMemcpyHostToDevice), "loop_msg_query.weight");
-            B.msg_query = Dev{d, kTypeF32, (int) e, kCtrl};
-        }
+        B.msg_query = msg_query(il);
         // a `fix` takes upload() past the file's F32 to the matrices' BF16
         auto ctl = [&](const std::string& n, int64_t a, int64_t b) {
             return ctrl_bf16_ ? upload(tensor(il, n.c_str()), blk(il, n.c_str()), a, b, kFloatMat,
@@ -559,6 +700,37 @@ void Inkling2::load_layer(int il) {
 }
 
 size_t Inkling2::recurrent_floats() const { return slots_.size() * past_floats(); }
+
+// ROCm on Linux gives VRAM back only with its addresses (Engine::vmm_unmap()), and a prompt's lent buffers crashed
+// strata-fourgbvram there (an RX 9070 XT, Inkling 2 Mini IQ4_NL with some experts in RAM): the prompt batch's scratch stays
+// out of them, in one layout as before.  With the experts frozen (STRATA_FREEZE_EXPERTS, --check-batch) lend_prompt()
+// lends nothing, and the small layout would only take VRAM from the expert cache for the whole run.
+bool Inkling2::scores_apart() const {
+#ifdef STRATA_VMM_RELEASE_WITH_ADDRESSES
+    return false;
+#else
+    return !ds_file_ && !freeze_experts_asked_ && mmq_ && vmm_ && !split_ && rows_ >= kStageRows;
+#endif
+}
+
+// A card that holds every expert lends nothing either (lend_prompt() with all_cached()).  The cache is not sized yet
+// when the engine asks, so this is from the free VRAM: every expert's bytes, the prompt batch's scratch (scratch_at_,
+// just counted) and 2 GiB for the reserve, the prompt's other buffers and the staging buffer.  Where it is wrong the
+// card either has the small layout it does not use (a few MiB) or no layouts, as main.
+bool Inkling2::every_expert_fits() const {
+    size_t all = 0;
+    for (const Layer& L : layers_) {
+        if (!L.moe) continue;
+        if (!kernels::native_mmvq_supported((int) L.gu_type) || !kernels::native_mmvq_supported((int) L.u_type) ||
+            !kernels::native_mmvq_supported((int) L.d_type))
+            return false;   // fill_expert_cache() keeps such a layer's experts in RAM
+        all += (size_t) n_expert_ * (L.gu2() + L.d_bytes);
+    }
+    const size_t need = all + scratch_at_ * sizeof(float) + (size_t(2) << 30);
+    return (size_t) vram_free_mib() << 20 >= need;
+}
+
+bool Inkling2::scratch_layouts() const { return scores_apart() && !every_expert_fits(); }
 
 int Inkling2::widest() const { return std::max(n_head_ * head_dim_, 2 * n_embd_); }
 
@@ -624,13 +796,24 @@ void Inkling2::assign_scratch() {
     aoraw_ = fbuf(e);
     fc_ = fbuf(e);
     // a token's scores of the whole context, and what ink_attend() keeps beside them
-    const size_t attend_one = ink_attend_floats(n_head_, n_kv_, head_dim_, opt_.max_context);
-    score_n_ = buf_rows_ >= kStageRows ? std::max(kScoreFloats, attend_one) : attend_one;
-    score_ = fbuf(score_n_);
+    score_n_ = std::max(kScoreFloats, ink_attend_floats(n_head_, n_kv_, head_dim_, opt_.max_context));
+    if (scores_apart()) {   // sized for the context, not for a call's tokens: 64 MiB that both layouts share
+        if (!scores_) scores_ = (float*) dmalloc(score_n_ * sizeof(float), "the attention's scores");
+        score_ = scores_;
+    } else {
+        score_ = fbuf(score_n_);
+    }
     zeros_ = fbuf((size_t) n_head_);
     xqo_ = fbuf((kernels::native_q8_1_bytes(n_head_ * head_dim_) + sizeof(float) - 1) / sizeof(float));
-    if (buf_rows_ >= kStageRows) awork_ = fbuf(heads + heads / 2 + 1 + 3 * n * n_head_);   // a prompt batch's attention
-    else awork_ = nullptr;
+    // a prompt batch's attention; none in the few tokens' layout, where the batch layout's may be lent
+    awork_ = buf_rows_ >= kStageRows ? fbuf(heads + heads / 2 + 1 + 3 * n * n_head_) : nullptr;
+    kvw_ = nullptr;
+    if (buf_rows_ >= kStageRows && kvq8_) {
+        // attend_batch()'s fp16 rows of a Q8_0 cache, keys then values: a block of kKvq8WorkRows rows a product
+        // (16 MiB for Inkling 2 Mini), where ink_attend_batch() does not take the batch
+        kvw_halves_ = (size_t) std::min<int64_t>(opt_.max_context, kKvq8WorkRows) * n_kv_ * head_dim_;
+        kvw_ = fbuf(kvw_halves_);   // 2 * kvw_halves_ halves
+    }
     if (ds_file_) {   // the drafter's: a call's features and mixes, and a block's rows
         const size_t E = (size_t) n_embd_, hq = (size_t) n_head_ * head_dim_, kv = (size_t) n_kv_ * head_dim_,
                      B = (size_t) ds_block_, V = (size_t) n_vocab_, R = (size_t) ds_rank_;
@@ -773,7 +956,13 @@ bool Inkling2::control_ffn(const float* msg, const Ctrl& c, const Block& B) {
 // launch, and the five Q8_0 matrices in one launch, every output the bits lin() gives it.  A window layer's three
 // inputs are one buffer until a later pass's controllers make them differ.  False, with nothing launched, where
 // lin() does them: more tokens, or matrices native_mmvq_many() does not take.
-bool Inkling2::project(const Block& B, const float* const* x, int n, bool quantized) {
+//
+// A token's on CUDA: the five of several types (Unsloth's files mix Q8_0 with K-quants in a layer) in one launch too,
+// native_mmvq_mixed()'s, each output its own launch's bits.  extras (where the caller has no other launch for them):
+// the sink's and a full layer's two convolution taps' products join the launch, quantized matrices of n_embd_ inputs
+// (the ggml-org files' Q8_0); *extras says whether they did, else the caller launches them.
+bool Inkling2::project(const Block& B, const float* const* x, int n, bool quantized, bool* extras) {
+    if (extras) *extras = false;
     if (n >= kStageRows) return false;
     const Dev* w[5] = {&B.wq, &B.wk, &B.wv, &B.rel, &B.gate};
     float* y[5] = {q_, kraw_, vraw_, rr_, gate_};
@@ -784,8 +973,18 @@ bool Inkling2::project(const Block& B, const float* const* x, int n, bool quanti
 #else
     constexpr bool kOneType = true;
 #endif
+#if !defined(STRATA_GPU_METAL) && !defined(STRATA_USE_HIP)
+    // one launch of several types: a token's, on CUDA (native_mmvq_mixed() takes no other; HIP keeps its launches)
+    static const bool mixed_on = [] {
+        const char* v = std::getenv("STRATA_INK_PROJECT_MIXED");
+        return v == nullptr || v[0] != '0';
+    }();
+    const bool mixed = n == 1 && mixed_on;
+#else
+    constexpr bool mixed = false;
+#endif
     for (const Dev* d : w)
-        if ((kOneType && d->type != w[0]->type) || d->n_in != n_embd_ || d->scale != 1.0f) return false;
+        if ((kOneType && !mixed && d->type != w[0]->type) || d->n_in != n_embd_ || d->scale != 1.0f) return false;
     const float* xs[3];
     void* qs[3];
     int nx = 0, slot[3];
@@ -843,18 +1042,48 @@ bool Inkling2::project(const Block& B, const float* const* x, int n, bool quanti
         }
         return true;
     }
-    kernels::NativeMmvqMany m{};
-    for (int i = 0; i < 5; ++i) {
-        m.w[i] = w[i]->p;
-        m.x_q8_1[i] = qs[slot[from[i]]];
-        m.y[i] = y[i];
-        m.n_out[i] = w[i]->n_out;
+#if !defined(STRATA_GPU_METAL)
+    // the five, then the sink's (input 0) and a full layer's taps (inputs 1 and 2) where they are to join
+    const Dev* all[8] = {w[0], w[1], w[2], w[3], w[4]};
+    float* ys[8] = {y[0], y[1], y[2], y[3], y[4]};
+    int src[8] = {from[0], from[1], from[2], from[3], from[4]};
+    int count = 5;
+    const auto plain = [&](const Dev& d) {
+        return d.p && d.type != kTypeF32 && d.type != kTypeBF16 && d.n_in == n_embd_ && d.scale == 1.0f;
+    };
+    if (extras && mixed && plain(B.sink) && (B.swa || (plain(B.k_dyn) && plain(B.v_dyn)))) {
+        all[count] = &B.sink, ys[count] = sink_, src[count++] = 0;
+        if (!B.swa) {
+            all[count] = &B.k_dyn, ys[count] = kdyn_, src[count++] = 1;
+            all[count] = &B.v_dyn, ys[count] = vdyn_, src[count++] = 2;
+        }
     }
-    m.count = 5;
-    if (!kernels::native_mmvq_many_fits((int) w[0]->type, m, n_embd_)) return false;   // lin() quantizes its own
-    if (!quantized) kernels::native_quantize_q8_1_many(xs, qs, nx, n_embd_, st_);
-    kernels::native_mmvq_many((int) w[0]->type, m, n_embd_, st_);
-    return true;
+    // the most that one launch takes: all of them, else the five alone
+    const int tries[2] = {count, 5};
+    for (int t = 0; t < (count > 5 ? 2 : 1); ++t) {
+        const int c = tries[t];
+        kernels::NativeMmvqMany m{};
+        int types[8];
+        bool one = true;
+        for (int i = 0; i < c; ++i) {
+            m.w[i] = all[i]->p;
+            m.x_q8_1[i] = qs[slot[src[i]]];
+            m.y[i] = ys[i];
+            m.n_out[i] = all[i]->n_out;
+            types[i] = (int) all[i]->type;
+            one = one && types[i] == types[0];
+        }
+        m.count = c;
+        const bool many = one && kernels::native_mmvq_many_fits(types[0], m, n_embd_);
+        if (!many && !(mixed && kernels::native_mmvq_mixed_fits(types, m, n_embd_))) continue;
+        if (!quantized) kernels::native_quantize_q8_1_many(xs, qs, nx, n_embd_, st_);
+        if (many) kernels::native_mmvq_many(types[0], m, n_embd_, st_);
+        else kernels::native_mmvq_mixed(types, m, n_embd_, st_);
+        if (extras) *extras = c > 5;
+        return true;
+    }
+#endif
+    return false;   // lin() quantizes its own (on Metal not reached: a window's block above takes every call)
 }
 
 // The three controllers of a later pass's attention inputs for a few tokens, each step one launch for the three
@@ -1018,7 +1247,8 @@ void Inkling2::layer_head(Layer& L, int il, int n) {
             gemv_bf16((const uint16_t*) B.v_dyn.p, x[2], vdyn_, B.v_dyn.n_in, B.v_dyn.n_out, B.v_dyn.n_out, 1, side_);
         }
     }
-    if (!project(B, x, n, quantized)) {
+    bool extras = false;   // the sink's and the taps' products in project()'s launch
+    if (!project(B, x, n, quantized, branch ? nullptr : &extras)) {
         lin(B.wq, x[0], q_, n);
         lin(B.wk, x[1], kraw_, n);
         lin(B.wv, x[2], vraw_, n);
@@ -1026,10 +1256,10 @@ void Inkling2::layer_head(Layer& L, int il, int n) {
         lin(B.gate, x[0], gate_, n);
     }
     if (branch) join();
-    else lin(B.sink, x[0], sink_, n);
+    else if (!extras) lin(B.sink, x[0], sink_, n);
     const float *kd = nullptr, *vd = nullptr;
     if (!B.swa) {
-        if (!branch) {
+        if (!branch && !extras) {
             lin(B.k_dyn, x[1], kdyn_, n);
             lin(B.v_dyn, x[2], vdyn_, n);
         }
@@ -1070,6 +1300,7 @@ void Inkling2::layer_head(Layer& L, int il, int n) {
         c.taps = taps_;
         c.ring = B.swa ? ring_ : 0;
         c.kv8 = kv8_;
+        c.kvq8 = kvq8_;
         ink_qkv(c, st_);
     } else {
         if (n <= kConvFew) {   // a window's K and V convolutions in one launch
@@ -1108,6 +1339,7 @@ void Inkling2::layer_head(Layer& L, int il, int n) {
         c.cache[2] = S.vals;
         c.ring = B.swa ? ring_ : 0;
         c.kv8 = kv8_;
+        c.kvq8 = kvq8_;
         ink_clips(c, st_);
     }
     InkAttn a;
@@ -1134,6 +1366,10 @@ void Inkling2::layer_head(Layer& L, int il, int n) {
     a.scale = 1.f / std::sqrt((float) head_dim_);
     a.gate = gate_;   // the output gate in the join's launch, or the flash kernel's
     a.kv8 = kv8_;
+    a.kvq8 = kvq8_;
+    // STRATA_KV_INT8 for decode only: a token alone or a window's (guessed tokens checked), not a prompt's rows,
+    // which a chunk of fewer than kStageRows also brings here (a short turn, the end of a long prompt)
+    a.int8_dot = int8_dot_ && (n == 1 || windowed_);
     if (n >= kStageRows && ink_attend_batch(a, st_)) {
         // a prompt batch on the tensor cores with no score written out: attend_batch()'s path below wrote 1.6e11
         // scores of a 30,954-token read and read them back, 8.9 of its 16.8 s of attention on the RTX 4070 Laptop
@@ -1148,8 +1384,16 @@ void Inkling2::layer_head(Layer& L, int il, int n) {
         bias.n_rel = n_rel_;
         bias.extent = B.extent;
         ck(cudaMemsetAsync(zeros_, 0, (size_t) n_head_ * sizeof(float), cs(st_)), "attention");
-        attend_batch(blas_, q_, S.keys, S.vals, pos_, n, score_, score_n_, awork_, att_, head_dim_, n_head_, n_kv_,
-                     a.scale, st_, a.window, a.ring, false, {}, {}, nullptr, nullptr, 0, zeros_, nullptr, &bias);
+        // a Q8_0 cache: a row's codes, then its scales (Kvq8::ss), the products reading rows dequantized into kvw_
+        const size_t row = kv_row(), codes = (size_t) n_kv_ * head_dim_;
+        const auto q8 = [&](const uint16_t* c) {
+            return kvq8_ ? Kvq8{(const int8_t*) c, (const uint16_t*) ((const uint8_t*) c + codes), row, row / 2}
+                         : Kvq8{};
+        };
+        uint16_t* kw = kvq8_ ? (uint16_t*) kvw_ : nullptr;
+        attend_batch(blas_, q_, kvq8_ ? nullptr : S.keys, kvq8_ ? nullptr : S.vals, pos_, n, score_, score_n_, awork_,
+                     att_, head_dim_, n_head_, n_kv_, a.scale, st_, a.window, a.ring, false, q8(S.keys), q8(S.vals),
+                     kw, kw ? kw + kvw_halves_ : nullptr, kvw_halves_, zeros_, nullptr, &bias);
         ink_mul_sigmoid(att_, gate_, (size_t) n * hq, st_);
     } else {
         if (n == 1) a.q8 = xqo_;   // and the output quantized for wo
@@ -1266,11 +1510,38 @@ void Inkling2::finish_logits(float* logits, int rows) {
 // What llama.cpp's MoE graph does for this model: sigmoid gates, the n_used largest of gate + bias, and weights
 // from the bare gates, divided by their sum and scaled.
 void Inkling2::route(int il, const float* logits, int32_t, int* ids, float* w, float* probs) const {
-    const std::vector<float>& bias = blocks_[(size_t) il].probs_b;
+    route_by(logits, blocks_[(size_t) il].probs_b.data(), ids, w, probs);
+}
+
+// --cache-bias: F onto the pick of each expert in VRAM.  The pick is the gate plus the layer's bias, so the experts in
+// VRAM keep their order among themselves, as do the others, and only a close call between the two goes the other way;
+// a looped layer's passes pick among the same experts in VRAM.  The weights stay the bare gates'.
+void Inkling2::cached_bias(const Layer& L, int il, float* b) const {
+    const std::vector<float>& pb = blocks_[(size_t) il].probs_b;
+    for (int e = 0; e < n_expert_; ++e) b[e] = pb[(size_t) e] + (L.slot[(size_t) e] ? opt_.cache_bias : 0.f);
+}
+
+void Inkling2::route_cached(const Layer& L, int il, const float* logits, int32_t, int* ids, float* w, float* probs) {
+    cached_bias(L, il, bias_rl_.data());
+    route_by(logits, bias_rl_.data(), ids, w, probs);
+}
+
+// route_card()'s bias for a few tokens, every layer's, from the experts card_moe() has just put on the card
+void Inkling2::slots_moved() {
+    if (!(opt_.cache_bias > 0.f)) return;
+    const size_t ne = (size_t) n_expert_;
+    std::vector<float> b((size_t) n_layer_ * ne, 0.f);
+    for (int il = 0; il < n_layer_; ++il)
+        if (layers_[(size_t) il].moe) cached_bias(layers_[(size_t) il], il, b.data() + (size_t) il * ne);
+    if (!cache_b_) cache_b_ = (float*) dmalloc(b.size() * sizeof(float), "scratch");
+    ck(cudaMemcpy(cache_b_, b.data(), b.size() * sizeof(float), cudaMemcpyHostToDevice), "cache bias");
+}
+
+void Inkling2::route_by(const float* logits, const float* bias, int* ids, float* w, float* probs) const {
     float* pick = probs + n_expert_;
     for (int e = 0; e < n_expert_; ++e) {
         probs[e] = 1.f / (1.f + std::exp(-logits[e]));
-        pick[e] = probs[e] + bias[(size_t) e];
+        pick[e] = probs[e] + bias[e];
     }
     float sum = 0.f;
     for (int k = 0; k < n_used_; ++k) {
@@ -1291,8 +1562,10 @@ void Inkling2::route(int il, const float* logits, int32_t, int* ids, float* w, f
 
 bool Inkling2::route_card(int il, int n, int32_t* ids, float* w) {
     const Block& B = blocks_[(size_t) il];
-    route_rows(rl_, n_expert_, n_used_, n, 1, 1.f, B.probs_b_dev.p ? fp(B.probs_b_dev) : nullptr, nullptr, true,
-               w_scale_, ids, w, st_);
+    const float* bias = B.probs_b_dev.p ? fp(B.probs_b_dev) : nullptr;
+    // a few tokens (moe_card()) with --cache-bias pick by slots_moved()'s bias; a prompt batch as before
+    if (cache_b_ && n < kStageRows) bias = cache_b_ + (size_t) il * n_expert_;
+    route_rows(rl_, n_expert_, n_used_, n, 1, 1.f, bias, nullptr, true, w_scale_, ids, w, st_);
     return true;
 }
 

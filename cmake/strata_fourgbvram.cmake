@@ -229,6 +229,18 @@ if(STRATA_BUILD_POLY AND STRATA_NATIVE_EXPERTS AND (STRATA_ENABLE_CUDA OR STRATA
   target_link_libraries(fourgbvram_draft_race_test PRIVATE strata_fourgbvram_mmq strata_kernels strata_spec strata_quant
                                                     ${_strata_gpu_blas_target} ${_strata_gpu_runtime_target}
                                                     ${_strata_fourgbvram_driver} Threads::Threads)
+  # the engine's logits for a list of tokens as raw floats, to compare two builds or settings; needs the model file,
+  # so it is run by hand: fourgbvram_logits_dump MODEL.gguf --tokens ID,ID,... (its usage says the rest)
+  add_executable(fourgbvram_logits_dump src/fourgbvram/logits_dump.cpp src/fourgbvram/engine.cpp src/fourgbvram/expert_card.cpp src/fourgbvram/glm5next.cpp
+                                  src/fourgbvram/qwen35.cpp src/fourgbvram/gemma4.cpp src/fourgbvram/deepseek4.cpp
+                                  src/fourgbvram/lfm2moe.cpp src/fourgbvram/flint.cpp src/fourgbvram/kolibri1.cpp src/fourgbvram/laguna.cpp src/fourgbvram/inkling2.cpp src/fourgbvram/inkling2_pictures.cpp src/fourgbvram/inkling2.cu
+                                  src/fourgbvram/cpu_experts.cpp src/fourgbvram/kernels.cu src/fourgbvram/kernels_dsv4.cu
+                                  src/core/conversation_memory.cpp)
+  target_include_directories(fourgbvram_logits_dump PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include
+                                                     ${_strata_gpu_include_directories})
+  target_link_libraries(fourgbvram_logits_dump PRIVATE strata_fourgbvram_mmq strata_kernels strata_spec strata_quant
+                                                ${_strata_gpu_blas_target} ${_strata_gpu_runtime_target}
+                                                ${_strata_fourgbvram_driver} Threads::Threads)
   # a prompt batch's routing on the card against the hosts' routing; needs a card, so it is run by hand
   add_executable(fourgbvram_route_test src/fourgbvram/route_test.cu src/fourgbvram/kernels.cu)
   target_include_directories(fourgbvram_route_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include
@@ -245,11 +257,37 @@ if(STRATA_BUILD_POLY AND STRATA_NATIVE_EXPERTS AND (STRATA_ENABLE_CUDA OR STRATA
   target_include_directories(fourgbvram_gemm_small_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include
                                                          ${_strata_gpu_include_directories})
   target_link_libraries(fourgbvram_gemm_small_test PRIVATE ${_strata_gpu_blas_target} ${_strata_gpu_runtime_target})
+  # Inkling 2's token attention (ink_attend()): output hashes of a battery of calls, and a long-context bench; needs a
+  # card, run by hand
+  add_executable(fourgbvram_inkling2_attend_test src/fourgbvram/inkling2_attend_test.cu src/fourgbvram/inkling2.cu src/fourgbvram/kernels.cu)
+  target_include_directories(fourgbvram_inkling2_attend_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include
+                                                               ${_strata_gpu_include_directories})
+  target_link_libraries(fourgbvram_inkling2_attend_test PRIVATE strata_kernels ${_strata_gpu_blas_target}
+                                                          ${_strata_gpu_runtime_target})
+  # Inkling 2's one-pass controller down kernel (STRATA_INK_FAST_CTRL=1) against the default one and float64; needs a
+  # card, run by hand
+  add_executable(fourgbvram_ctrl_fast_test src/fourgbvram/ctrl_fast_test.cu src/fourgbvram/inkling2.cu src/fourgbvram/kernels.cu)
+  target_include_directories(fourgbvram_ctrl_fast_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include
+                                                         ${_strata_gpu_include_directories})
+  target_link_libraries(fourgbvram_ctrl_fast_test PRIVATE strata_kernels ${_strata_gpu_blas_target}
+                                                    ${_strata_gpu_runtime_target})
   # attend()'s blocks of rows against its other kernels and itself; needs a card, so it is run by hand
   add_executable(fourgbvram_attend_test src/fourgbvram/attend_test.cu src/fourgbvram/kernels.cu)
   target_include_directories(fourgbvram_attend_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include
                                                      ${_strata_gpu_include_directories})
   target_link_libraries(fourgbvram_attend_test PRIVATE ${_strata_gpu_blas_target} ${_strata_gpu_runtime_target})
+  # Inkling 2's flash attention (ink_attend_batch()) against float64 and the paths it stands in for; needs a card,
+  # so it is run by hand (--bench: its speed against attend_batch())
+  add_executable(fourgbvram_ink_flash_test src/fourgbvram/ink_flash_test.cu src/fourgbvram/inkling2.cu src/fourgbvram/kernels.cu)
+  target_include_directories(fourgbvram_ink_flash_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include
+                                                        ${_strata_gpu_include_directories})
+  target_link_libraries(fourgbvram_ink_flash_test PRIVATE strata_kernels ${_strata_gpu_blas_target} ${_strata_gpu_runtime_target})
+  # Inkling 2's Q8_0 attention caches (--kv q8_0): stores and readers against the host; needs a card, run by hand
+  add_executable(fourgbvram_inkling2_kvq8_test src/fourgbvram/inkling2_kvq8_test.cu src/fourgbvram/inkling2.cu src/fourgbvram/kernels.cu)
+  target_include_directories(fourgbvram_inkling2_kvq8_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include
+                                                             ${_strata_gpu_include_directories})
+  target_link_libraries(fourgbvram_inkling2_kvq8_test PRIVATE strata_kernels ${_strata_gpu_blas_target}
+                                                        ${_strata_gpu_runtime_target})
   # DeepSeek V4's hyper-connection read for a batch against the rows one at a time; needs a card, run by hand
   add_executable(fourgbvram_hc_test src/fourgbvram/hc_test.cu src/fourgbvram/kernels.cu)
   target_include_directories(fourgbvram_hc_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include ${_strata_gpu_include_directories})
@@ -273,6 +311,16 @@ if(STRATA_BUILD_POLY AND STRATA_NATIVE_EXPERTS AND (STRATA_ENABLE_CUDA OR STRATA
   target_link_libraries(fourgbvram_hip_split_attend_test PRIVATE ${_strata_gpu_blas_target} ${_strata_gpu_runtime_target})
   add_test(NAME fourgbvram_hip_split_attend_test COMMAND fourgbvram_hip_split_attend_test)
   set_tests_properties(fourgbvram_hip_split_attend_test PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 600)
+  # ink_attend_batch() on RDNA4's matrix cores against an FP64 reference and ink_attend(), and in 2 calls bit for bit;
+  # needs a gfx12 card (77 = skipped)
+  if(STRATA_ENABLE_HIP)
+    add_executable(fourgbvram_inkling2_wmma_test src/fourgbvram/inkling2_wmma_test.cu src/fourgbvram/inkling2.cu src/fourgbvram/kernels.cu)
+    target_include_directories(fourgbvram_inkling2_wmma_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include
+                                                              ${_strata_gpu_include_directories})
+    target_link_libraries(fourgbvram_inkling2_wmma_test PRIVATE strata_kernels ${_strata_gpu_blas_target} ${_strata_gpu_runtime_target})
+    add_test(NAME fourgbvram_inkling2_wmma_test COMMAND fourgbvram_inkling2_wmma_test)
+    set_tests_properties(fourgbvram_inkling2_wmma_test PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 600)
+  endif()
   # attend_batch() against attend() with Flint's heads, sinks and window ring; needs a card
   add_executable(fourgbvram_sink_attend_test src/fourgbvram/sink_attend_test.cu src/fourgbvram/kernels.cu)
   target_include_directories(fourgbvram_sink_attend_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include
@@ -310,7 +358,10 @@ if(STRATA_BUILD_POLY AND STRATA_NATIVE_EXPERTS AND (STRATA_ENABLE_CUDA OR STRATA
                                                         ${_strata_gpu_include_directories})
     target_link_libraries(fourgbvram_mmq_k32_test PRIVATE strata_fourgbvram_mmq ${_strata_gpu_blas_target} ${_strata_gpu_runtime_target})
     add_test(NAME fourgbvram_mmq_k32_test COMMAND fourgbvram_mmq_k32_test)
-    set_tests_properties(fourgbvram_mmq_k32_test PROPERTIES SKIP_RETURN_CODE 77)
+    add_test(NAME fourgbvram_mmq_k32_test_turing_int8 COMMAND fourgbvram_mmq_k32_test --turing-int8)
+    add_test(NAME fourgbvram_mmq_k32_test_w4a8 COMMAND fourgbvram_mmq_k32_test)
+    set_tests_properties(fourgbvram_mmq_k32_test fourgbvram_mmq_k32_test_turing_int8 fourgbvram_mmq_k32_test_w4a8 PROPERTIES SKIP_RETURN_CODE 77)
+    set_tests_properties(fourgbvram_mmq_k32_test_w4a8 PROPERTIES ENVIRONMENT "STRATA_PREFILL_NVFP4=w4a8")
   endif()
   # a prompt product of each path (the card's, and the BLAS path with STRATA_FOURGBVRAM_PROMPT_BLAS=1) against a double-precision
   # product of ggml's dequantized weights; needs a card
@@ -322,9 +373,13 @@ if(STRATA_BUILD_POLY AND STRATA_NATIVE_EXPERTS AND (STRATA_ENABLE_CUDA OR STRATA
     add_test(NAME fourgbvram_mmq_paths_test COMMAND fourgbvram_mmq_paths_test)
     add_test(NAME fourgbvram_mmq_paths_test_blas COMMAND fourgbvram_mmq_paths_test)
     add_test(NAME fourgbvram_mmq_paths_test_x2 COMMAND fourgbvram_mmq_paths_test)
-    set_tests_properties(fourgbvram_mmq_paths_test fourgbvram_mmq_paths_test_blas fourgbvram_mmq_paths_test_x2 PROPERTIES SKIP_RETURN_CODE 77)
+    add_test(NAME fourgbvram_mmq_paths_test_turing_int8 COMMAND fourgbvram_mmq_paths_test --turing-int8)
+    add_test(NAME fourgbvram_mmq_paths_test_w4a8 COMMAND fourgbvram_mmq_paths_test)
+    set_tests_properties(fourgbvram_mmq_paths_test fourgbvram_mmq_paths_test_blas fourgbvram_mmq_paths_test_x2 fourgbvram_mmq_paths_test_turing_int8 fourgbvram_mmq_paths_test_w4a8
+                         PROPERTIES SKIP_RETURN_CODE 77)
     set_tests_properties(fourgbvram_mmq_paths_test_blas PROPERTIES ENVIRONMENT "STRATA_FOURGBVRAM_PROMPT_BLAS=1")
     set_tests_properties(fourgbvram_mmq_paths_test_x2 PROPERTIES ENVIRONMENT "STRATA_PREFILL_NVFP4=w4a4x2")
+    set_tests_properties(fourgbvram_mmq_paths_test_w4a8 PROPERTIES ENVIRONMENT "STRATA_PREFILL_NVFP4=w4a8")
   endif()
   # LFM2's short convolution against the same arithmetic on the host; needs a card, so it is run by hand
   add_executable(fourgbvram_shortconv_test src/fourgbvram/shortconv_test.cu src/fourgbvram/kernels.cu)
@@ -336,16 +391,48 @@ if(STRATA_BUILD_POLY AND STRATA_NATIVE_EXPERTS AND (STRATA_ENABLE_CUDA OR STRATA
   target_include_directories(fourgbvram_dsv4_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include
                                                    ${_strata_gpu_include_directories})
   target_link_libraries(fourgbvram_dsv4_test PRIVATE ${_strata_gpu_runtime_target})
+  # Inkling 2's kernels (inkling2.cu) against the same arithmetic on the host, and the fused launches against the
+  # calls they stand for; needs a card (77 without one)
+  add_executable(fourgbvram_inkling2_test src/fourgbvram/inkling2_test.cu src/fourgbvram/inkling2.cu src/fourgbvram/kernels.cu)
+  target_include_directories(fourgbvram_inkling2_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include
+                                                       ${_strata_gpu_include_directories})
+  target_link_libraries(fourgbvram_inkling2_test PRIVATE strata_kernels ${_strata_gpu_blas_target}
+                                                   ${_strata_gpu_runtime_target})
+  add_test(NAME fourgbvram_inkling2_test COMMAND fourgbvram_inkling2_test)
+  set_tests_properties(fourgbvram_inkling2_test PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 600)
   # the pool of the CPU experts, without a model
   add_executable(fourgbvram_workers_test src/fourgbvram/workers_test.cpp src/fourgbvram/cpu_experts.cpp)
   target_link_libraries(fourgbvram_workers_test PRIVATE strata_quant Threads::Threads)
   add_test(NAME fourgbvram_workers_test COMMAND fourgbvram_workers_test)
+  # the four-row dot products the CPU experts take, bit for bit against the one-row ones, without a model
+  add_executable(fourgbvram_cpu_x4_test src/fourgbvram/cpu_x4_test.cpp src/fourgbvram/cpu_experts.cpp)
+  target_link_libraries(fourgbvram_cpu_x4_test PRIVATE strata_quant Threads::Threads)
+  add_test(NAME fourgbvram_cpu_x4_test COMMAND fourgbvram_cpu_x4_test)
   # the card's MXFP4 product against ggml's dequantizer on random blocks, without a model; needs a card, run by hand
   if(TARGET ggml-base)
     add_executable(fourgbvram_mxfp4_test src/fourgbvram/mxfp4_test.cu)
     target_include_directories(fourgbvram_mxfp4_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include ${_strata_ggml_root}/ggml/include
                                                       ${_strata_gpu_include_directories})
     target_link_libraries(fourgbvram_mxfp4_test PRIVATE strata_kernels ggml-base ${_strata_gpu_runtime_target})
+  endif()
+  # Inkling 2's cached IQ3_S / IQ3_XXS slots launches with MmvqSlots::lanes against the same launches without it and
+  # native_mmvq(), bit for bit, on random blocks (no model); CUDA only, needs a card
+  if(STRATA_ENABLE_CUDA)
+    add_executable(fourgbvram_iq3_lanes_test src/fourgbvram/iq3_lanes_test.cu)
+    target_include_directories(fourgbvram_iq3_lanes_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include ${_strata_gpu_include_directories})
+    target_link_libraries(fourgbvram_iq3_lanes_test PRIVATE strata_kernels ${_strata_gpu_runtime_target})
+    add_test(NAME fourgbvram_iq3_lanes_test COMMAND fourgbvram_iq3_lanes_test)
+    set_tests_properties(fourgbvram_iq3_lanes_test PROPERTIES SKIP_RETURN_CODE 77)
+  endif()
+  # a token's attention products in one launch (native_mmvq_mixed(), native_mmvq_many()) against native_mmvq() a
+  # matrix, bit for bit, on random blocks (no model); CUDA only, needs a card
+  if(STRATA_ENABLE_CUDA)
+    add_executable(fourgbvram_project_mixed_test src/fourgbvram/project_mixed_test.cu)
+    target_include_directories(fourgbvram_project_mixed_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include
+                                                              ${_strata_gpu_include_directories})
+    target_link_libraries(fourgbvram_project_mixed_test PRIVATE strata_kernels ${_strata_gpu_runtime_target})
+    add_test(NAME fourgbvram_project_mixed_test COMMAND fourgbvram_project_mixed_test)
+    set_tests_properties(fourgbvram_project_mixed_test PROPERTIES SKIP_RETURN_CODE 77)
   endif()
   # the Q8_0 KV cache kernels (store_q8 / store_q8_at) against a host reference (GPU, synthetic, no model)
   if(STRATA_BUILD_TESTS)

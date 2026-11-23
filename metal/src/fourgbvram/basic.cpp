@@ -2,6 +2,7 @@
 #include "strata/fourgbvram/kernels.hpp"
 #include "strata/gpu/metal.hpp"
 #include "quantized.hpp"
+#include "launch.hpp"
 #include <algorithm>
 #include <fstream>
 #include <iterator>
@@ -30,11 +31,7 @@ void launch(const char* name, const Args& input, void* stream, gpu::metal::Grid 
             ptr = mapped;
         }
     }
-    static const std::string source = [] {
-        std::ifstream f(STRATA_FOURGBVRAM_BASIC_SOURCE);
-        if (!f) throw std::runtime_error("cannot read strata-fourgbvram Metal kernels");
-        return std::string(std::istreambuf_iterator<char>(f), {});
-    }();
+    static const std::string source = metal_detail::read_source(STRATA_FOURGBVRAM_BASIC_SOURCE);
     std::string error;
     auto* pipeline = gpu::metal::pipeline("fourgbvram_basic", source.c_str(), name, error);
     if (!pipeline) throw std::runtime_error(error);

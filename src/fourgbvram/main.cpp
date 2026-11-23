@@ -1659,7 +1659,8 @@ void usage() {
                  "                         RAM (default: 0 = all of them in VRAM; with --kv-whole, fully resident)\n"
                  "  --kv fmt               the K and V attention caches' format, opt-in: fp16 (default,\n"
                  "                         unchanged); q8_0 (ggml Q8_0 blocks: half the KV VRAM, slightly\n"
-                 "                         different answers; qwen35moe's, kolibri1's and Flint's); q4_0 (ggml Q4_0\n"
+                 "                         different answers; qwen35moe's, kolibri1's, Flint's and Inkling 2's,\n"
+                 "                         which takes it on CUDA and HIP, not Metal); q4_0 (ggml Q4_0\n"
                  "                         blocks: 4-bit KV cache, 47%% smaller Host/PCIe footprint with --kv-resident);\n"
                  "                         int8 / int8k (Gemma 4's:\n"
                  "                         the same Q8_0 rule with the codes and their deltas in two arrays, so a\n"
@@ -1733,12 +1734,19 @@ void usage() {
                  "                         or iq4_nl) at load: fewer bytes a token, and the answers move a little\n"
                  "                         (default: the file's types; setup gives an 8 GB card q5_0)\n"
                  "  --loop-bf16            Inkling 2: its loop controllers' matrices in BF16, not F32\n"
+                 "  --prompt-int8          Inkling 2 on an RTX 20 (Turing): its prompt products on the int8 tensor\n"
+                 "                         cores as on RTX 30 and newer, not as halves and cuBLAS (the default on\n"
+                 "                         Turing): faster prompts, and the answers move more, activations int8 a\n"
+                 "                         32 values; --no-prompt-int8 says the default; STRATA_PF_I8MMA=0 turns the\n"
+                 "                         int8 kernel off on every card; with it, a prompt batch's experts in VRAM\n"
+                 "                         go in one launch a class of rows, the same numbers in fewer launches\n"
+                 "                         (STRATA_FOURGBVRAM_EXPERT_TILES=0: a launch a run of slots again)\n"
                  "  --skip-weight F        in place of --tail-skip: an expert outside VRAM that every token of a\n"
                  "                         window weighs under F of its experts' weight is left out (default 0 = off)\n"
-                 "  --cache-bias F         qwen35moe: a token's router scores get F added for each expert in VRAM\n"
-                 "                         before it picks, as it comes a few at a time; the weights stay the\n"
-                 "                         router's own: fewer experts on the CPU, and the answers move (default 0\n"
-                 "                         = off)\n"
+                 "  --cache-bias F         qwen35moe and Inkling 2: a token's router scores (Inkling 2: its gate\n"
+                 "                         plus bias) get F added for each expert in VRAM before it picks, as it\n"
+                 "                         comes a few at a time; the weights stay the router's own: fewer\n"
+                 "                         experts on the CPU, and the answers move (default 0 = off)\n"
                  "environment: STRATA_ROUTE_TAIL_SKIP=N  in place of --tail-skip (0 turns it off)\n"
                  "environment: STRATA_FREEZE_EXPERTS=1  hold the split of the routed experts between the card\n"
                  "                         and the CPU still, so the same request gives the same greedy answer\n"
@@ -1860,6 +1868,8 @@ int main(int argc, char** argv) {
         else if (a == "--route-top") o.route_top = std::atoi(val());
         else if (a == "--attn-requant") o.attn_requant = val();
         else if (a == "--loop-bf16") o.loop_bf16 = true;
+        else if (a == "--prompt-int8") o.prompt_int8 = 1;
+        else if (a == "--no-prompt-int8") o.prompt_int8 = 0;
         else if (a == "--skip-weight") o.skip_weight = (float) std::atof(val());
         else if (a == "--cache-bias") o.cache_bias = (float) std::atof(val());
         else if (a == "--layer-split") o.layer_split = val();

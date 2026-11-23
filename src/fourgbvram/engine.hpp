@@ -131,9 +131,13 @@ struct Options {
     std::string attn_requant;     ///< Inkling 2: its attention's six matrices quantized again to this type at load
                                   ///< (q4_0, q5_0 or iq4_nl; --attn-requant); empty: the file's types
     bool loop_bf16 = false;       ///< Inkling 2: its loop controllers' matrices in BF16, not the file's F32 (--loop-bf16)
+    int prompt_int8 = -1;         ///< Inkling 2: on Turing its prompt products on the int8 tensor cores, as on Ampere
+                                  ///< (gemm_iq_i8_turing()); -1: the default, off; 1: --prompt-int8; 0: --no-prompt-int8,
+                                  ///< Turing's halves and cuBLAS
     float cache_bias = 0;         ///< a token's few-at-a-time routing adds this to the score of each expert in VRAM
-                                  ///< before it picks its experts; their weights stay the softmax of the scores the
-                                  ///< router gave (--cache-bias, qwen35moe only); 0: the router's own picks
+                                  ///< before it picks its experts; their weights stay the router's own
+                                  ///< (--cache-bias, qwen35moe and inkling2_loop, route_cached()); 0: the router's own
+                                  ///< picks
     int expert_gpu = -1;          ///< Inkling 2: a second CUDA device (this process's number) for the routed experts
                                   ///< the first card has no room for (--expert-gpu, expert_card.hpp); -1: none
     int expert_gpu_reserve_mib = -1;   ///< VRAM that card keeps free beside them (--expert-gpu-reserve-mib); -1: 512
@@ -539,14 +543,25 @@ protected:
     /// for, or -1 where it has none (a picture's row, the draft block).  tmp: 2 * n_expert_ floats of scratch.  A
     /// prompt batch's tokens are routed by several threads at once: it changes nothing of the engine's.
     virtual void route(int il, const float* logits, int32_t token, int* ids, float* w, float* tmp) const = 0;
+    /// route() with Options::cache_bias, for a token that comes a few at a time (moe()): the experts in VRAM (L.slot)
+    /// are favored by F, and the weights stay the router's own.  The engine's is qwen35moe's: F on the scores, and the
+    /// picks weighed as a softmax of their own scores.
+    virtual void route_cached(const Layer& L, int il, const float* scores, int32_t token, int* ids, float* w,
+                              float* tmp);
+    /// card_moe() has put a new set of experts in VRAM on the card (d_slots_), before the call's launches.
+    virtual void slots_moved() {}
     /// A prompt batch's routing on the card: n tokens' experts and weights from their scores in rl_, n_used_ a token
     /// into ids and w (on the card), what route() gives them up to the last bits of a weight.  False: the host routes.
+    /// moe_card() routes a few tokens with it too (n < kStageRows), where --cache-bias applies as in route_cached().
     virtual bool route_card(int il, int n, int32_t* ids, float* w) {
         (void) il, (void) n, (void) ids, (void) w;
         return false;
     }
     /// The shared expert, into fo_.  It runs on the GPU while the host routes.
     virtual void moe_shared(const Layer& L, int il, int n) = 0;
+    /// False: run() launches moe_shared() as it is where it replays a layer's other launches (Layer::shared stays
+    /// empty), for a family whose shared expert is a launch or two that a graph launch costs the host more than.
+    virtual bool shared_recorded() const { return true; }
     /// True: moe_card() leaves the routed experts' sum (d_ weighted by d_wts_, onto fo_) of a call of n tokens to the
     /// family, which folds it into what follows (Inkling 2's layer_tail()), and sets moe_left_.  The weights are then
     /// still to be multiplied by moe_left_scale_[id] where that is set (expert_weights()'s product).
@@ -568,6 +583,10 @@ protected:
     virtual void router_scores(const Layer& L, int n);
     /// router_scores() is lin(gate_inp) on xn_ with xq_: moe_router() may run it beside the next layer's
     virtual bool plain_router() const { return true; }
+    /// The router (ffn_gate_inp) goes to VRAM as BF16 when its F32 values are all BF16 ones (upload()'s kExactBF16):
+    /// lin() widens BF16 exactly and sums as for F32, so the same scores from half the bytes.  false (the default):
+    /// as its file has it.
+    virtual bool router_bf16() const { return false; }
     /// What is done to `rows` rows of logits on the card before they are copied out.
     virtual void finish_logits(float* logits, int rows) { (void) logits, (void) rows; }
     /// What a token's embedding is multiplied by on its way in.
@@ -642,7 +661,11 @@ protected:
     /// kGuessMat: quantized again to guess_type_ (Q4_0, Q5_0 or IQ4_NL), for a matrix only guesses are made with: a
     /// guess is checked, so a less exact one costs a wrong guess now and then and no token.  (Inkling 2 reads its
     /// attention's matrices so with --attn-requant: inkling2.cpp.)
-    enum Want { kF32, kFloatMat, kAnyMat, kGuessMat };
+    /// kExactBF16: an F32 tensor all of whose values are BF16 ones (exact_bf16()) goes to VRAM as BF16, the same
+    /// values in half the bytes; any other as kAnyMat.
+    enum Want { kF32, kFloatMat, kAnyMat, kGuessMat, kExactBF16 };
+    /// The tensor is F32 and every value of it is a BF16 one (its low 16 bits are zero).
+    bool exact_bf16(const TensorInfo* t) const;
     uint32_t guess_type_ = 2;   ///< kTypeQ4_0
     Dev upload(const TensorInfo* t, const std::string& name, int64_t n_in, int64_t n_out, Want want,
                float (*fix)(float) = nullptr);
@@ -691,7 +714,6 @@ protected:
     bool moe(Layer& L, int il, int n, const std::function<void()>* first = nullptr);
     bool card_moe(int n);
     bool moe_card(Layer& L, int il, int n);
-    const float* biased(const Layer& L, const float* scores);
     /// Whether n tokens take layer L's routed experts as a prompt batch, through MMQ (moe_rows()), and not a few at
     /// a time (moe()).
     bool batched(const Layer& L, int n) const;
@@ -899,6 +921,7 @@ protected:
                                              ///< for the engine's whole run (see Engine::load())
     bool freeze_experts_asked_ = false;      ///< the env was set: refreeze_experts() puts it back after the
                                              ///< serve VRAM resize lifted it (unfreeze_experts())
+    int expert_cap_ = -1;                    ///< STRATA_GPU_EXPERTS: the expert cache holds this many, for the run
     void* blas_ = nullptr; ///< cuBLAS on st_
     void* ev_ = nullptr;   ///< marks the router's copy to the host: ev_row_'s first, or a window's row's own
     void* ev_row_[8] = {}; ///< one for each token a window can have
@@ -960,10 +983,18 @@ protected:
     /// the file's ffn_gate_up_exps.scale is each expert's scale of its joined gate and up product, whatever the
     /// experts' type, and ffn_down_exps.scale of its down product (load_moe())
     bool joined_scales_ = false;
+    /// the cached experts' slots launches may take the kernels that keep more lanes busy (kernels::MmvqSlots::lanes):
+    /// the same bits.  Inkling 2 only, where they were measured.
+    bool lane_slots_ = false;
     std::vector<float> clamp_exp_, clamp_shexp_;   ///< a layer's SwiGLU limits: the routed experts', the shared one's
     /// a prompt batch's products go through guard_half_sums(): the model's activations can sum past a half's range
     /// in a block.  Off for the models whose sums stay in range: it cost LFM2.5 4% of a 30K prompt's read on a 5090.
     bool half_sum_guard_ = false;
+    /// In a read of several calls, moe_rows() hands the card a call's row tables by a kernel that reads them from
+    /// pinned memory (copy2()), not by a copy: the copies to the card go one after the other, and a call's tables
+    /// (about 100 KB) waited behind the layer's experts on their way to the staging buffer.  Inkling 2's on CUDA
+    /// unless STRATA_INK_KERNEL_TABLES=0, else off.
+    bool kernel_tables_ = false;
 
     std::vector<Layer> layers_;   ///< the model's, and after them the draft block
     Dev out_norm_, output_;
@@ -1158,11 +1189,18 @@ protected:
     std::vector<int32_t> ids_, count_, first_, group_, round_, round_row_;
     std::vector<int> staged_tiles_;   ///< STRATA_FOURGBVRAM_STAGED_TILES: the rows that end a size class of staged experts
     std::vector<float> route_tmp_;   ///< route()'s scratch, a share for each host thread
-    std::vector<float> bias_rl_;     ///< one token's scores with Options::cache_bias added (moe())
+    std::vector<float> bias_rl_;     ///< one token's scores or pick bias with Options::cache_bias (route_cached())
     struct Run {
         int c, j, m, most;   ///< the rows' class, its first cached expert and how many, the most rows one has
     };
     std::vector<Run> runs_;        ///< a layer's launches over cached experts whose slots lie one behind the other
+    // A model's engine may have a prompt batch's cached experts multiplied in a launch for each class of rows, the
+    // slots found by their offsets (Mmq::mul_at()), in place of a launch for each run of slots that lie one behind
+    // the other and each class (Inkling 2 on Turing by default, not with --no-prompt-int8; STRATA_FOURGBVRAM_EXPERT_TILES=0
+    // turns it off).  The int8 products only, whose rows do not depend on the launch: the same numbers in fewer
+    // launches.
+    bool expert_tiles_ = false;
+    int64_t *d_slot_at_ = nullptr, *h_slot_at_ = nullptr;   ///< the cached experts' offsets, VRAM and pinned
     std::vector<int32_t> chan_;    ///< a layer's cached experts in the order of their slots
     std::vector<uint8_t> sent_;
     // A call that copies only the experts it routes to leaves some of those outside VRAM to the CPU (moe_rows()).
