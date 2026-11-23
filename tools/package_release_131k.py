@@ -1,7 +1,7 @@
 """Build the Linux release tarball of 4gbVramStrata with the 131K engine.
 
 The tarball is what a user downloads: setup.sh, update.sh, bench.sh, setup.py, the server and web app, the tools
-setup runs, the documents a user reads, engine-fourgbvram/ (the built strata-fourgbvram with its BUILD.json), and the
+setup runs, the documents a user reads, engine-fourgbvram/ (the built strata-fourgbvram, strata-vision, and BUILD.json), and the
 engine's sources.  The sources are there because setup.source_hash() walks them: without them the shipped BUILD.json
 names a source the tarball does not have, and setup takes the engine for stale and tries to compile one.  Tests,
 benchmark records, the paper, the local build folders and the quarantined working files (_attic/) stay out.
@@ -39,7 +39,7 @@ SOURCES = ["CMakeLists.txt", "cmake", "src", "include", "third_party/ggml", "thi
 SKIP_DIRS = {"__pycache__", ".pytest_cache", "paper", "superpowers"}
 SKIP_NAMES = {"test_setup_golden.json"}
 SKIP_PREFIXES = ("test_",)
-SKIP_SUFFIXES = ("_test.py", ".pyc", ".pyo", ".tmp", ".obj", ".exp", ".lib", ".pdb", ".bat")
+SKIP_SUFFIXES = ("_test.py", ".pyc", ".pyo", ".tmp", ".obj", ".exp", ".lib", ".pdb", ".bat", ".log")
 
 
 def version() -> str:
@@ -85,7 +85,7 @@ def engine_files(engine: Path) -> list:
     if not engine.is_dir():
         return []
     return [Path("engine-fourgbvram", p.name) for p in sorted(engine.iterdir())
-            if p.is_file() and (p.name.startswith("strata-fourgbvram") or p.name == "BUILD.json")]
+            if p.is_file() and (p.name.startswith(("strata-fourgbvram", "strata-vision")) or p.name == "BUILD.json")]
 
 
 def main() -> int:
@@ -95,7 +95,7 @@ def main() -> int:
                     help="check the tree only: do not require the compiled engine in --engine DIR (CI has no card to "
                          "build one). Every other required file is still checked")
     ap.add_argument("--engine", default=str(ROOT / "engine-fourgbvram"),
-                    help="folder with strata-fourgbvram and BUILD.json (default: engine-fourgbvram/)")
+                    help="folder with strata-fourgbvram, strata-vision, and BUILD.json (default: engine-fourgbvram/)")
     a = ap.parse_args()
 
     ver = version()
@@ -114,8 +114,11 @@ def main() -> int:
     plan += source_files()
     plan = list(dict.fromkeys(plan))                 # tools/vision arrives from TREES and SOURCES alike
     eng = engine_files(Path(a.engine))
-    if not eng and not a.no_engine:
-        missing.append(f"{Path(a.engine).name}/strata-fourgbvram")
+    if not a.no_engine:
+        if not any(p.name.startswith("strata-fourgbvram") for p in eng):
+            missing.append(f"{Path(a.engine).name}/strata-fourgbvram")
+        if not any(p.name == "BUILD.json" for p in eng):
+            missing.append(f"{Path(a.engine).name}/BUILD.json")
 
     print(f"release: {release_name}")
     print(f"files:   {len(plan)} from the tree (the engine's sources included), {len(eng)} from {Path(a.engine).name}/")

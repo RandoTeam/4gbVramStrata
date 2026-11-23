@@ -9,7 +9,7 @@ No cloud · No API key · Nothing leaves the machine
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge)](LICENSE)
 [![VRAM](https://img.shields.io/badge/VRAM-4%20GB-76B900?style=for-the-badge&logo=nvidia&logoColor=white)](#measured-on-a-4-gb-laptop)
 [![Platform](https://img.shields.io/badge/Platform-Linux%20%C2%B7%20Ubuntu%2026.04-E95420?style=for-the-badge&logo=ubuntu&logoColor=white)](#install)
-[![Engine](https://img.shields.io/badge/Donor%20engine-v0.1.45--poly.10-2E7D32?style=for-the-badge)](docs/BENCH-4GB.md)
+[![Engine](https://img.shields.io/badge/Donor%20engine-v0.2.19--poly.1-2E7D32?style=for-the-badge)](docs/BENCH-4GB.md)
 [![Quality gate](https://img.shields.io/badge/Quality%20gate-22%2F22%20%C2%B7%2021%2F22-1F6FEB?style=for-the-badge)](docs/QUALITY-4GB.md)
 [![💖 Support](https://img.shields.io/badge/💖_Support_the_Developer-Donate-FF69B4?style=for-the-badge)](#support-the-solo-developer)
 
@@ -65,8 +65,11 @@ tokens, 32K context, eight runs on a quiet machine. Median, with the range:
 
 | Model | File | Reads the prompt | **Answers** | Experts in VRAM |
 | --- | ---: | ---: | ---: | ---: |
-| Clover-35B-A3B-Preview APEX-I-NANOPLUS | 12.6 GB | **546 tokens/s** | **43.2 tokens/s** | 791–895 of 10,240 |
-| Gemma 4 26B-A4B QAT-UD-Q4_K_XL | 14.7 GB | **524 tokens/s** | **39.0 tokens/s** | 178 of 3,840 |
+| **Clover-35B-A3B-Preview APEX-I-NANOPLUS** (`v0.2.19-poly.1`) | 12.6 GB | **547 tokens/s** | **40.6 tokens/s** | 896 of 10,240 |
+| **Gemma 4 26B-A4B QAT-UD-Q4_K_XL** (`v0.2.19-poly.1`) | 14.7 GB | **475 tokens/s** | **34.0 tokens/s** | 170 of 3,840 |
+| **Inkling 2 Mini UD-Q4_K_XL** (`v0.2.19-poly.1`) | 17 GB | **208 tokens/s** | **25.1 tokens/s** | 280–281 of 3,072 |
+| Clover APEX-I-NANOPLUS (`v0.1.45-poly.10` session) | 12.6 GB | 546 tokens/s | 43.2 tokens/s | 791–895 of 10,240 |
+| Gemma 4 26B-A4B QAT-UD-Q4_K_XL (`v0.1.45-poly.10` session) | 14.7 GB | 524 tokens/s | 39.0 tokens/s | 178 of 3,840 |
 | Clover APEX-I-NANOPLUS, Windows 11 (history) | 11.7 GB | 449 tokens/s | 38.1 tokens/s | 529 of 10,240 |
 | Flint 40B-A2.5B UD-Q3_K_XL, Windows 11 (history) | 17.2 GB | 331 tokens/s | 21.9 tokens/s | 518 of 12,032 |
 
@@ -128,15 +131,16 @@ being an estimate. [Open an issue](https://github.com/RandoTeam/4gbVramStrata/is
 
 ## The models
 
-Twelve models, each from the vendor's own GGUF or a well-known quantizer's. **Three are measured on 4 GB here**; the
+Thirteen models, each from the vendor's own GGUF or a well-known quantizer's. **Four are measured on 4 GB here**; the
 rest are listed with what the installer estimates for this card. Details, quant sizes, vendor scores and sources:
 **[docs/MODELS-4GB.md](docs/MODELS-4GB.md)**.
 
 | Model | Parameters | Smallest file | On a 4 GB card |
 | --- | --- | ---: | --- |
-| **Clover-35B-A3B-Preview** (DiffuSpace) | 35B / 3B active | 13 GB | ✅ **measured**, 43.2 tokens/s |
-| **Gemma 4 26B-A4B QAT** (Google) | 26B / 3.8B active | 15 GB | ✅ **measured**, 39.0 tokens/s at 32K |
-| **Flint 40B-A2.5B** (Recursive) | 40B / 2.5B active | 18 GB | ✅ **measured**, 21.9 tokens/s |
+| **Clover-35B-A3B-Preview** (DiffuSpace) | 35B / 3B active | 13 GB | ✅ **measured**, 40.6–43.2 tokens/s, 22/22 gate |
+| **Gemma 4 26B-A4B QAT** (Google) | 26B / 3.8B active | 15 GB | ✅ **measured**, 34.0–39.0 tokens/s at 32K, 21/22 gate |
+| **Inkling 2 Mini** (Unsloth UD-Q4_K_XL) | looped MoE (48 passes / 24 blocks) | 17 GB | ✅ **measured**, 25.1 tokens/s, 21/22 gate |
+| **Flint 40B-A2.5B** (Recursive) | 40B / 2.5B active | 18 GB | ✅ **measured**, 21.9 tokens/s (Windows 11 history), 21/22 gate |
 | **LFM2.5-24B-A2B** (Liquid AI) | 24B / 2B active | 11 GB | 🟡 should start; not run here |
 | **Ornith 1.5-35B-A3B** (ornith-ai) | 35B / 3B active | 14 GB | 🟡 the smallest size should start; not run here |
 | **MiniCPM-V 4.7 35B-A3B** (OpenBMB) | 35B / 3B active | 16 GB | 🟡 should start; not run here |
@@ -288,7 +292,7 @@ because of them — if you can fund one project, fund the upstream first:
 **This fork stands on two projects, and neither is a dependency to be hidden:**
 
 - **[PolyStrata](https://github.com/VecSzn/PolyStrata)** by **[VecSzn](https://github.com/VecSzn)** — the engine line
-  this fork follows (`v0.1.45-poly.10`). Its MoE execution model, the expert cache, the server and the installer design
+  this fork follows (`v0.2.19-poly.1`). Its MoE execution model, the expert cache, the server and the installer design
   are theirs. This fork's update to their newest engine is merged commit for commit, and whenever their change does not
   help on 4 GB, that is written down instead of spun.
 - **[Strata](https://github.com/Niko1221/Strata)** by **[Niko1221](https://github.com/Niko1221)** — the project that

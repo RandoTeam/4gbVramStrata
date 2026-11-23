@@ -25,14 +25,17 @@ has one machine: an RTX 3050 Laptop, 4 GB, x86-64 Linux. Everything else is a co
 
 ### What the CI jobs actually run
 
-`.github/workflows/backends.yml`, four jobs, each configuring with the release's own lines from `setup.py`:
+`.github/workflows/backends.yml`, seven jobs, verified green on `v0.2.19-poly.1`, configuring with the release's own lines from `setup.py`:
 
 | Job | Runner | Configure | Proves |
 | --- | --- | --- | --- |
 | `cuda13` | `nvidia/cuda:13.0.2-devel-ubuntu24.04` | `sm_75;86;89;120` | the shipped CUDA path compiles for the cards the release names |
 | `cuda12` | `nvidia/cuda:12.9.1-devel-ubuntu24.04` | `sm_60;61;70;86` + `STRATA_EXPERIMENTAL_SM60=ON` | `--cuda 12` compiles at all |
 | `hip` | `rocm/dev-ubuntu-24.04:7.2.4-complete` | `gfx1100;gfx1201`, `STRATA_ENABLE_CUDA=OFF` | the AMD engine compiles |
-| `metal` | `macos-26` | every target, `METAL_CPP_DIR` + `STRATA_GGML_DIR` | the Metal kernels and the parity tests compile |
+| `aarch64` | `ubuntu-24.04-arm` (`nvidia/cuda:13.0.2-devel-ubuntu24.04`) | `sm_87-real` | the whole engine compiles on Linux arm64 CUDA 13 |
+| `metal` | `macos-26` | every target, `STRATA_METAL_POLY=ON`, `METAL_CPP_DIR` | the Metal kernels and the parity tests compile |
+| `linux-cpu` | `ubuntu-24.04` | GCC, `STRATA_PORTABLE=ON`, no GPU backend | all 183 CTest host & quant parity tests pass |
+| `windows` | `windows-2025` | MSVC, `STRATA_PORTABLE=ON`, no GPU backend | 40 host executables build cleanly and host CTest suite passes |
 
 They found three defects in their first hours, all real: a CUDA-only constant (`CU_MEM_LOCATION_TYPE_HOST`) in the
 4 GB host-KV fallback that HIP does not define, an `MTLGPUFamilyMetal4` name only the macOS 26 SDK has, and the Metal

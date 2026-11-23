@@ -37,17 +37,19 @@ def main() -> int:
     if nvcc is None or cuda_v < (13, 0):
         sys.exit(f"a CUDA 13.x nvcc is needed; found {cuda_v}")
     vcvars = None
-    llama = setup.get_llama_cpp()
     defs = ["-DCMAKE_CUDA_ARCHITECTURES=" + ";".join(f"{a}-real" for a in ARCHS), f"-DCMAKE_CUDA_COMPILER={nvcc}",
-            "-DSTRATA_PORTABLE=ON"]
+            *setup.toolkit_root_defs(nvcc), "-DSTRATA_PORTABLE=ON"]
     fourgbvram, vis = out / "build-fourgbvram", out / "build-vision"   # GBs of CUDA objects for five cards: on OUT_DIR's disk
     for d in (fourgbvram, vis):
         d.mkdir(parents=True, exist_ok=True)
-    setup.cmake_build(ROOT, fourgbvram, "strata-fourgbvram", ["-DSTRATA_ENABLE_CUDA=ON", "-DSTRATA_BUILD_TESTS=OFF",
-                                                  f"-DSTRATA_GGML_DIR={llama}", *defs], vcvars, fourgbvram / "build.bat")
+    setup.cmake_build(ROOT, fourgbvram, "strata-fourgbvram", ["-DSTRATA_ENABLE_CUDA=ON", "-DSTRATA_BUILD_TESTS=OFF", *defs],
+                      vcvars, fourgbvram / "build.bat")
     setup.cmake_build(ROOT / "tools" / "vision", vis, "strata-vision", [f"-DLLAMA_DIR={setup.get_llama_cpp(vision=True)}",
                                                                         "-DSTRATA_VISION_CUDA=ON", *defs],
                       vcvars, vis / "build.bat")
+    vexe = vis / "bin" / setup.VEXE
+    if not vexe.is_file():
+        sys.exit(f"missing built image encoder: {vexe}")
     src = setup.source_hash(setup.ENGINE_SOURCES)
     meta = {"source": "release", "version": setup.source_version(), "archs": ARCHS, "cuda": f"{cuda_v[0]}.{cuda_v[1]}",
             "src": src, "vision": "gpu", "vision_src": setup.source_hash(setup.VISION_SOURCES)}
@@ -55,8 +57,7 @@ def main() -> int:
     z = out / setup.fourgbvram_asset()
     with tarfile.open(z, "w:gz") as f:
         f.add(fourgbvram / setup.FOURGBVRAM_EXE, setup.FOURGBVRAM_EXE, recursive=False)
-        if (vis / "bin" / setup.VEXE).exists():
-            f.add(vis / "bin" / setup.VEXE, setup.VEXE, recursive=False)
+        f.add(vexe, setup.VEXE, recursive=False)
         info = tarfile.TarInfo("BUILD.json")
         data = json.dumps(meta, indent=1).encode()
         info.size, info.mode = len(data), 0o644

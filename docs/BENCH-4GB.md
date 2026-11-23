@@ -113,7 +113,7 @@ chat page in the browser.
 
 ## [PolyStrata](https://github.com/VecSzn/PolyStrata) v0.2.19-poly.1 (2026-11-23): Inkling 2 Mini, Clover and Gemma 4
 
-Engine updated from `v0.1.45-poly.10` to `v0.2.19-poly.1` (commit `dc0c4abf9`, locally compiled for `sm_86`, CUDA 13.3, `engine-fourgbvram/strata-fourgbvram` SHA-256 `274a7e4d3fb0ed2e…`, Ubuntu 26.04, `performance` governor, quiet card at 42 MiB before each run). Added Inkling 2 Mini support including Unsloth's top-level `architecture = 'inkling2'` layout alongside `inkling2_loop` (`src/fourgbvram/inkling2.cpp`, `src/fourgbvram/engine.cpp`).
+Engine updated from `v0.1.45-poly.10` to `v0.2.19-poly.1` (commit `c16b5bd07`, locally compiled for `sm_86`, CUDA 13.3, `engine-fourgbvram/strata-fourgbvram` SHA-256 `274a7e4d3fb0ed2e…`, Ubuntu 26.04, `performance` governor, quiet card at 42 MiB before each run). Added Inkling 2 Mini support including Unsloth's top-level `architecture = 'inkling2'` layout alongside `inkling2_loop` (`src/fourgbvram/inkling2.cpp`, `src/fourgbvram/engine.cpp`).
 
 **The saved-prompt chat task** (`bench/speed/prompt.txt`, 8 runs each, 128 new tokens, 32K context):
 
@@ -132,7 +132,7 @@ All three models were verified end-to-end through `serve/server.py` on the same 
 
 ## poly.7 → poly.10 (2026-11-20): the engine updated, the numbers did not move
 
-The fork took the donor's v0.1.45-poly.10 (commit `b798306b`; the donor carries the shared expert scratch, the
+The fork took the donor's v0.1.45-poly.10 (commit `913f97883`; the donor carries the shared expert scratch, the
 Gemma 4 tool-call fix, `--kv` in setup, the RAM budget with SSD spill and `--batch-mtp`). The engine was rebuilt here
 for `sm_86` from the merged tree: `engine-fourgbvram/strata-fourgbvram`, SHA-256 `cf0e29415ce7b486…`. The old binary
 (`285f20e579b6bc19…`, poly.7) was kept and measured beside it in the same session.
