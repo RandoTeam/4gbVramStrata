@@ -680,7 +680,10 @@ std::vector<int> layer_starts(const std::string& split, const Shards& file, int 
 // in turns with the build that kept 512 (1,496 and 1,311); the smaller files read as fast either way.  Under
 // Windows what the card is short of moves to the system's RAM, which the file then has less of.
 int default_reserve_mib(size_t total_b, bool ram_tight) {
-    if (ram_tight) return (int) std::clamp<size_t>(total_b >> 24, 512, 1024);
+    // On 4-6 GB cards, bumping the reserve from 256 to 512 MiB takes 25-30% of the expert cache
+    // (e.g. Inkling 2 Mini 280 -> 220 experts on a 4 GB RTX 3050, leaving 369 MiB unused); keep
+    // the 512 MiB ram_tight floor for cards > 6 GiB where WDDM/shared-RAM spill was measured.
+    if (ram_tight && total_b > (6ULL << 30)) return (int) std::clamp<size_t>(total_b >> 24, 512, 1024);
     return (int) std::clamp<size_t>(total_b >> 25, 256, 768);
 }
 
@@ -2254,7 +2257,7 @@ void Engine::fill_expert_cache() {
     size_t free_b = 0, total_b = 0;
     ck(cudaMemGetInfo(&free_b, &total_b), "cudaMemGetInfo");
     const size_t ram = ram_available(), files = gg_->bytes() + (dg_ ? dg_->bytes() : 0);
-    ram_tight_ = ram > 0 && files + (5ULL << 30) > ram;
+    ram_tight_ = ram > 0 && total_b > (6ULL << 30) && files + (5ULL << 30) > ram;
     // 256 MiB at least, whatever was asked: the launches recorded later take theirs out of the reserve (mind_vram())
     reserve_mib_ = opt_.vram_reserve_mib >= 0 ? std::max(opt_.vram_reserve_mib, 256) :
 #if defined(STRATA_GPU_METAL)

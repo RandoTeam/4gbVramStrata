@@ -1065,8 +1065,8 @@ const DotX4Kernel kX4Table[] = {
     ENTRY_X4(Q4_0, Q8_0, q4_0_q8_0),
     ENTRY_X4(Q8_0, Q8_0, q8_0_q8_0),
     ENTRY_X4(MXFP4, Q8_0, mxfp4_q8_0),
-    ENTRY_X4(Q4_K, Q8_K, q4_K_q8_K),
-    ENTRY_X4(Q5_K, Q8_K, q5_K_q8_K),
+    // Q4_K and Q5_K stay on 1-row AVX2 _opt kernels: beside the Xeon throughput note above, stack-spilled
+    // acc_m[4] lets GCC emit vfmadd213ps vs vfmadd231ps, flipping NaN payloads on dmin in pool_determinism.
     ENTRY_X4(Q6_K, Q8_K, q6_K_q8_K),
     ENTRY_X4(IQ4_XS, Q8_K, iq4_xs_q8_K),
     ENTRY_X4(IQ3_XXS, Q8_K, iq3_xxs_q8_K),
