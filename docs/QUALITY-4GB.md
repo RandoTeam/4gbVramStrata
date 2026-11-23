@@ -68,6 +68,18 @@ It folded the read into the grep, which is a legitimate plan for a human and not
 for. Clover, on the same gate, emits all three. This is the fourth family to lose a prompt here and the first whose
 failure is a planning choice rather than an instruction it could not follow.
 
+### v0.2.19-poly.1 engine, 2026-11-23: Clover, Gemma 4 and Inkling 2 Mini
+
+Measured on the locally compiled `v0.2.19-poly.1` engine (`dc0c4abf9`, SHA-256 `274a7e4d3fb0ed2e…`), two attempts per prompt:
+
+| Model | Result file | Passed every attempt | Long prompt (`needle_3facts`) | Failed prompt |
+| --- | --- | ---: | --- | --- |
+| **Clover APEX-I-NANOPLUS** | `bench/quality/results/clover-v0219.json` | **22 of 22** | 2/2 (13,722 tokens read at 742.6 tok/s) | none |
+| **Gemma 4 26B-A4B QAT-UD-Q4_K_XL** | `bench/quality/results/gemma4-v0219.json` | **21 of 22** | 2/2 (13,333 tokens read at 520.3 tok/s) | `tool_loop` 0/2 (folds `read_file` into `grep`) |
+| **Inkling 2 Mini UD-Q4_K_XL** | `bench/quality/results/inkling-ud-q4-k-xl.json` | **21 of 22** | 2/2 (15,323 tokens read at 279.5 tok/s) | `tool_loop` 0/2 (hit `--max-tokens 2000` inside `reasoning_content`, 6,989 / 6,832 chars) |
+
+Notice Inkling 2 Mini ran at `--max-tokens 2000` per the reasoning-budget rule and still spent all 2,000 completion tokens inside thinking on `tool_loop` before emitting visible JSON tool calls; all other 21 prompts (arithmetic, logic, executable Python, single `tool_call`, JSON schema, Russian/German/Spanish, constraints, and all three needles across 15K tokens) passed 2/2.
+
 **The long-context prompt is why the engine fix in this session mattered.** Before it, `needle_3facts` (about 18,000
 tokens) ended the request with `cudaGraphInstantiate: out of memory` — the 400 that stopped the first gate run at
 prompt 22 of 22. With the recording falling back to plain launches it passes 2/2.

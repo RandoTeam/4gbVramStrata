@@ -1,0 +1,825 @@
+{
+ "model": "local",
+ "when": "2026-11-23 02:37",
+ "engine": "strata-fourgbvram",
+ "passed": 21,
+ "passed_any": 21,
+ "total": 22,
+ "repeat": 2,
+ "rows": [
+  {
+   "id": "math_mul",
+   "domain": "math",
+   "prompt": "What is 137 * 29? Answer with the number only.",
+   "pass": true,
+   "passes": 2,
+   "attempts": [
+    {
+     "answer": "3973",
+     "pass": true,
+     "reasoning_chars": 152,
+     "seconds": 4.8,
+     "usage": {
+      "prompt_tokens": 29,
+      "completion_tokens": 73,
+      "total_tokens": 102,
+      "prompt_tokens_details": {
+       "cached_tokens": 0
+      }
+     }
+    },
+    {
+     "answer": "3973",
+     "pass": true,
+     "reasoning_chars": 149,
+     "seconds": 3.3,
+     "usage": {
+      "prompt_tokens": 29,
+      "completion_tokens": 73,
+      "total_tokens": 102,
+      "prompt_tokens_details": {
+       "cached_tokens": 28
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "math_train",
+   "domain": "math",
+   "prompt": "A train travels 60 km in 45 minutes. What is its average speed in km/h? Answer with the number only.",
+   "pass": true,
+   "passes": 2,
+   "attempts": [
+    {
+     "answer": "80",
+     "pass": true,
+     "reasoning_chars": 218,
+     "seconds": 4.7,
+     "usage": {
+      "prompt_tokens": 43,
+      "completion_tokens": 86,
+      "total_tokens": 129,
+      "prompt_tokens_details": {
+       "cached_tokens": 12
+      }
+     }
+    },
+    {
+     "answer": "80",
+     "pass": true,
+     "reasoning_chars": 218,
+     "seconds": 3.6,
+     "usage": {
+      "prompt_tokens": 43,
+      "completion_tokens": 86,
+      "total_tokens": 129,
+      "prompt_tokens_details": {
+       "cached_tokens": 42
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "math_pencils",
+   "domain": "math",
+   "prompt": "If 3 pencils cost 1.20, how much do 7 pencils cost? Answer with the number only.",
+   "pass": true,
+   "passes": 2,
+   "attempts": [
+    {
+     "answer": "2.80",
+     "pass": true,
+     "reasoning_chars": 242,
+     "seconds": 5.2,
+     "usage": {
+      "prompt_tokens": 41,
+      "completion_tokens": 102,
+      "total_tokens": 143,
+      "prompt_tokens_details": {
+       "cached_tokens": 12
+      }
+     }
+    },
+    {
+     "answer": "2.80",
+     "pass": true,
+     "reasoning_chars": 242,
+     "seconds": 4.4,
+     "usage": {
+      "prompt_tokens": 41,
+      "completion_tokens": 102,
+      "total_tokens": 143,
+      "prompt_tokens_details": {
+       "cached_tokens": 40
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "logic_roses",
+   "domain": "logic",
+   "prompt": "All roses are flowers. Some flowers fade quickly. Can we conclude that some roses fade quickly? Answer yes or no, then one line why.",
+   "pass": true,
+   "passes": 2,
+   "attempts": [
+    {
+     "answer": "No. The quickly fading flowers might all be non-rose flowers; roses being a subset of flowers doesn’t force overlap with the fading ones.",
+     "pass": true,
+     "reasoning_chars": 942,
+     "seconds": 13.1,
+     "usage": {
+      "prompt_tokens": 48,
+      "completion_tokens": 277,
+      "total_tokens": 325,
+      "prompt_tokens_details": {
+       "cached_tokens": 12
+      }
+     }
+    },
+    {
+     "answer": "No. The quickly fading flowers might all be non-rose flowers; roses being a subset of flowers doesn’t force overlap with the fading ones.",
+     "pass": true,
+     "reasoning_chars": 942,
+     "seconds": 11.8,
+     "usage": {
+      "prompt_tokens": 48,
+      "completion_tokens": 277,
+      "total_tokens": 325,
+      "prompt_tokens_details": {
+       "cached_tokens": 47
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "logic_order",
+   "domain": "logic",
+   "prompt": "Anna is taller than Ben. Ben is taller than Carl. Who is the shortest? One name only.",
+   "pass": true,
+   "passes": 2,
+   "attempts": [
+    {
+     "answer": "Carl",
+     "pass": true,
+     "reasoning_chars": 237,
+     "seconds": 3.5,
+     "usage": {
+      "prompt_tokens": 36,
+      "completion_tokens": 70,
+      "total_tokens": 106,
+      "prompt_tokens_details": {
+       "cached_tokens": 12
+      }
+     }
+    },
+    {
+     "answer": "Carl",
+     "pass": true,
+     "reasoning_chars": 237,
+     "seconds": 2.8,
+     "usage": {
+      "prompt_tokens": 36,
+      "completion_tokens": 70,
+      "total_tokens": 106,
+      "prompt_tokens_details": {
+       "cached_tokens": 35
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "code_palindrome",
+   "domain": "code",
+   "prompt": "Write a Python function is_palindrome(s) that ignores case and spaces. Code only.",
+   "pass": true,
+   "passes": 2,
+   "attempts": [
+    {
+     "answer": "def is_palindrome(s):\n    s = s.replace(' ', '').lower()\n    return s == s[::-1]",
+     "pass": true,
+     "reasoning_chars": 858,
+     "seconds": 11.8,
+     "usage": {
+      "prompt_tokens": 36,
+      "completion_tokens": 254,
+      "total_tokens": 290,
+      "prompt_tokens_details": {
+       "cached_tokens": 12
+      }
+     }
+    },
+    {
+     "answer": "def is_palindrome(s):\n    s = s.replace(' ', '').lower()\n    return s == s[::-1]",
+     "pass": true,
+     "reasoning_chars": 858,
+     "seconds": 10.9,
+     "usage": {
+      "prompt_tokens": 36,
+      "completion_tokens": 254,
+      "total_tokens": 290,
+      "prompt_tokens_details": {
+       "cached_tokens": 35
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "code_listcomp",
+   "domain": "code",
+   "prompt": "What does this print? print([x*x for x in range(4)]) Answer with the output only.",
+   "pass": true,
+   "passes": 2,
+   "attempts": [
+    {
+     "answer": "[0, 1, 4, 9]",
+     "pass": true,
+     "reasoning_chars": 261,
+     "seconds": 5.5,
+     "usage": {
+      "prompt_tokens": 41,
+      "completion_tokens": 115,
+      "total_tokens": 156,
+      "prompt_tokens_details": {
+       "cached_tokens": 12
+      }
+     }
+    },
+    {
+     "answer": "[0, 1, 4, 9]",
+     "pass": true,
+     "reasoning_chars": 261,
+     "seconds": 4.6,
+     "usage": {
+      "prompt_tokens": 41,
+      "completion_tokens": 115,
+      "total_tokens": 156,
+      "prompt_tokens_details": {
+       "cached_tokens": 40
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "json_city",
+   "domain": "tools",
+   "prompt": "Return a JSON object with the keys city and country for Kyiv. JSON only.",
+   "pass": true,
+   "passes": 2,
+   "attempts": [
+    {
+     "answer": "{\"city\":\"Kyiv\",\"country\":\"Ukraine\"}",
+     "pass": true,
+     "reasoning_chars": 337,
+     "seconds": 5.1,
+     "usage": {
+      "prompt_tokens": 32,
+      "completion_tokens": 108,
+      "total_tokens": 140,
+      "prompt_tokens_details": {
+       "cached_tokens": 12
+      }
+     }
+    },
+    {
+     "answer": "{\"city\":\"Kyiv\",\"country\":\"Ukraine\"}",
+     "pass": true,
+     "reasoning_chars": 337,
+     "seconds": 4.5,
+     "usage": {
+      "prompt_tokens": 32,
+      "completion_tokens": 108,
+      "total_tokens": 140,
+      "prompt_tokens_details": {
+       "cached_tokens": 31
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "tool_call",
+   "domain": "tools",
+   "prompt": "You have the function get_weather(city). Call it for Paris and answer with a JSON object with the keys name and arguments. JSON only.",
+   "pass": true,
+   "passes": 2,
+   "attempts": [
+    {
+     "answer": "{\"name\":\"get_weather\",\"arguments\":{\"city\":\"Paris\"}}",
+     "pass": true,
+     "reasoning_chars": 1209,
+     "seconds": 14.1,
+     "usage": {
+      "prompt_tokens": 46,
+      "completion_tokens": 323,
+      "total_tokens": 369,
+      "prompt_tokens_details": {
+       "cached_tokens": 12
+      }
+     }
+    },
+    {
+     "answer": "{\"name\":\"get_weather\",\"arguments\":{\"city\":\"Paris\"}}",
+     "pass": true,
+     "reasoning_chars": 1209,
+     "seconds": 13.0,
+     "usage": {
+      "prompt_tokens": 46,
+      "completion_tokens": 323,
+      "total_tokens": 369,
+      "prompt_tokens_details": {
+       "cached_tokens": 45
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "lang_russian",
+   "domain": "language",
+   "prompt": "РћС‚РІРµС‡Р°Р№ РїРѕ-СЂСѓСЃСЃРєРё: РїРµСЂРµС‡РёСЃР»Рё С‚СЂРё РїСЂРёС‡РёРЅС‹, РїРѕС‡РµРјСѓ РЅРѕСѓС‚Р±СѓРє РјРѕР¶РµС‚ СЂР°Р±РѕС‚Р°С‚СЊ РјРµРґР»РµРЅРЅРѕ. РљСЂР°С‚РєРѕ.",
+   "pass": true,
+   "passes": 2,
+   "attempts": [
+    {
+     "answer": "1) мало свободной оперативной памяти и много фоновых программ;  \n2) перегрев из-за пыли и забитых вентиляторов;  \n3) заполненный или фрагментированный диск.",
+     "pass": true,
+     "reasoning_chars": 1346,
+     "seconds": 22.8,
+     "usage": {
+      "prompt_tokens": 171,
+      "completion_tokens": 459,
+      "total_tokens": 630,
+      "prompt_tokens_details": {
+       "cached_tokens": 12
+      }
+     }
+    },
+    {
+     "answer": "1) мало свободной оперативной памяти и много фоновых программ;  \n2) перегрев из-за пыли и забитых вентиляторов;  \n3) заполненный или фрагментированный диск.",
+     "pass": true,
+     "reasoning_chars": 1346,
+     "seconds": 20.3,
+     "usage": {
+      "prompt_tokens": 171,
+      "completion_tokens": 459,
+      "total_tokens": 630,
+      "prompt_tokens_details": {
+       "cached_tokens": 170
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "lang_german",
+   "domain": "language",
+   "prompt": "Translate into German, one sentence only: The cat sits on the mat.",
+   "pass": true,
+   "passes": 2,
+   "attempts": [
+    {
+     "answer": "Die Katze sitzt auf der Matte.",
+     "pass": true,
+     "reasoning_chars": 288,
+     "seconds": 3.8,
+     "usage": {
+      "prompt_tokens": 32,
+      "completion_tokens": 89,
+      "total_tokens": 121,
+      "prompt_tokens_details": {
+       "cached_tokens": 12
+      }
+     }
+    },
+    {
+     "answer": "Die Katze sitzt auf der Matte.",
+     "pass": true,
+     "reasoning_chars": 288,
+     "seconds": 3.2,
+     "usage": {
+      "prompt_tokens": 32,
+      "completion_tokens": 89,
+      "total_tokens": 121,
+      "prompt_tokens_details": {
+       "cached_tokens": 31
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "instruction_words",
+   "domain": "instruction",
+   "prompt": "Write exactly one sentence of exactly eight words about rain. Nothing else.",
+   "pass": true,
+   "passes": 2,
+   "attempts": [
+    {
+     "answer": "Rain softly stitches silver threads across quiet streets.",
+     "pass": true,
+     "reasoning_chars": 618,
+     "seconds": 6.8,
+     "usage": {
+      "prompt_tokens": 29,
+      "completion_tokens": 173,
+      "total_tokens": 202,
+      "prompt_tokens_details": {
+       "cached_tokens": 12
+      }
+     }
+    },
+    {
+     "answer": "Rain softly stitches silver threads across quiet streets.",
+     "pass": true,
+     "reasoning_chars": 618,
+     "seconds": 6.4,
+     "usage": {
+      "prompt_tokens": 29,
+      "completion_tokens": 173,
+      "total_tokens": 202,
+      "prompt_tokens_details": {
+       "cached_tokens": 28
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "instruction_five",
+   "domain": "instruction",
+   "prompt": "List exactly five prime numbers between 100 and 200, comma-separated, nothing else.",
+   "pass": true,
+   "passes": 2,
+   "attempts": [
+    {
+     "answer": "101,103,107,109,113",
+     "pass": true,
+     "reasoning_chars": 537,
+     "seconds": 7.3,
+     "usage": {
+      "prompt_tokens": 34,
+      "completion_tokens": 183,
+      "total_tokens": 217,
+      "prompt_tokens_details": {
+       "cached_tokens": 12
+      }
+     }
+    },
+    {
+     "answer": "101,103,107,109,113",
+     "pass": true,
+     "reasoning_chars": 537,
+     "seconds": 6.7,
+     "usage": {
+      "prompt_tokens": 34,
+      "completion_tokens": 183,
+      "total_tokens": 217,
+      "prompt_tokens_details": {
+       "cached_tokens": 33
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "summary_moe",
+   "domain": "summary",
+   "prompt": "Summarise in one sentence: a mixture-of-experts model keeps most of its parameters idle for any one token.",
+   "pass": true,
+   "passes": 2,
+   "attempts": [
+    {
+     "answer": "In a mixture-of-experts model, each token is processed by only a small subset of experts, leaving most parameters idle for that token.",
+     "pass": true,
+     "reasoning_chars": 683,
+     "seconds": 8.2,
+     "usage": {
+      "prompt_tokens": 40,
+      "completion_tokens": 196,
+      "total_tokens": 236,
+      "prompt_tokens_details": {
+       "cached_tokens": 12
+      }
+     }
+    },
+    {
+     "answer": "In a mixture-of-experts model, each token is processed by only a small subset of experts, leaving most parameters idle for that token.",
+     "pass": true,
+     "reasoning_chars": 683,
+     "seconds": 7.4,
+     "usage": {
+      "prompt_tokens": 40,
+      "completion_tokens": 196,
+      "total_tokens": 236,
+      "prompt_tokens_details": {
+       "cached_tokens": 39
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "fact_capital",
+   "domain": "facts",
+   "prompt": "What is the capital of Australia? One word.",
+   "pass": true,
+   "passes": 2,
+   "attempts": [
+    {
+     "answer": "Canberra",
+     "pass": true,
+     "reasoning_chars": 274,
+     "seconds": 3.0,
+     "usage": {
+      "prompt_tokens": 25,
+      "completion_tokens": 76,
+      "total_tokens": 101,
+      "prompt_tokens_details": {
+       "cached_tokens": 12
+      }
+     }
+    },
+    {
+     "answer": "Canberra",
+     "pass": true,
+     "reasoning_chars": 274,
+     "seconds": 2.7,
+     "usage": {
+      "prompt_tokens": 25,
+      "completion_tokens": 76,
+      "total_tokens": 101,
+      "prompt_tokens_details": {
+       "cached_tokens": 24
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "seq_fib",
+   "domain": "math",
+   "prompt": "Write the first 8 Fibonacci numbers, comma-separated, nothing else.",
+   "pass": true,
+   "passes": 2,
+   "attempts": [
+    {
+     "answer": "1,1,2,3,5,8,13,21",
+     "pass": true,
+     "reasoning_chars": 602,
+     "seconds": 9.2,
+     "usage": {
+      "prompt_tokens": 30,
+      "completion_tokens": 236,
+      "total_tokens": 266,
+      "prompt_tokens_details": {
+       "cached_tokens": 12
+      }
+     }
+    },
+    {
+     "answer": "1,1,2,3,5,8,13,21",
+     "pass": true,
+     "reasoning_chars": 602,
+     "seconds": 8.7,
+     "usage": {
+      "prompt_tokens": 30,
+      "completion_tokens": 236,
+      "total_tokens": 266,
+      "prompt_tokens_details": {
+       "cached_tokens": 29
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "math_change",
+   "domain": "math",
+   "prompt": "A shop sells pens at 1.20 each and notebooks at 2.50 each. I buy 3 pens and 2 notebooks and pay with a 20 note. How much change do I get? Answer with the number only.",
+   "pass": true,
+   "passes": 2,
+   "attempts": [
+    {
+     "answer": "11.40",
+     "pass": true,
+     "reasoning_chars": 238,
+     "seconds": 4.5,
+     "usage": {
+      "prompt_tokens": 67,
+      "completion_tokens": 94,
+      "total_tokens": 161,
+      "prompt_tokens_details": {
+       "cached_tokens": 12
+      }
+     }
+    },
+    {
+     "answer": "11.40",
+     "pass": true,
+     "reasoning_chars": 238,
+     "seconds": 3.4,
+     "usage": {
+      "prompt_tokens": 67,
+      "completion_tokens": 94,
+      "total_tokens": 161,
+      "prompt_tokens_details": {
+       "cached_tokens": 66
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "lang_spanish",
+   "domain": "language",
+   "prompt": "Translate into Spanish, one sentence only: The dog sleeps under the table.",
+   "pass": true,
+   "passes": 2,
+   "attempts": [
+    {
+     "answer": "El perro duerme debajo de la mesa.",
+     "pass": true,
+     "reasoning_chars": 346,
+     "seconds": 4.2,
+     "usage": {
+      "prompt_tokens": 32,
+      "completion_tokens": 101,
+      "total_tokens": 133,
+      "prompt_tokens_details": {
+       "cached_tokens": 12
+      }
+     }
+    },
+    {
+     "answer": "El perro duerme debajo de la mesa.",
+     "pass": true,
+     "reasoning_chars": 346,
+     "seconds": 3.6,
+     "usage": {
+      "prompt_tokens": 32,
+      "completion_tokens": 101,
+      "total_tokens": 133,
+      "prompt_tokens_details": {
+       "cached_tokens": 31
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "json_array",
+   "domain": "tools",
+   "prompt": "Return a JSON array of exactly three objects, each with the keys name and size, for three files. JSON only.",
+   "pass": true,
+   "passes": 2,
+   "attempts": [
+    {
+     "answer": "[{\"name\":\"report.pdf\",\"size\":\"2.4 MB\"},{\"name\":\"photo.jpg\",\"size\":\"1.1 MB\"},{\"name\":\"notes.txt\",\"size\":\"18 KB\"}]",
+     "pass": true,
+     "reasoning_chars": 1246,
+     "seconds": 15.9,
+     "usage": {
+      "prompt_tokens": 40,
+      "completion_tokens": 409,
+      "total_tokens": 449,
+      "prompt_tokens_details": {
+       "cached_tokens": 12
+      }
+     }
+    },
+    {
+     "answer": "[{\"name\":\"report.pdf\",\"size\":\"2.4 MB\"},{\"name\":\"photo.jpg\",\"size\":\"1.1 MB\"},{\"name\":\"notes.txt\",\"size\":\"18 KB\"}]",
+     "pass": true,
+     "reasoning_chars": 1246,
+     "seconds": 15.1,
+     "usage": {
+      "prompt_tokens": 40,
+      "completion_tokens": 409,
+      "total_tokens": 449,
+      "prompt_tokens_details": {
+       "cached_tokens": 39
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "tool_loop",
+   "domain": "tools",
+   "prompt": "You have three functions: read_file(path), grep(pattern, path) and write_file(path, text). Read src/main.c, find the lines that contain TODO in it, then write those lines to notes/todo.md. Answer with one JSON object per line and nothing else, each shaped {\"name\": ..., \"arguments\": {...}}, one call per line, in the order you would call them.",
+   "pass": false,
+   "passes": 0,
+   "attempts": [
+    {
+     "answer": "",
+     "pass": false,
+     "reasoning_chars": 6989,
+     "seconds": 81.5,
+     "usage": {
+      "prompt_tokens": 112,
+      "completion_tokens": 2000,
+      "total_tokens": 2112,
+      "prompt_tokens_details": {
+       "cached_tokens": 12
+      }
+     }
+    },
+    {
+     "answer": "",
+     "pass": false,
+     "reasoning_chars": 6832,
+     "seconds": 80.0,
+     "usage": {
+      "prompt_tokens": 112,
+      "completion_tokens": 2000,
+      "total_tokens": 2112,
+      "prompt_tokens_details": {
+       "cached_tokens": 111
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "code_runs",
+   "domain": "code",
+   "prompt": "Write a Python function split_even(nums) that returns a tuple of two lists: the even numbers and the odd numbers, each in the order they appear. Code only, in one ```python block.",
+   "pass": true,
+   "passes": 2,
+   "attempts": [
+    {
+     "answer": "```python\ndef split_even(nums):\n    even = [x for x in nums if x % 2 == 0]\n    odd = [x for x in nums if x % 2 != 0]\n    return even, odd\n```",
+     "pass": true,
+     "reasoning_chars": 614,
+     "seconds": 10.3,
+     "usage": {
+      "prompt_tokens": 57,
+      "completion_tokens": 248,
+      "total_tokens": 305,
+      "prompt_tokens_details": {
+       "cached_tokens": 12
+      }
+     }
+    },
+    {
+     "answer": "```python\ndef split_even(nums):\n    even = [x for x in nums if x % 2 == 0]\n    odd = [x for x in nums if x % 2 != 0]\n    return even, odd\n```",
+     "pass": true,
+     "reasoning_chars": 614,
+     "seconds": 9.3,
+     "usage": {
+      "prompt_tokens": 57,
+      "completion_tokens": 248,
+      "total_tokens": 305,
+      "prompt_tokens_details": {
+       "cached_tokens": 56
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "needle_3facts",
+   "domain": "long-context",
+   "prompt": "Read the document, then answer the three questions at the end.",
+   "pass": true,
+   "passes": 2,
+   "attempts": [
+    {
+     "answer": "1. The calibration code for bay seven is **ZUBROVKA-7741**.\n2. The delivery slot for the north yard is **Thursday at 07:40**.\n3. The spare part number for the coolant pump is **SP-88213-K**.",
+     "pass": true,
+     "reasoning_chars": 599,
+     "seconds": 72.5,
+     "usage": {
+      "prompt_tokens": 15323,
+      "completion_tokens": 235,
+      "total_tokens": 15558,
+      "prompt_tokens_details": {
+       "cached_tokens": 12
+      }
+     }
+    },
+    {
+     "answer": "1. The calibration code for bay seven is **ZUBROVKA-7741**.\n2. The delivery slot for the north yard is **Thursday at 07:40**.\n3. The spare part number for the coolant pump is **SP-88213-K**.",
+     "pass": true,
+     "reasoning_chars": 599,
+     "seconds": 17.7,
+     "usage": {
+      "prompt_tokens": 15323,
+      "completion_tokens": 235,
+      "total_tokens": 15558,
+      "prompt_tokens_details": {
+       "cached_tokens": 15322
+      }
+     }
+    }
+   ]
+  }
+ ]
+}

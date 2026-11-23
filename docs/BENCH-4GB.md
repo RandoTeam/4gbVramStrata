@@ -111,6 +111,25 @@ used), against 784 at 32K. A **57,897-token** prompt reads at **634.3 tok/s** (9
 32K remains the daily window. The launcher is `run-clover-apex-i-nanoplus-64k.sh`, and its desktop shortcut opens the
 chat page in the browser.
 
+## [PolyStrata](https://github.com/VecSzn/PolyStrata) v0.2.19-poly.1 (2026-11-23): Inkling 2 Mini, Clover and Gemma 4
+
+Engine updated from `v0.1.45-poly.10` to `v0.2.19-poly.1` (commit `dc0c4abf9`, locally compiled for `sm_86`, CUDA 13.3, `engine-fourgbvram/strata-fourgbvram` SHA-256 `274a7e4d3fb0ed2e…`, Ubuntu 26.04, `performance` governor, quiet card at 42 MiB before each run). Added Inkling 2 Mini support including Unsloth's top-level `architecture = 'inkling2'` layout alongside `inkling2_loop` (`src/fourgbvram/inkling2.cpp`, `src/fourgbvram/engine.cpp`).
+
+**The saved-prompt chat task** (`bench/speed/prompt.txt`, 8 runs each, 128 new tokens, 32K context):
+
+| Model | Prompt tokens | Written tokens/s, median (range) | Prompt read | Draft guesses kept | Experts in VRAM at load |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| **Clover APEX-I-NANOPLUS** | 1,904 | **40.6 (36.9–41.7)** | **547 tok/s** | 23–57 of 38–79 | 896 of 10,240 (0.9 GiB) |
+| **Gemma 4 26B-A4B QAT-UD-Q4_K_XL** | 1,921 | **34.0 (31.2–35.6)** | **475 tok/s** | 92–96 of 99–117 | 170 of 3,840 (0.5 GiB) |
+| **Inkling 2 Mini UD-Q4_K_XL** | 1,981 | **25.1 (24.6–25.3)** | **208 tok/s** | — (no draft head) | 280–281 of 3,072 (1.2 GiB) |
+
+Settings:
+- **Clover**: `--max-context 32768 --conversation-cache-mib auto --tail-skip 6 --no-graphs --kv q8_0` (`bench/speed/results/clover-chat-v0219.json`)
+- **Gemma 4**: `--max-context 32768 --draft-model mtp-gemma-4-26B-A4B-it-Q8_0.gguf` (`bench/speed/results/gemma4-chat-v0219.json`)
+- **Inkling 2 Mini**: `--max-context 32768 --attn-requant q5_0 --loop-bf16 --tail-skip 4 --expert-swaps 0 --kv fp8` (`bench/speed/results/inkling-chat.json`; 2,826 experts outside VRAM in 13.9 GiB of pinned memory, 48 looped passes across 24 physical blocks)
+
+All three models were verified end-to-end through `serve/server.py` on the same engine build (`bench/quality/results/`): Clover **22/22**, Gemma 4 **21/22**, Inkling 2 Mini **21/22**. Note that in this session Clover (40.6 vs 43.2–44.3) and Gemma 4 (34.0 vs 39.0) measured slightly slower than the `poly.10` session below (Gemma 4 cached 170 experts instead of 178 at load); both sets of runs remain side by side without rewriting older rows.
+
 ## poly.7 → poly.10 (2026-11-20): the engine updated, the numbers did not move
 
 The fork took the donor's v0.1.45-poly.10 (commit `b798306b`; the donor carries the shared expert scratch, the
