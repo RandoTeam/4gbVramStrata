@@ -29,9 +29,10 @@ rather than implying parity.
 Windows numbers measured 2026-11-03 on the saved prompt `bench/speed/prompt.txt` (about 1,900 tokens, a question at the
 end), 8 runs, quiet machine, engine `a37654f5f940047f…`. The `4gbVramStrata v0.1.66` 8-run Linux numbers (`39.2` Clover,
 `31.25` Gemma 4, `24.05` Inkling 2 Mini) were measured 2026-11-23 on engine `45a9f28d13f90494…` (`bench/speed/results/`);
-the subsequent portable rebuild on `af00ac464` (`8cb86071445a885e…`, `BUILD.json` `src: 1c4066903af4af4d`) adopts
-`v0.2.20-poly.2` + Basalt `#593` + null-slot MMVQ early exit and passed GPU unit tests and single-run hardware smoke
-checks on Inkling 2 Mini and Clover. Earlier Linux `poly.10` (`cf0e29415ce7b486…`, 43.2 / 39.0), `poly.7` (`285f20e579b6bc19…`,
+the subsequent portable rebuild on `009b2bf1f` (`780e2f7b4a07e9dd…`, `BUILD.json` `src: ab30946605188513`) adopts
+`v0.2.20-poly.2` + main PRs 264/278/266/`#181` + `sm_86` IQ lane parity + Basalt `#593` + null-slot MMVQ early exit
+and passed all five GPU unit tests (`iq3_lanes`, `iq_slot_lanes`, `bell`, `fattn`, `ink_flash`) as well as hardware smoke
+checks on `8cb86071445a885e…`. Earlier Linux `poly.10` (`cf0e29415ce7b486…`, 43.2 / 39.0), `poly.7` (`285f20e579b6bc19…`,
 44.5 over 11 runs), and `v0.2.19-poly.1` rows are preserved side by side in `docs/BENCH-4GB.md`; the full 32K suite is
 `bench/results/`. The marginal cost of a token is 32.9 ms (Clover) and 46.2 ms (Flint) — that is what a long answer
 pays.
