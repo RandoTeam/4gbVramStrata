@@ -1,0 +1,825 @@
+{
+ "model": "local",
+ "when": "2026-11-23 19:54",
+ "engine": "strata-fourgbvram",
+ "passed": 21,
+ "passed_any": 21,
+ "total": 22,
+ "repeat": 2,
+ "rows": [
+  {
+   "id": "math_mul",
+   "domain": "math",
+   "prompt": "What is 137 * 29? Answer with the number only.",
+   "pass": true,
+   "passes": 2,
+   "attempts": [
+    {
+     "answer": "3973",
+     "pass": true,
+     "reasoning_chars": 808,
+     "seconds": 13.9,
+     "usage": {
+      "prompt_tokens": 33,
+      "completion_tokens": 435,
+      "total_tokens": 468,
+      "prompt_tokens_details": {
+       "cached_tokens": 0
+      }
+     }
+    },
+    {
+     "answer": "3973",
+     "pass": true,
+     "reasoning_chars": 784,
+     "seconds": 11.2,
+     "usage": {
+      "prompt_tokens": 33,
+      "completion_tokens": 424,
+      "total_tokens": 457,
+      "prompt_tokens_details": {
+       "cached_tokens": 32
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "math_train",
+   "domain": "math",
+   "prompt": "A train travels 60 km in 45 minutes. What is its average speed in km/h? Answer with the number only.",
+   "pass": true,
+   "passes": 2,
+   "attempts": [
+    {
+     "answer": "80",
+     "pass": true,
+     "reasoning_chars": 569,
+     "seconds": 8.7,
+     "usage": {
+      "prompt_tokens": 45,
+      "completion_tokens": 267,
+      "total_tokens": 312,
+      "prompt_tokens_details": {
+       "cached_tokens": 0
+      }
+     }
+    },
+    {
+     "answer": "80",
+     "pass": true,
+     "reasoning_chars": 569,
+     "seconds": 7.5,
+     "usage": {
+      "prompt_tokens": 45,
+      "completion_tokens": 267,
+      "total_tokens": 312,
+      "prompt_tokens_details": {
+       "cached_tokens": 44
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "math_pencils",
+   "domain": "math",
+   "prompt": "If 3 pencils cost 1.20, how much do 7 pencils cost? Answer with the number only.",
+   "pass": true,
+   "passes": 2,
+   "attempts": [
+    {
+     "answer": "2.80",
+     "pass": true,
+     "reasoning_chars": 439,
+     "seconds": 6.3,
+     "usage": {
+      "prompt_tokens": 41,
+      "completion_tokens": 176,
+      "total_tokens": 217,
+      "prompt_tokens_details": {
+       "cached_tokens": 0
+      }
+     }
+    },
+    {
+     "answer": "2.80",
+     "pass": true,
+     "reasoning_chars": 562,
+     "seconds": 7.1,
+     "usage": {
+      "prompt_tokens": 41,
+      "completion_tokens": 248,
+      "total_tokens": 289,
+      "prompt_tokens_details": {
+       "cached_tokens": 40
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "logic_roses",
+   "domain": "logic",
+   "prompt": "All roses are flowers. Some flowers fade quickly. Can we conclude that some roses fade quickly? Answer yes or no, then one line why.",
+   "pass": true,
+   "passes": 2,
+   "attempts": [
+    {
+     "answer": "No.\nThe flowers that fade quickly might not be roses.",
+     "pass": true,
+     "reasoning_chars": 762,
+     "seconds": 8.9,
+     "usage": {
+      "prompt_tokens": 45,
+      "completion_tokens": 241,
+      "total_tokens": 286,
+      "prompt_tokens_details": {
+       "cached_tokens": 0
+      }
+     }
+    },
+    {
+     "answer": "No.\nThe flowers that fade quickly might not be roses.",
+     "pass": true,
+     "reasoning_chars": 827,
+     "seconds": 8.1,
+     "usage": {
+      "prompt_tokens": 45,
+      "completion_tokens": 260,
+      "total_tokens": 305,
+      "prompt_tokens_details": {
+       "cached_tokens": 44
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "logic_order",
+   "domain": "logic",
+   "prompt": "Anna is taller than Ben. Ben is taller than Carl. Who is the shortest? One name only.",
+   "pass": true,
+   "passes": 2,
+   "attempts": [
+    {
+     "answer": "Carl",
+     "pass": true,
+     "reasoning_chars": 325,
+     "seconds": 4.2,
+     "usage": {
+      "prompt_tokens": 37,
+      "completion_tokens": 108,
+      "total_tokens": 145,
+      "prompt_tokens_details": {
+       "cached_tokens": 0
+      }
+     }
+    },
+    {
+     "answer": "Carl",
+     "pass": true,
+     "reasoning_chars": 332,
+     "seconds": 3.0,
+     "usage": {
+      "prompt_tokens": 37,
+      "completion_tokens": 109,
+      "total_tokens": 146,
+      "prompt_tokens_details": {
+       "cached_tokens": 36
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "code_palindrome",
+   "domain": "code",
+   "prompt": "Write a Python function is_palindrome(s) that ignores case and spaces. Code only.",
+   "pass": true,
+   "passes": 2,
+   "attempts": [
+    {
+     "answer": "```python\ndef is_palindrome(s):\n    clean_s = s.replace(\" \", \"\").lower()\n    return clean_s == clean_s[::-1]\n```",
+     "pass": true,
+     "reasoning_chars": 719,
+     "seconds": 8.5,
+     "usage": {
+      "prompt_tokens": 35,
+      "completion_tokens": 256,
+      "total_tokens": 291,
+      "prompt_tokens_details": {
+       "cached_tokens": 0
+      }
+     }
+    },
+    {
+     "answer": "```python\ndef is_palindrome(s):\n    clean_s = s.lower().replace(\" \", \"\")\n    return clean_s == clean_s[::-1]\n```",
+     "pass": true,
+     "reasoning_chars": 712,
+     "seconds": 7.0,
+     "usage": {
+      "prompt_tokens": 35,
+      "completion_tokens": 255,
+      "total_tokens": 290,
+      "prompt_tokens_details": {
+       "cached_tokens": 34
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "code_listcomp",
+   "domain": "code",
+   "prompt": "What does this print? print([x*x for x in range(4)]) Answer with the output only.",
+   "pass": true,
+   "passes": 2,
+   "attempts": [
+    {
+     "answer": "[0, 1, 4, 9]",
+     "pass": true,
+     "reasoning_chars": 379,
+     "seconds": 6.2,
+     "usage": {
+      "prompt_tokens": 39,
+      "completion_tokens": 177,
+      "total_tokens": 216,
+      "prompt_tokens_details": {
+       "cached_tokens": 0
+      }
+     }
+    },
+    {
+     "answer": "[0, 1, 4, 9]",
+     "pass": true,
+     "reasoning_chars": 430,
+     "seconds": 5.5,
+     "usage": {
+      "prompt_tokens": 39,
+      "completion_tokens": 191,
+      "total_tokens": 230,
+      "prompt_tokens_details": {
+       "cached_tokens": 38
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "json_city",
+   "domain": "tools",
+   "prompt": "Return a JSON object with the keys city and country for Kyiv. JSON only.",
+   "pass": true,
+   "passes": 2,
+   "attempts": [
+    {
+     "answer": "```json\n{\n  \"city\": \"Kyiv\",\n  \"country\": \"Ukraine\"\n}\n```",
+     "pass": true,
+     "reasoning_chars": 327,
+     "seconds": 4.8,
+     "usage": {
+      "prompt_tokens": 32,
+      "completion_tokens": 141,
+      "total_tokens": 173,
+      "prompt_tokens_details": {
+       "cached_tokens": 0
+      }
+     }
+    },
+    {
+     "answer": "```json\n{\n  \"city\": \"Kyiv\",\n  \"country\": \"Ukraine\"\n}\n```",
+     "pass": true,
+     "reasoning_chars": 327,
+     "seconds": 3.8,
+     "usage": {
+      "prompt_tokens": 32,
+      "completion_tokens": 141,
+      "total_tokens": 173,
+      "prompt_tokens_details": {
+       "cached_tokens": 31
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "tool_call",
+   "domain": "tools",
+   "prompt": "You have the function get_weather(city). Call it for Paris and answer with a JSON object with the keys name and arguments. JSON only.",
+   "pass": true,
+   "passes": 2,
+   "attempts": [
+    {
+     "answer": "```json\n{\n  \"name\": \"get_weather\",\n  \"arguments\": {\n    \"city\": \"Paris\"\n  }\n}\n```",
+     "pass": true,
+     "reasoning_chars": 315,
+     "seconds": 4.9,
+     "usage": {
+      "prompt_tokens": 46,
+      "completion_tokens": 143,
+      "total_tokens": 189,
+      "prompt_tokens_details": {
+       "cached_tokens": 0
+      }
+     }
+    },
+    {
+     "answer": "```json\n{\n  \"name\": \"get_weather\",\n  \"arguments\": {\n    \"city\": \"Paris\"\n  }\n}\n```",
+     "pass": true,
+     "reasoning_chars": 315,
+     "seconds": 3.9,
+     "usage": {
+      "prompt_tokens": 46,
+      "completion_tokens": 143,
+      "total_tokens": 189,
+      "prompt_tokens_details": {
+       "cached_tokens": 45
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "lang_russian",
+   "domain": "language",
+   "prompt": "РћС‚РІРµС‡Р°Р№ РїРѕ-СЂСѓСЃСЃРєРё: РїРµСЂРµС‡РёСЃР»Рё С‚СЂРё РїСЂРёС‡РёРЅС‹, РїРѕС‡РµРјСѓ РЅРѕСѓС‚Р±СѓРє РјРѕР¶РµС‚ СЂР°Р±РѕС‚Р°С‚СЊ РјРµРґР»РµРЅРЅРѕ. РљСЂР°С‚РєРѕ.",
+   "pass": true,
+   "passes": 2,
+   "attempts": [
+    {
+     "answer": "Вот три основные причины медленной работы ноутбука:\n\n1. **Перегрузка системы:** Слишком много запущенных фоновых программ или наличие вирусов.\n2. **Проблемы с памятью:** Недостаток оперативной памяти (RAM) или переполненный жесткий диск.\n3. **Перегрев:** Загрязнение системы охлаждения пылью, из-за чего процессор снижает скорость работы (троттлинг).",
+     "pass": true,
+     "reasoning_chars": 1751,
+     "seconds": 25.6,
+     "usage": {
+      "prompt_tokens": 169,
+      "completion_tokens": 804,
+      "total_tokens": 973,
+      "prompt_tokens_details": {
+       "cached_tokens": 0
+      }
+     }
+    },
+    {
+     "answer": "Вот три основные причины медленной работы ноутбука:\n\n1. **Перегрузка системы:** слишком много запущенных программ в фоновом режиме или наличие вирусов.\n2. **Перегрев:** из-за пыли или высохшей термопасты процессор снижает скорость (троттлинг), чтобы не сгореть.\n3. **Проблемы с накопителем:** нехватка свободного места или использование медленного жесткого диска (HDD) вместо современного SSD.",
+     "pass": true,
+     "reasoning_chars": 1789,
+     "seconds": 26.2,
+     "usage": {
+      "prompt_tokens": 169,
+      "completion_tokens": 813,
+      "total_tokens": 982,
+      "prompt_tokens_details": {
+       "cached_tokens": 168
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "lang_german",
+   "domain": "language",
+   "prompt": "Translate into German, one sentence only: The cat sits on the mat.",
+   "pass": true,
+   "passes": 2,
+   "attempts": [
+    {
+     "answer": "Die Katze sitzt auf der Matte.",
+     "pass": true,
+     "reasoning_chars": 542,
+     "seconds": 6.7,
+     "usage": {
+      "prompt_tokens": 31,
+      "completion_tokens": 187,
+      "total_tokens": 218,
+      "prompt_tokens_details": {
+       "cached_tokens": 0
+      }
+     }
+    },
+    {
+     "answer": "Die Katze sitzt auf der Matte.",
+     "pass": true,
+     "reasoning_chars": 542,
+     "seconds": 5.7,
+     "usage": {
+      "prompt_tokens": 31,
+      "completion_tokens": 187,
+      "total_tokens": 218,
+      "prompt_tokens_details": {
+       "cached_tokens": 30
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "instruction_words",
+   "domain": "instruction",
+   "prompt": "Write exactly one sentence of exactly eight words about rain. Nothing else.",
+   "pass": true,
+   "passes": 2,
+   "attempts": [
+    {
+     "answer": "The rain falls softly on the green leaves.",
+     "pass": true,
+     "reasoning_chars": 2117,
+     "seconds": 24.2,
+     "usage": {
+      "prompt_tokens": 30,
+      "completion_tokens": 717,
+      "total_tokens": 747,
+      "prompt_tokens_details": {
+       "cached_tokens": 0
+      }
+     }
+    },
+    {
+     "answer": "The rain falls softly on the green leaves.",
+     "pass": true,
+     "reasoning_chars": 2117,
+     "seconds": 22.5,
+     "usage": {
+      "prompt_tokens": 30,
+      "completion_tokens": 717,
+      "total_tokens": 747,
+      "prompt_tokens_details": {
+       "cached_tokens": 29
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "instruction_five",
+   "domain": "instruction",
+   "prompt": "List exactly five prime numbers between 100 and 200, comma-separated, nothing else.",
+   "pass": true,
+   "passes": 2,
+   "attempts": [
+    {
+     "answer": "101, 103, 107, 109, 113",
+     "pass": true,
+     "reasoning_chars": 752,
+     "seconds": 11.2,
+     "usage": {
+      "prompt_tokens": 39,
+      "completion_tokens": 384,
+      "total_tokens": 423,
+      "prompt_tokens_details": {
+       "cached_tokens": 0
+      }
+     }
+    },
+    {
+     "answer": "101, 103, 107, 109, 113",
+     "pass": true,
+     "reasoning_chars": 743,
+     "seconds": 10.1,
+     "usage": {
+      "prompt_tokens": 39,
+      "completion_tokens": 382,
+      "total_tokens": 421,
+      "prompt_tokens_details": {
+       "cached_tokens": 38
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "summary_moe",
+   "domain": "summary",
+   "prompt": "Summarise in one sentence: a mixture-of-experts model keeps most of its parameters idle for any one token.",
+   "pass": true,
+   "passes": 2,
+   "attempts": [
+    {
+     "answer": "Mixture-of-experts models activate only a subset of their parameters for each token.",
+     "pass": true,
+     "reasoning_chars": 1666,
+     "seconds": 15.3,
+     "usage": {
+      "prompt_tokens": 40,
+      "completion_tokens": 417,
+      "total_tokens": 457,
+      "prompt_tokens_details": {
+       "cached_tokens": 0
+      }
+     }
+    },
+    {
+     "answer": "Mixture-of-experts models only activate a subset of their parameters for any given token.",
+     "pass": true,
+     "reasoning_chars": 1797,
+     "seconds": 14.6,
+     "usage": {
+      "prompt_tokens": 40,
+      "completion_tokens": 452,
+      "total_tokens": 492,
+      "prompt_tokens_details": {
+       "cached_tokens": 39
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "fact_capital",
+   "domain": "facts",
+   "prompt": "What is the capital of Australia? One word.",
+   "pass": true,
+   "passes": 2,
+   "attempts": [
+    {
+     "answer": "Canberra",
+     "pass": true,
+     "reasoning_chars": 168,
+     "seconds": 2.6,
+     "usage": {
+      "prompt_tokens": 26,
+      "completion_tokens": 54,
+      "total_tokens": 80,
+      "prompt_tokens_details": {
+       "cached_tokens": 0
+      }
+     }
+    },
+    {
+     "answer": "Canberra",
+     "pass": true,
+     "reasoning_chars": 200,
+     "seconds": 2.1,
+     "usage": {
+      "prompt_tokens": 26,
+      "completion_tokens": 61,
+      "total_tokens": 87,
+      "prompt_tokens_details": {
+       "cached_tokens": 25
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "seq_fib",
+   "domain": "math",
+   "prompt": "Write the first 8 Fibonacci numbers, comma-separated, nothing else.",
+   "pass": true,
+   "passes": 2,
+   "attempts": [
+    {
+     "answer": "0, 1, 1, 2, 3, 5, 8, 13",
+     "pass": true,
+     "reasoning_chars": 1419,
+     "seconds": 21.4,
+     "usage": {
+      "prompt_tokens": 31,
+      "completion_tokens": 705,
+      "total_tokens": 736,
+      "prompt_tokens_details": {
+       "cached_tokens": 0
+      }
+     }
+    },
+    {
+     "answer": "0, 1, 1, 2, 3, 5, 8, 13",
+     "pass": true,
+     "reasoning_chars": 902,
+     "seconds": 11.4,
+     "usage": {
+      "prompt_tokens": 31,
+      "completion_tokens": 397,
+      "total_tokens": 428,
+      "prompt_tokens_details": {
+       "cached_tokens": 30
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "math_change",
+   "domain": "math",
+   "prompt": "A shop sells pens at 1.20 each and notebooks at 2.50 each. I buy 3 pens and 2 notebooks and pay with a 20 note. How much change do I get? Answer with the number only.",
+   "pass": true,
+   "passes": 2,
+   "attempts": [
+    {
+     "answer": "11.40",
+     "pass": true,
+     "reasoning_chars": 623,
+     "seconds": 9.4,
+     "usage": {
+      "prompt_tokens": 68,
+      "completion_tokens": 291,
+      "total_tokens": 359,
+      "prompt_tokens_details": {
+       "cached_tokens": 0
+      }
+     }
+    },
+    {
+     "answer": "11.40",
+     "pass": true,
+     "reasoning_chars": 809,
+     "seconds": 11.1,
+     "usage": {
+      "prompt_tokens": 68,
+      "completion_tokens": 388,
+      "total_tokens": 456,
+      "prompt_tokens_details": {
+       "cached_tokens": 67
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "lang_spanish",
+   "domain": "language",
+   "prompt": "Translate into Spanish, one sentence only: The dog sleeps under the table.",
+   "pass": true,
+   "passes": 2,
+   "attempts": [
+    {
+     "answer": "El perro duerme debajo de la mesa.",
+     "pass": true,
+     "reasoning_chars": 442,
+     "seconds": 5.3,
+     "usage": {
+      "prompt_tokens": 31,
+      "completion_tokens": 155,
+      "total_tokens": 186,
+      "prompt_tokens_details": {
+       "cached_tokens": 0
+      }
+     }
+    },
+    {
+     "answer": "El perro duerme debajo de la mesa.",
+     "pass": true,
+     "reasoning_chars": 442,
+     "seconds": 4.2,
+     "usage": {
+      "prompt_tokens": 31,
+      "completion_tokens": 155,
+      "total_tokens": 186,
+      "prompt_tokens_details": {
+       "cached_tokens": 30
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "json_array",
+   "domain": "tools",
+   "prompt": "Return a JSON array of exactly three objects, each with the keys name and size, for three files. JSON only.",
+   "pass": true,
+   "passes": 2,
+   "attempts": [
+    {
+     "answer": "```json\n[\n  {\n    \"name\": \"report.pdf\",\n    \"size\": \"1.2 MB\"\n  },\n  {\n    \"name\": \"vacation_photo.jpg\",\n    \"size\": \"4.5 MB\"\n  },\n  {\n    \"name\": \"data_backup.zip\",\n    \"size\": \"256 MB\"\n  }\n]\n```",
+     "pass": true,
+     "reasoning_chars": 522,
+     "seconds": 9.4,
+     "usage": {
+      "prompt_tokens": 40,
+      "completion_tokens": 282,
+      "total_tokens": 322,
+      "prompt_tokens_details": {
+       "cached_tokens": 0
+      }
+     }
+    },
+    {
+     "answer": "```json\n[\n  {\n    \"name\": \"report.pdf\",\n    \"size\": \"1.2MB\"\n  },\n  {\n    \"name\": \"vacation_photo.jpg\",\n    \"size\": \"4.5MB\"\n  },\n  {\n    \"name\": \"presentation.pptx\",\n    \"size\": \"15MB\"\n  }\n]\n```",
+     "pass": true,
+     "reasoning_chars": 695,
+     "seconds": 9.8,
+     "usage": {
+      "prompt_tokens": 40,
+      "completion_tokens": 350,
+      "total_tokens": 390,
+      "prompt_tokens_details": {
+       "cached_tokens": 39
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "tool_loop",
+   "domain": "tools",
+   "prompt": "You have three functions: read_file(path), grep(pattern, path) and write_file(path, text). Read src/main.c, find the lines that contain TODO in it, then write those lines to notes/todo.md. Answer with one JSON object per line and nothing else, each shaped {\"name\": ..., \"arguments\": {...}}, one call per line, in the order you would call them.",
+   "pass": false,
+   "passes": 0,
+   "attempts": [
+    {
+     "answer": "{\"name\": \"grep\", \"arguments\": {\"pattern\": \"TODO\", \"path\": \"src/main.c\"}}\n{\"name\": \"write_file\", \"arguments\": {\"path\": \"notes/todo.md\", \"text\": \"result_of_grep\"}}",
+     "pass": false,
+     "reasoning_chars": 2244,
+     "seconds": 25.7,
+     "usage": {
+      "prompt_tokens": 104,
+      "completion_tokens": 765,
+      "total_tokens": 869,
+      "prompt_tokens_details": {
+       "cached_tokens": 0
+      }
+     }
+    },
+    {
+     "answer": "{\"name\": \"grep\", \"arguments\": {\"pattern\": \"TODO\", \"path\": \"src/main.c\"}}\n{\"name\": \"write_file\", \"arguments\": {\"path\": \"notes/todo.md\", \"text\": \"result_of_grep\"}}",
+     "pass": false,
+     "reasoning_chars": 2232,
+     "seconds": 24.7,
+     "usage": {
+      "prompt_tokens": 104,
+      "completion_tokens": 765,
+      "total_tokens": 869,
+      "prompt_tokens_details": {
+       "cached_tokens": 103
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "code_runs",
+   "domain": "code",
+   "prompt": "Write a Python function split_even(nums) that returns a tuple of two lists: the even numbers and the odd numbers, each in the order they appear. Code only, in one ```python block.",
+   "pass": true,
+   "passes": 2,
+   "attempts": [
+    {
+     "answer": "```python\ndef split_even(nums):\n    evens = []\n    odds = []\n    for n in nums:\n        if n % 2 == 0:\n            evens.append(n)\n        else:\n            odds.append(n)\n    return evens, odds\n```",
+     "pass": true,
+     "reasoning_chars": 1854,
+     "seconds": 19.0,
+     "usage": {
+      "prompt_tokens": 58,
+      "completion_tokens": 660,
+      "total_tokens": 718,
+      "prompt_tokens_details": {
+       "cached_tokens": 0
+      }
+     }
+    },
+    {
+     "answer": "```python\ndef split_even(nums):\n    evens = []\n    odds = []\n    for num in nums:\n        if num % 2 == 0:\n            evens.append(num)\n        else:\n            odds.append(num)\n    return evens, odds\n```",
+     "pass": true,
+     "reasoning_chars": 2318,
+     "seconds": 22.1,
+     "usage": {
+      "prompt_tokens": 58,
+      "completion_tokens": 777,
+      "total_tokens": 835,
+      "prompt_tokens_details": {
+       "cached_tokens": 57
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "needle_3facts",
+   "domain": "long-context",
+   "prompt": "Read the document, then answer the three questions at the end.",
+   "pass": true,
+   "passes": 2,
+   "attempts": [
+    {
+     "answer": "1. ZUBROVKA-7741\n2. Thursday at 07:40\n3. SP-88213-K",
+     "pass": true,
+     "reasoning_chars": 1452,
+     "seconds": 65.0,
+     "usage": {
+      "prompt_tokens": 13333,
+      "completion_tokens": 471,
+      "total_tokens": 13804,
+      "prompt_tokens_details": {
+       "cached_tokens": 0
+      }
+     }
+    },
+    {
+     "answer": "1. ZUBROVKA-7741\n2. Thursday at 07:40\n3. SP-88213-K",
+     "pass": true,
+     "reasoning_chars": 1428,
+     "seconds": 36.2,
+     "usage": {
+      "prompt_tokens": 13333,
+      "completion_tokens": 467,
+      "total_tokens": 13800,
+      "prompt_tokens_details": {
+       "cached_tokens": 13332
+      }
+     }
+    }
+   ]
+  }
+ ]
+}

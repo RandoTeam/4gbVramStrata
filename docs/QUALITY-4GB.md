@@ -68,6 +68,17 @@ It folded the read into the grep, which is a legitimate plan for a human and not
 for. Clover, on the same gate, emits all three. This is the fourth family to lose a prompt here and the first whose
 failure is a planning choice rather than an instruction it could not follow.
 
+### `4gbVramStrata v0.1.66` engine, 2026-11-23: Clover and Gemma 4
+
+Measured on `4gbVramStrata v0.1.66` (`45a9f28d13f90494…`, two attempts per prompt, saved in `bench/quality/results/`):
+
+| Model | Config | Gate score | Notes | Result file |
+| --- | --- | ---: | --- | --- |
+| **Clover-35B-A3B-Preview APEX-I-NANOPLUS** | `--kv q8_0 --tail-skip 6 --no-graphs` | **22 / 22** | Every prompt 2/2 | `bench/quality/results/clover-v0166.json` |
+| **Gemma 4 26B-A4B QAT-UD-Q4_K_XL** | `--draft-model` (MTP-Q8_0) | **21 / 22** | `tool_loop` 0/2 (merges `read_file` into `grep`+`write_file`, same pattern as `v0.2.19-poly.1`) | `bench/quality/results/gemma4-v0166.json` |
+
+After adopting [PolyStrata](https://github.com/VecSzn/PolyStrata) `v0.2.20-poly.2` (Prompt FlashAttention without `llama.cpp`, Inkling 2 `reasoning_budget_tokens` close, layer-split `eval_picks`/`picked`), [Basalt](https://github.com/jesdga95/basalt) `#593` mapped doorbell, and null-slot `native_mmvq_ids` early exit on `af00ac464` (`engine-fourgbvram/strata-fourgbvram` SHA-256 `8cb86071445a885e…`), unit tests (`serve.test_inkling` 12/12, `fourgbvram_fattn_test`, `fourgbvram_fattn_test dec`, `fourgbvram_bell_test`) and hardware smoke checks verified the rebuilt binary.
+
 ### v0.2.19-poly.1 engine, 2026-11-23: Clover, Gemma 4 and Inkling 2 Mini
 
 Measured on the locally compiled `v0.2.19-poly.1` engine (`dc0c4abf9`, SHA-256 `274a7e4d3fb0ed2e…`), two attempts per prompt:

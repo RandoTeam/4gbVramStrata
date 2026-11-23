@@ -1,12 +1,12 @@
 {
  "model": "clover",
  "task": "chat",
- "when": "2026-11-20 13:39",
+ "when": "2026-11-23 19:31",
  "runs": 8,
  "prompt": "bench/speed/prompt.txt",
  "prompt_tokens": 1904,
  "max_new": 128,
- "engine_sha256": "cf0e29415ce7b4860cbe2b74d2850cab2a7eb20549eaa46646c8616e513cf4b6",
+ "engine_sha256": "45a9f28d13f90494d6ef7654f4d53a5e5edd70f488b428dc7d69a0c052ccacb4",
  "config": "/home/ilia/\u0414\u043e\u043a\u0443\u043c\u0435\u043d\u0442\u044b/OpenCode/4gbVramStrata/strata-clover-apex-i-nanoplus.json",
  "settings": {
   "--model": "/home/ilia/\u0414\u043e\u043a\u0443\u043c\u0435\u043d\u0442\u044b/OpenCode/4gbVramStrata-data/models/clover-APEX-I-NANOPLUS/Clover-35B-A3B-Preview.APEX-I-NanoPlus-V2.1.gguf",
@@ -17,66 +17,66 @@
   "--no-graphs": true,
   "--kv": "q8_0"
  },
- "median_decode": 44.349999999999994,
- "min_decode": 43.4,
- "max_decode": 45.4,
- "median_prefill": 545.8,
+ "median_decode": 39.2,
+ "min_decode": 36.4,
+ "max_decode": 40.4,
+ "median_prefill": 541.8499999999999,
  "rows": [
   {
    "prompt_tokens": 1904,
-   "prefill": 546.6,
+   "prefill": 541.4,
    "generated": 128,
-   "decode": 45.1,
-   "drafts": "39/53"
+   "decode": 39.1,
+   "drafts": "44/64"
   },
   {
    "prompt_tokens": 1904,
-   "prefill": 547.1,
+   "prefill": 539.5,
    "generated": 128,
-   "decode": 45.4,
-   "drafts": "41/55"
+   "decode": 38.2,
+   "drafts": "33/49"
   },
   {
    "prompt_tokens": 1904,
-   "prefill": 546.0,
+   "prefill": 546.4,
    "generated": 128,
-   "decode": 43.8,
-   "drafts": "40/63"
+   "decode": 36.4,
+   "drafts": "21/36"
   },
   {
    "prompt_tokens": 1904,
-   "prefill": 545.6,
+   "prefill": 539.0,
    "generated": 128,
-   "decode": 43.4,
-   "drafts": "43/64"
+   "decode": 40.4,
+   "drafts": "45/64"
   },
   {
    "prompt_tokens": 1904,
    "prefill": 545.2,
    "generated": 128,
-   "decode": 44.3,
-   "drafts": "40/63"
+   "decode": 40.3,
+   "drafts": "45/64"
   },
   {
    "prompt_tokens": 1904,
-   "prefill": 545.3,
+   "prefill": 544.1,
    "generated": 128,
-   "decode": 43.8,
-   "drafts": "42/60"
+   "decode": 40.1,
+   "drafts": "45/64"
   },
   {
    "prompt_tokens": 1904,
-   "prefill": 546.3,
+   "prefill": 538.9,
    "generated": 128,
-   "decode": 44.4,
-   "drafts": "40/55"
+   "decode": 37.3,
+   "drafts": "32/50"
   },
   {
    "prompt_tokens": 1904,
-   "prefill": 544.4,
+   "prefill": 542.3,
    "generated": 128,
-   "decode": 44.4,
-   "drafts": "35/51"
+   "decode": 39.3,
+   "drafts": "45/64"
   }
  ]
 }

@@ -1,12 +1,12 @@
 {
  "model": "inkling",
  "task": "chat",
- "when": "2026-11-23 02:41",
+ "when": "2026-11-23 19:39",
  "runs": 8,
  "prompt": "bench/speed/prompt.txt",
  "prompt_tokens": 1981,
  "max_new": 128,
- "engine_sha256": "274a7e4d3fb0ed2e73a61750bbae5b516109fa8a1370863b3f0826a15aa762b0",
+ "engine_sha256": "45a9f28d13f90494d6ef7654f4d53a5e5edd70f488b428dc7d69a0c052ccacb4",
  "config": "/home/ilia/\u0414\u043e\u043a\u0443\u043c\u0435\u043d\u0442\u044b/OpenCode/4gbVramStrata/strata-inkling-ud-q4_k_xl.json",
  "settings": {
   "--model": "/home/ilia/\u0414\u043e\u043a\u0443\u043c\u0435\u043d\u0442\u044b/OpenCode/4gbVramStrata-data/models/inkling2-mini-UD-Q4_K_XL/Inkling-2-Mini-UD-Q4_K_XL.gguf",
@@ -15,68 +15,67 @@
   "--attn-requant": "q5_0",
   "--loop-bf16": true,
   "--tail-skip": "4",
-  "--expert-swaps": "0",
   "--kv": "fp8"
  },
- "median_decode": 25.05,
- "min_decode": 24.6,
- "max_decode": 25.3,
- "median_prefill": 207.8,
+ "median_decode": 24.05,
+ "min_decode": 23.0,
+ "max_decode": 25.5,
+ "median_prefill": 214.2,
  "rows": [
   {
    "prompt_tokens": 1981,
-   "prefill": 207.0,
+   "prefill": 213.5,
    "generated": 128,
-   "decode": 24.7,
+   "decode": 23.0,
    "drafts": "?"
   },
   {
    "prompt_tokens": 1981,
-   "prefill": 207.9,
+   "prefill": 212.4,
    "generated": 128,
-   "decode": 24.6,
+   "decode": 23.9,
    "drafts": "?"
   },
   {
    "prompt_tokens": 1981,
-   "prefill": 208.1,
-   "generated": 128,
-   "decode": 25.0,
-   "drafts": "?"
-  },
-  {
-   "prompt_tokens": 1981,
-   "prefill": 207.7,
-   "generated": 128,
-   "decode": 25.0,
-   "drafts": "?"
-  },
-  {
-   "prompt_tokens": 1981,
-   "prefill": 207.8,
-   "generated": 128,
-   "decode": 25.1,
-   "drafts": "?"
-  },
-  {
-   "prompt_tokens": 1981,
-   "prefill": 207.7,
-   "generated": 128,
-   "decode": 25.2,
-   "drafts": "?"
-  },
-  {
-   "prompt_tokens": 1981,
-   "prefill": 208.1,
+   "prefill": 216.3,
    "generated": 128,
    "decode": 25.3,
    "drafts": "?"
   },
   {
    "prompt_tokens": 1981,
-   "prefill": 207.8,
+   "prefill": 217.0,
    "generated": 128,
-   "decode": 25.2,
+   "decode": 25.5,
+   "drafts": "?"
+  },
+  {
+   "prompt_tokens": 1981,
+   "prefill": 216.8,
+   "generated": 128,
+   "decode": 25.3,
+   "drafts": "?"
+  },
+  {
+   "prompt_tokens": 1981,
+   "prefill": 213.6,
+   "generated": 128,
+   "decode": 23.8,
+   "drafts": "?"
+  },
+  {
+   "prompt_tokens": 1981,
+   "prefill": 213.4,
+   "generated": 128,
+   "decode": 24.0,
+   "drafts": "?"
+  },
+  {
+   "prompt_tokens": 1981,
+   "prefill": 214.8,
+   "generated": 128,
+   "decode": 24.1,
    "drafts": "?"
   }
  ]

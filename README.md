@@ -9,7 +9,7 @@ No cloud · No API key · Nothing leaves the machine
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge)](LICENSE)
 [![VRAM](https://img.shields.io/badge/VRAM-4%20GB-76B900?style=for-the-badge&logo=nvidia&logoColor=white)](#measured-on-a-4-gb-laptop)
 [![Platform](https://img.shields.io/badge/Platform-Linux%20%C2%B7%20Ubuntu%2026.04-E95420?style=for-the-badge&logo=ubuntu&logoColor=white)](#install)
-[![Engine](https://img.shields.io/badge/Donor%20engine-v0.2.19--poly.1-2E7D32?style=for-the-badge)](docs/BENCH-4GB.md)
+[![Engine](https://img.shields.io/badge/4gbVramStrata-v0.1.66-2E7D32?style=for-the-badge)](docs/BENCH-4GB.md)
 [![Quality gate](https://img.shields.io/badge/Quality%20gate-22%2F22%20%C2%B7%2021%2F22-1F6FEB?style=for-the-badge)](docs/QUALITY-4GB.md)
 [![💖 Support](https://img.shields.io/badge/💖_Support_the_Developer-Donate-FF69B4?style=for-the-badge)](#support-the-solo-developer)
 
@@ -65,9 +65,12 @@ tokens, 32K context, eight runs on a quiet machine. Median, with the range:
 
 | Model | File | Reads the prompt | **Answers** | Experts in VRAM |
 | --- | ---: | ---: | ---: | ---: |
-| **Clover-35B-A3B-Preview APEX-I-NANOPLUS** (`v0.2.19-poly.1`) | 12.6 GB | **547 tokens/s** | **40.6 tokens/s** | 896 of 10,240 |
-| **Gemma 4 26B-A4B QAT-UD-Q4_K_XL** (`v0.2.19-poly.1`) | 14.7 GB | **475 tokens/s** | **34.0 tokens/s** | 170 of 3,840 |
-| **Inkling 2 Mini UD-Q4_K_XL** (`v0.2.19-poly.1`) | 17 GB | **208 tokens/s** | **25.1 tokens/s** | 280–281 of 3,072 |
+| **Clover-35B-A3B-Preview APEX-I-NANOPLUS** (`4gbVramStrata v0.1.66`) | 12.6 GB | **542 tokens/s** | **39.2 tokens/s** | 897 of 10,240 |
+| **Gemma 4 26B-A4B QAT-UD-Q4_K_XL** (`4gbVramStrata v0.1.66`) | 14.7 GB | **471 tokens/s** | **31.3 tokens/s** | 162 of 3,840 |
+| **Inkling 2 Mini UD-Q4_K_XL** (`4gbVramStrata v0.1.66`) | 17 GB | **214 tokens/s** | **24.1 tokens/s** | 279 of 3,072 |
+| Clover APEX-I-NANOPLUS (`v0.2.19-poly.1` baseline) | 12.6 GB | 547 tokens/s | 40.6 tokens/s | 896 of 10,240 |
+| Gemma 4 26B-A4B QAT-UD-Q4_K_XL (`v0.2.19-poly.1` baseline) | 14.7 GB | 475 tokens/s | 34.0 tokens/s | 170 of 3,840 |
+| Inkling 2 Mini UD-Q4_K_XL (`v0.2.19-poly.1` baseline) | 17 GB | 208 tokens/s | 25.1 tokens/s | 280–281 of 3,072 |
 | Clover APEX-I-NANOPLUS (`v0.1.45-poly.10` session) | 12.6 GB | 546 tokens/s | 43.2 tokens/s | 791–895 of 10,240 |
 | Gemma 4 26B-A4B QAT-UD-Q4_K_XL (`v0.1.45-poly.10` session) | 14.7 GB | 524 tokens/s | 39.0 tokens/s | 178 of 3,840 |
 | Clover APEX-I-NANOPLUS, Windows 11 (history) | 11.7 GB | 449 tokens/s | 38.1 tokens/s | 529 of 10,240 |
@@ -137,9 +140,9 @@ rest are listed with what the installer estimates for this card. Details, quant 
 
 | Model | Parameters | Smallest file | On a 4 GB card |
 | --- | --- | ---: | --- |
-| **Clover-35B-A3B-Preview** (DiffuSpace) | 35B / 3B active | 13 GB | ✅ **measured**, 40.6–43.2 tokens/s, 22/22 gate |
-| **Gemma 4 26B-A4B QAT** (Google) | 26B / 3.8B active | 15 GB | ✅ **measured**, 34.0–39.0 tokens/s at 32K, 21/22 gate |
-| **Inkling 2 Mini** (Unsloth UD-Q4_K_XL) | looped MoE (48 passes / 24 blocks) | 17 GB | ✅ **measured**, 25.1 tokens/s, 21/22 gate |
+| **Clover-35B-A3B-Preview** (DiffuSpace) | 35B / 3B active | 13 GB | ✅ **measured**, 39.2–43.2 tokens/s, 22/22 gate |
+| **Gemma 4 26B-A4B QAT** (Google) | 26B / 3.8B active | 15 GB | ✅ **measured**, 31.3–39.0 tokens/s at 32K, 21/22 gate |
+| **Inkling 2 Mini** (Unsloth UD-Q4_K_XL) | looped MoE (48 passes / 24 blocks) | 17 GB | ✅ **measured**, 24.1–25.1 tokens/s, 21/22 gate |
 | **Flint 40B-A2.5B** (Recursive) | 40B / 2.5B active | 18 GB | ✅ **measured**, 21.9 tokens/s (Windows 11 history), 21/22 gate |
 | **LFM2.5-24B-A2B** (Liquid AI) | 24B / 2B active | 11 GB | 🟡 should start; not run here |
 | **Ornith 1.5-35B-A3B** (ornith-ai) | 35B / 3B active | 14 GB | 🟡 the smallest size should start; not run here |
@@ -185,12 +188,13 @@ cd 4gbVramStrata
    A `run-<model>.bat` or `run-<model>.sh` per installed model is a start with no questions.
 3. For a start with no questions now: `./run-clover-apex-i-nanoplus.sh` (Linux) or `run-clover-apex-i-nanoplus.bat`.
 
-**The engine.** Windows downloads a ready-made `strata-fourgbvram.exe` for the release; if none fits your card, setup
-offers to install Visual Studio Build Tools and the CUDA Toolkit and compiles it (20–40 minutes, once). Linux always
-compiles it (5–20 minutes). Nothing else needs a compiler.
+**The engine.** Windows downloads a ready-made `strata-fourgbvram.exe` from the release (or can be built on CI via
+[`.github/workflows/release-windows.yml`](.github/workflows/release-windows.yml)); if none fits your card, setup
+offers to install Visual Studio Build Tools and the CUDA Toolkit and compiles it (20–40 minutes, once). Linux downloads
+a ready-made release binary or compiles it locally (5–20 minutes). Nothing else needs a compiler.
 
-*Windows has not been re-measured since the engine update to poly.10 — the Windows rows on this page are from the
-poly.7 era, kept as history. The code path is the same one; only the numbers are older.*
+*Windows has not been re-measured since the engine update to `v0.1.45-poly.10` — the Windows rows on this page are
+from the poly.7 era, kept as history. The code path is the same one; only the numbers are older.*
 
 ## Use it
 
@@ -261,7 +265,9 @@ because of them — if you can fund one project, fund the upstream first:
 - **Strata** by [Niko1221](https://github.com/Niko1221) — [GitHub Sponsors](https://github.com/sponsors/Niko1221) ·
   [Buy Me a Coffee](https://buymeacoffee.com/strataengine)
 - **[PolyStrata](https://github.com/VecSzn/PolyStrata)** by [VecSzn](https://github.com/VecSzn) — the engine line this
-  fork follows
+  fork follows (`v0.2.20-poly.2`)
+- **[Basalt](https://github.com/jesdga95/basalt)** by [jesdga95](https://github.com/jesdga95) — mapped expert doorbell
+  and low-latency sync mechanisms adopted here
 
 ## Legal and fair use
 
@@ -289,12 +295,15 @@ because of them — if you can fund one project, fund the upstream first:
 
 ## Credits and license
 
-**This fork stands on two projects, and neither is a dependency to be hidden:**
+**This fork stands on three projects, and none of them is a dependency to be hidden:**
 
 - **[PolyStrata](https://github.com/VecSzn/PolyStrata)** by **[VecSzn](https://github.com/VecSzn)** — the engine line
-  this fork follows (`v0.2.19-poly.1`). Its MoE execution model, the expert cache, the server and the installer design
-  are theirs. This fork's update to their newest engine is merged commit for commit, and whenever their change does not
-  help on 4 GB, that is written down instead of spun.
+  this fork tracks (`v0.2.20-poly.2`). Its MoE execution model, prompt FlashAttention without `llama.cpp`, Inkling 2
+  thinking-budget support, the expert cache, the server and the installer design are theirs. This fork merges engine
+  ideas commit by commit, and whenever an upstream change does not help on 4 GB, that is written down instead of spun.
+- **[Basalt](https://github.com/jesdga95/basalt)** by **[jesdga95](https://github.com/jesdga95)** — architectural and
+  low-overhead mechanisms adapted for `sm_86` / 4 GB VRAM, including the mapped `ExpertBell` multi-row doorbell with
+  system-scope atomics and host-sync refinements (`#593`).
 - **[Strata](https://github.com/Niko1221/Strata)** by **[Niko1221](https://github.com/Niko1221)** — the project that
   [PolyStrata](https://github.com/VecSzn/PolyStrata) is itself built on. The second engine (`strata`, which runs
   Qwen3.8-Flash-Next), the installer, the server and the web app come from here.

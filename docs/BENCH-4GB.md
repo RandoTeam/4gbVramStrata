@@ -111,6 +111,18 @@ used), against 784 at 32K. A **57,897-token** prompt reads at **634.3 tok/s** (9
 32K remains the daily window. The launcher is `run-clover-apex-i-nanoplus-64k.sh`, and its desktop shortcut opens the
 chat page in the browser.
 
+## 4gbVramStrata v0.1.66 (2026-11-23): Inkling 2 Mini, Clover, Gemma 4 + [PolyStrata](https://github.com/VecSzn/PolyStrata) `v0.2.20-poly.2` & [Basalt](https://github.com/jesdga95/basalt) `#593`
+
+Eight-run `chat` measurements on the saved prompt (`bench/speed/prompt.txt`, `--max-context 32768`) recorded on the `4gbVramStrata v0.1.66` engine (`45a9f28d13f90494…`, `bench/speed/results/{clover,gemma4,inkling}-chat.json`):
+
+| Model | Settings | Prompt | Reads the prompt | **Answers (median / range)** | Experts in VRAM |
+| --- | --- | ---: | ---: | ---: | ---: |
+| **Clover-35B-A3B-Preview APEX-I-NANOPLUS** | `--kv q8_0 --tail-skip 6 --no-graphs` | 1,904 tok | 541.8 tok/s | **39.2 tok/s** (36.4–40.4) | 897 / 10,240 |
+| **Gemma 4 26B-A4B QAT-UD-Q4_K_XL** | `--draft-model` (MTP-Q8_0) | 1,921 tok | 470.6 tok/s | **31.3 tok/s** (`31.25`, 30.0–31.9) | 162 / 3,840 |
+| **Inkling 2 Mini UD-Q4_K_XL** | `--attn-requant q5_0 --loop-bf16 --tail-skip 4 --kv fp8` | 1,981 tok | 214.2 tok/s | **24.1 tok/s** (`24.05`, 23.0–25.5) | 279 / 3,072 |
+
+The shipped portable Linux x86-64 engine was subsequently rebuilt cleanly on commit `af00ac464` (`engine-fourgbvram/strata-fourgbvram` SHA-256 `8cb86071445a885e…`, `BUILD.json` `src` `1c4066903af4af4d`, CUDA 13.3 `sm_75;80;86;89;120`) adopting [PolyStrata](https://github.com/VecSzn/PolyStrata) `v0.2.20-poly.2` (Prompt FlashAttention without `llama.cpp` including `fattn_mma_d256.cuh`, Inkling 2 `reasoning_budget_tokens` close, layer-split `eval_picks`/`picked`), [Basalt](https://github.com/jesdga95/basalt) `#593` (mapped `ExpertBell` multi-row doorbell `kBellRows=8`/`kBellJobs=64`, system-scope PTX atomics, `float4` + `__ldcv`, batched `cudaEventQuery`, abort safety), and null-slot `native_mmvq_ids` early exit (`slots.cuh`, `native_mmvq.cu`, `iq_kernels.cu`). That rebuilt shipping binary passed `fourgbvram_fattn_test`, `fourgbvram_fattn_test dec`, `fourgbvram_bell_test`, plus single short hardware smoke passes (`--tokens 1,2,3,4,5,6,7,8 --max-new 32`) on Inkling 2 Mini and Clover (`8cb86071445a885e…`); the 8-run speed table above and quality JSONs were recorded immediately before that final rebuild (`45a9f28d13f90494…`) and are kept transparently beside earlier baselines. Windows has not been re-measured since `v0.1.45-poly.10`.
+
 ## [PolyStrata](https://github.com/VecSzn/PolyStrata) v0.2.19-poly.1 (2026-11-23): Inkling 2 Mini, Clover and Gemma 4
 
 Engine updated from `v0.1.45-poly.10` to `v0.2.19-poly.1` (commit `c16b5bd07`, locally compiled for `sm_86`, CUDA 13.3, `engine-fourgbvram/strata-fourgbvram` SHA-256 `274a7e4d3fb0ed2e…`, Ubuntu 26.04, `performance` governor, quiet card at 42 MiB before each run). Added Inkling 2 Mini support including Unsloth's top-level `architecture = 'inkling2'` layout alongside `inkling2_loop` (`src/fourgbvram/inkling2.cpp`, `src/fourgbvram/engine.cpp`).

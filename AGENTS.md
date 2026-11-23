@@ -1,9 +1,10 @@
 # AGENTS.md — how to work in this repository
 
 **`RandoTeam/4gbVramStrata`**, public, a fork of [Strata](https://github.com/Niko1221/Strata). It runs large
-mixture-of-experts models on a 4 GB laptop. The engine is [PolyStrata](https://github.com/VecSzn/PolyStrata)'s
-`v0.1.45-poly.10`, built for CUDA 13 (`sm_75`–`sm_120`). The plan is `.local/ROADMAP.md` (git-ignored, never published);
-this file is the contract.
+mixture-of-experts models on a 4 GB laptop. The shipped binary is **`4gbVramStrata v0.1.66`** (tracking
+[PolyStrata](https://github.com/VecSzn/PolyStrata) `v0.2.20-poly.2` plus [Basalt](https://github.com/jesdga95/basalt)
+`#593` doorbell / low-overhead sync mechanisms), built for CUDA 13 (`sm_75`–`sm_120`). The plan is `.local/ROADMAP.md`
+(git-ignored, never published); this file is the contract.
 
 ## The machine, and the models this fork is about
 
@@ -18,16 +19,20 @@ This fork's own patches use CUDA and the C++ standard library only. What is Wind
 ready-made `.exe` in a release, and the fact that **Windows has not been re-measured since the poly.10 update** — say so
 rather than implying parity.
 
-| Model | File | Chat, tokens/s | Reads the prompt | What setup writes |
+| Model | File | Chat, tokens/s (`4gbVramStrata v0.1.66`) | Reads the prompt | What setup writes |
 | --- | ---: | ---: | ---: | --- |
-| Clover-35B-A3B-Preview APEX-I-NANOPLUS | 12.6 GB | **38.1** Windows / **43.2** Linux | 449 Windows / 546 Linux tokens/s | `--tail-skip 6 --no-graphs`, `--kv q8_0` on cards of 6 GB or less |
-| Gemma 4 26B-A4B QAT-UD-Q4_K_XL | 14.7 GB | **39.0** Linux | 524 tokens/s | `--max-context 32768 --draft-model`, no `--no-graphs` |
-| Flint 40B-A2.5B UD-Q3_K_XL | 17.2 GB | **21.9** Windows | 331 tokens/s | `--prompt-batch 512 --expert-swaps 32 --no-graphs` |
+| Clover-35B-A3B-Preview APEX-I-NANOPLUS | 12.6 GB | **39.2** Linux (`v0.1.66`) · 43.2 `poly.10` · 38.1 Win | 542 Linux / 449 Win tokens/s | `--tail-skip 6 --no-graphs`, `--kv q8_0` on cards of 6 GB or less |
+| Gemma 4 26B-A4B QAT-UD-Q4_K_XL | 14.7 GB | **31.3** Linux (`v0.1.66`) · 39.0 `poly.10` | 471 (`v0.1.66`) / 524 tokens/s | `--max-context 32768 --draft-model`, no `--no-graphs` |
+| Inkling 2 Mini UD-Q4_K_XL | 17 GB | **24.1** Linux (`v0.1.66`) · 25.1 `v0.2.19-poly.1` | 214 tokens/s | `--attn-requant q5_0 --loop-bf16 --tail-skip 4 --kv fp8` |
+| Flint 40B-A2.5B UD-Q3_K_XL | 17.2 GB | **21.9** Windows (history) | 331 tokens/s | `--prompt-batch 512 --expert-swaps 32 --no-graphs` |
 
 Windows numbers measured 2026-11-03 on the saved prompt `bench/speed/prompt.txt` (about 1,900 tokens, a question at the
-end), 8 runs, quiet machine, engine `a37654f5f940047f…`. The Linux Clover row is the same task on 2026-11-20 with the
-poly.10 engine (`cf0e29415ce7b486…`), 8 runs; the poly.7 binary beside it (`285f20e579b6bc19…`) wrote 44.5 over 11
-runs, so the 36.1 of 2026-11-12 is marked not reproduced beside it in `docs/BENCH-4GB.md`; the full 32K suite is
+end), 8 runs, quiet machine, engine `a37654f5f940047f…`. The `4gbVramStrata v0.1.66` 8-run Linux numbers (`39.2` Clover,
+`31.25` Gemma 4, `24.05` Inkling 2 Mini) were measured 2026-11-23 on engine `45a9f28d13f90494…` (`bench/speed/results/`);
+the subsequent portable rebuild on `af00ac464` (`8cb86071445a885e…`, `BUILD.json` `src: 1c4066903af4af4d`) adopts
+`v0.2.20-poly.2` + Basalt `#593` + null-slot MMVQ early exit and passed GPU unit tests and single-run hardware smoke
+checks on Inkling 2 Mini and Clover. Earlier Linux `poly.10` (`cf0e29415ce7b486…`, 43.2 / 39.0), `poly.7` (`285f20e579b6bc19…`,
+44.5 over 11 runs), and `v0.2.19-poly.1` rows are preserved side by side in `docs/BENCH-4GB.md`; the full 32K suite is
 `bench/results/`. The marginal cost of a token is 32.9 ms (Clover) and 46.2 ms (Flint) — that is what a long answer
 pays.
 
