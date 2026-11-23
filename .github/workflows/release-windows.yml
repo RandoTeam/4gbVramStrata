@@ -25,6 +25,9 @@ concurrency:
 env:
   CUDA_VERSION: "13.0.2"
   TAG: ${{ github.event.release.tag_name || inputs.release_tag }}
+  CMAKE_C_COMPILER_LAUNCHER: ccache
+  CMAKE_CXX_COMPILER_LAUNCHER: ccache
+  CMAKE_CUDA_COMPILER_LAUNCHER: ccache
 
 jobs:
   build-windows-cuda13:
@@ -75,7 +78,7 @@ jobs:
         run: python tools/make_fourgbvram_release.py dist
 
       - name: Package Windows installer zip and SHA256SUMS
-        shell: pwsh
+        shell: bash
         run: |
           python - <<'PY'
           import hashlib, shutil, subprocess, sys, zipfile
@@ -116,7 +119,6 @@ jobs:
         if: ${{ env.TAG != '' }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        shell: pwsh
+        shell: bash
         run: |
-          $tag = "${{ env.TAG }}"
-          gh release upload $tag dist/4gbVramStrata-v*-windows-x64.zip dist/strata-fourgbvram-windows-x64-*.zip dist/SHA256SUMS-windows.txt --clobber
+          gh release upload "$TAG" dist/4gbVramStrata-v*-windows-x64.zip dist/strata-fourgbvram-windows-x64-*.zip dist/SHA256SUMS-windows.txt --clobber
