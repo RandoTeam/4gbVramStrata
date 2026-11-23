@@ -37,7 +37,7 @@ answers, no questions), --setup (install another model / change settings instead
 --models-dir DIR, --gguf-dir DIR (use GGUF files you already have), --build (compile instead of the ready-made
 engine), --max-compatibility (with --build on Windows: an engine that also runs on other PCs), --check (only check
 this PC), --resident-budget-gib N (UD-Q4_K_XL's or UD-IQ4_XS's experts in RAM),
---kv-streaming on|off|auto.
+--kv-streaming on|off|auto, --inkling-small-card on|off.
 
 Setup recommends, it never forces: the recommended answers are the defaults (--yes, or Enter), and a bigger choice
 than it recommends - a longer context, more GPUs, a bigger RAM budget, a size it thinks will not fit - is kept, with
@@ -588,9 +588,9 @@ FAMILIES = {
                 "mmproj_hf": hf("unsloth/Inkling-2-Mini-GGUF"), "mmproj": "mmproj-F16.gguf", "mac_vision_cpu": True,
                 "mac_measured": ("UD-Q3_K_XL", "UD-Q2_K_XL"),
                 "vision_gb": 0.7, "vision_vram_gb": 1.3,
-                # UD-Q3_K_XL on the RTX 4070 Laptop (8 GB), the README's benchmark, medians of 3 rounds: 43.7 -> 55.8
-                # tokens/s written in the short chat, 439 -> 466 read and 33.6 -> 41.9 written after the long prompt;
-                # the same most likely token as without them at 96.7% of 1,280 steps, the default run again at 98.3%
+                # UD-Q3_K_XL on the RTX 4070 Laptop (8 GB), medians of 3 rounds: 43.7 -> 55.8 tokens/s written in the short
+                # chat, 439 -> 466 read and 33.6 -> 41.9 written after the long prompt; --inkling-small-card off leaves
+                # them out, and a later setup run keeps that (fourgbvram_small_card()).
                 "small_card_args": ["--attn-requant", "q5_0", "--loop-bf16", "--tail-skip", "4"],
                 "models": {"UD-Q4_K_XL": {"about": "4-bit experts (NVFP4, Unsloth Dynamic), 8-bit where they write",
                                           "download_gb": 17.6, "ram_gb": 21, "arena_gb": 15.797846016,
@@ -1470,6 +1470,11 @@ def two_socket_note(sockets) -> list[str]:
     return [f"tip: this PC has {sockets[0]} CPU sockets of {sockets[1]} cores. Expert workers on the other socket have "
             f"been measured slower than fewer, local ones (35 vs 17-18 on 2-socket Xeons): try --pool-workers {n} in "
             "the config's args (START-HERE --calibrate measures it on this PC)"]
+
+
+def is_arm64() -> bool:
+    """An ARM64 CPU (DGX Spark / GB10, Grace): there is no AVX here, and no ready-made engine for it."""
+    return platform.machine().lower() in ("aarch64", "arm64")
 
 
 def cpu_info():
@@ -5461,7 +5466,7 @@ def write_config(path: Path, cfg: dict):
 # "sampling" or "mcp_servers" block, "allowed_hosts", "cors_origins", "open_browser" - and is kept when setup runs again
 SETUP_KEYS = frozenset({"exe", "args", "cwd", "tokenizer", "model_name", "log", "lib_dirs", "port", "backend", "env",
                         "gpu", "gpus_asked", "layer_split", "host", "api_key", "draft_vocab", "vision",
-                        "display_name", "cuda"})
+                        "display_name", "cuda", "small_card"})
 SETUP_ENV = frozenset({"STRATA_HIPBLASLT_TUNING", "STRATA_ROCBLAS_TUNING", "STRATA_RESIDENT_PIN", "STRATA_NO_ARENA_THP", "STRATA_MMQ_KQ", "STRATA_HC_Q8",
                        "STRATA_ROUTE_TAIL_SKIP"}) | frozenset(GFX1103_SWITCHES) | frozenset(GFX1150_SWITCHES)   # the "env" entries setup writes (the gfx1103 switches are setup's too: a re-run refreshes them, they do not linger)
 # 0.1.44 added these three, written for Unsloth's files only (unsloth_default_env).  In any other model's config they are the
@@ -6663,16 +6668,55 @@ def fourgbvram_saved_conv(paths) -> int | str | None:
     return None
 
 
+def fourgbvram_small_card(a, fam, paths) -> str | None:
+    """A family's "small_card_args": "on" (the default) or "off" (the high-accuracy mode: none of them), as chosen
+    for this model whatever the card: --inkling-small-card says it, else the earlier run config of this model (the
+    first of `paths` there is) keeps its "small_card": "off", so an install moved from a card that holds every expert
+    back to a small one stays off.  None for a family without them.  Whether they are written depends on the card too
+    (fourgbvram_setup)."""
+    if not fam.get("small_card_args"):
+        return None
+    if getattr(a, "inkling_small_card", None):
+        return a.inkling_small_card
+    for p in paths:
+        if p is None or not p.is_file():
+            continue
+        try:
+            saved = json.loads(p.read_text(encoding="utf-8-sig")).get("small_card")
+        except (OSError, ValueError, AttributeError):
+            continue
+        return "off" if saved == "off" else "on"
+    return "on"
+
+
 def fourgbvram_asset() -> str:
     """The ready-made strata-fourgbvram's asset for this checkout: the engine and the image encoder are both in it."""
     return FOURGBVRAM_ASSET.format(src=source_hash(ENGINE_SOURCES + VISION_SOURCES))
 
 
+def fourgbvram_will_not_start(folder: Path) -> str:
+    """#181: "" when the ready-made Linux strata-fourgbvram and strata-vision in `folder` start here with pip's CUDA 13
+    libraries, else what the dynamic loader said (glibc older than 2.34, a libstdc++ older than GCC 12's, a library
+    that is not there).  strata-fourgbvram --help prints its usage and exits 2, strata-vision --version exits 0; neither
+    touches the GPU."""
+    lib = os.pathsep.join([*cuda_lib_dirs(13), os.environ.get("LD_LIBRARY_PATH", "")]).rstrip(os.pathsep)
+    for exe, flag in ((FOURGBVRAM_EXE, "--help"), (VEXE, "--version")):
+        try:
+            r = subprocess.run([str(folder / exe), flag], capture_output=True, text=True, errors="replace",
+                               env={**os.environ, "LD_LIBRARY_PATH": lib}, timeout=60)
+        except (OSError, subprocess.TimeoutExpired) as e:
+            return f"{exe}: {e}"
+        if r.returncode not in (0, 2):
+            return " ".join(r.stderr.split())[-300:] or f"{exe} ended with status {r.returncode}"
+    return ""
+
+
 def get_fourgbvram_prebuilt(gpu) -> bool:
     """The ready-made strata-fourgbvram and image encoder of this checkout's source in engine-fourgbvram/, with NVIDIA's CUDA 13
-    libraries from pip.  False when the release has none for this source or this GPU, off Windows, with a driver
-    older than CUDA 13's or a CPU without AVX2.  An engine already there for this source and GPU is kept, ready-made
-    or compiled, unless it was compiled with CUDA 12."""
+    libraries from pip: on Windows the release's zip, on x86-64 Linux its tarball (#181).  False when the release has
+    none for this source or this GPU, on another system, with a driver older than CUDA 13's, a CPU without AVX2, or a
+    Linux the tarball's programs do not start on.  An engine already there for this source and GPU is kept,
+    ready-made or compiled, unless it was compiled with CUDA 12."""
     eng = ROOT / ENGINE_FOURGBVRAM_DIR
     stamp = eng / "BUILD.json"
     meta = json.loads(stamp.read_text()) if stamp.exists() else {}
@@ -6682,7 +6726,8 @@ def get_fourgbvram_prebuilt(gpu) -> bool:
     if meta.get("src") == src and (eng / FOURGBVRAM_EXE).exists() and cards <= {int(x) for x in meta.get("archs", [])} \
             and (meta.get("source") != "release" or meta.get("vision_src") == vsrc) and meta.get("toolkit", 13) == 13:
         return True
-    if not WIN or not FOURGBVRAM_PREBUILT_URL or driver_major(gpu) < MIN_DRIVER or cpu_floor(cpu_info()[1]):
+    linux_x64 = sys.platform.startswith("linux") and not is_arm64()
+    if not (WIN or linux_x64) or not FOURGBVRAM_PREBUILT_URL or driver_major(gpu) < MIN_DRIVER or cpu_floor(cpu_info()[1]):
         return False
     base = FOURGBVRAM_PREBUILT_URL if FOURGBVRAM_PREBUILT_URL.endswith(("/", "\\")) else FOURGBVRAM_PREBUILT_URL + "/"
     asset = fourgbvram_asset()
@@ -6708,8 +6753,13 @@ def get_fourgbvram_prebuilt(gpu) -> bool:
     tmp = eng / "_unpack"
     shutil.rmtree(tmp, ignore_errors=True)
     try:
-        with zipfile.ZipFile(z) as f:
-            f.extractall(tmp)
+        if WIN:
+            with zipfile.ZipFile(z) as f:
+                f.extractall(tmp)
+        else:                                          # the Linux tarball keeps the programs' execute bits
+            import tarfile
+            with tarfile.open(z) as f:
+                f.extractall(tmp, **({"filter": "data"} if hasattr(tarfile, "data_filter") else {}))
     finally:
         drop_archive(z)
     new = json.loads((tmp / "BUILD.json").read_text(encoding="utf-8"))
@@ -6720,6 +6770,11 @@ def get_fourgbvram_prebuilt(gpu) -> bool:
         shutil.rmtree(tmp, ignore_errors=True)
         return False
     pip_cuda_libs(13)                                  # before the engine there is replaced, should pip fail
+    why = "" if WIN else fourgbvram_will_not_start(tmp)
+    if why:
+        warn(f"the ready-made strata-fourgbvram does not start on this Linux ({why}): it is compiled here instead")
+        shutil.rmtree(tmp, ignore_errors=True)
+        return False
     for p in tmp.iterdir():
         p.replace(eng / p.name)
     shutil.rmtree(tmp, ignore_errors=True)
@@ -6948,7 +7003,7 @@ def update_fourgbvram_engine(cfg: dict, yes=False, cfg_path: Path | None = None)
             # one compiled here (--build, a CPU without AVX2) stays so
             if meta.get("source") == "release" and not get_fourgbvram_prebuilt(gpu) and fits:
                 warn("the latest release has no ready-made strata-fourgbvram of this source: the one installed starts "
-                     "(START-HERE.bat --setup --build compiles this source)")
+                     f"({'START-HERE.bat' if WIN else './setup.sh'} --setup --build compiles this source)")
                 return
             build_engine_fourgbvram(gpu, yes, get_llama_cpp(), vision, int(meta.get("toolkit", 13)),
                               bool(meta.get("portable")))
@@ -7027,7 +7082,9 @@ def fourgbvram_setup(a, family, gpu, hip, cuda_tk, multi, ram, data, elsewhere, 
         ("--vision", not sees and a.vision not in (None, "no", "none")),
         ("--vision-tokens", not sees and a.vision_tokens is not None),
         ("--kv", a.kv and a.kv != "fp16" and family not in FOURGBVRAM_KV.get(a.kv, ())),
-        ("--kv-streaming", a.kv_streaming != "auto"), ("--rope-scaling", a.rope_scaling),
+        ("--kv-streaming", a.kv_streaming != "auto"),
+        ("--inkling-small-card", getattr(a, "inkling_small_card", None) and not fam.get("small_card_args")),
+        ("--rope-scaling", a.rope_scaling),
         ("--rope-scale", a.rope_scale is not None), ("--low-ram", a.low_ram != "auto"),
         ("--resident-budget-gib", a.resident_budget_gib is not None),
         ("--draft-vocab", a.draft_vocab), ("--layer-split", a.layer_split and not multi), ("--calibrate", a.calibrate),
@@ -7320,10 +7377,15 @@ def fourgbvram_setup(a, family, gpu, hip, cuda_tk, multi, ram, data, elsewhere, 
            "that much less)")
     if fam.get("tail_skip"):
         args += ["--tail-skip", str(fam["tail_skip"])]
-    if fam.get("small_card_args") and not multi and fourgbvram_held_gb(d, vram) < d["arena_gb"]:
+    small = fourgbvram_small_card(a, fam, [cfg_path, adopted if adopted is not None and adopted.name == cfg_path.name else None])
+    part = small is not None and not multi and fourgbvram_held_gb(d, vram) < d["arena_gb"]
+    if part and small == "on":
         args += fam["small_card_args"]
         ok(f"this card holds part of {model}'s experts: {' '.join(fam['small_card_args'])} (fewer bytes a token, "
-           "and the answers move a little)")
+           "and the answers move a little; --inkling-small-card off: the high-accuracy mode, without them)")
+    elif part:
+        ok(f"this card holds part of {model}'s experts: high-accuracy mode, without the small-card settings "
+           "(--inkling-small-card off; slower here; --inkling-small-card on puts them back)")
     if fam.get("expert_swaps"):
         args += ["--expert-swaps", str(fam["expert_swaps"])]
     if fam.get("no_graphs"):
@@ -7357,6 +7419,8 @@ def fourgbvram_setup(a, family, gpu, hip, cuda_tk, multi, ram, data, elsewhere, 
            "model_name": base.lower() if base else f"{fam['name']}-{model.lower()}",
            "display_name": base if base else f"{title} {model}",
            "log": str(ROOT / f"strata-{tag.lower()}.log"), "lib_dirs": lib_dirs, "port": port}
+    if small == "off":
+        cfg["small_card"] = "off"                      # kept by a later setup run, on any card (fourgbvram_small_card)
     if fam.get("tool_call_recovery"):
         cfg["tool_call_recovery"] = True
         ok("its tool calls are JSON inside the wrapper: they are read with the recovery (tool_call_recovery in the "
@@ -8112,6 +8176,11 @@ def main() -> int:
     ap.add_argument("--kv-streaming", choices=["auto", "on", "off"], default="auto",
                     help="from a 64K context: keep the KV cache in RAM and only the attention's window in VRAM (more "
                          "experts fit on the GPU); auto: when the RAM has room for it")
+    ap.add_argument("--inkling-small-card", choices=["on", "off"],
+                    help="Inkling 2 Mini on a card that does not hold every expert of the size: on = the small-card "
+                         "settings (--attn-requant q5_0 --loop-bf16 --tail-skip 4: faster, the answers move a "
+                         "little; the default); off = the high-accuracy mode, without them. A later setup run keeps "
+                         "off (\"small_card\" in the run config) until --inkling-small-card on")
     ap.add_argument("--backend", choices=["cuda", "hip", "sycl"],
                     help="cuda = NVIDIA (default), hip = AMD RX 7900 / 7800 / 7700 XT, RX 9060 XT / 9070 / AI PRO R9700 on "
                          "Linux or Windows (chosen by itself when the PC has no NVIDIA card 4gbVramStrata can use), "

@@ -198,13 +198,13 @@ int main(int argc, char** argv) {
         std::printf("STRATA_IQ3_LANES=0 is set, so the lane kernel is off: skipped\n");
         return 77;
     }
-    // unset, the lane kernel runs on sm_75 and sm_89 only (iq_kernels.cu: iq3_lanes_on()); STRATA_IQ3_LANES=1 checks it
+    // unset, the lane kernel runs on sm_75, sm_86 and sm_89 (iq_kernels.cu: iq3_lanes_on()); STRATA_IQ3_LANES=1 checks it
     // on another card
     if (const char* v = std::getenv("STRATA_IQ3_LANES"); !(v && *v)) {
         int major = 0, minor = 0;
         cudaDeviceGetAttribute(&major, cudaDevAttrComputeCapabilityMajor, 0);
         cudaDeviceGetAttribute(&minor, cudaDevAttrComputeCapabilityMinor, 0);
-        if (!((major == 7 && minor == 5) || (major == 8 && minor == 9))) {
+        if (!((major == 7 && minor == 5) || (major == 8 && (minor == 6 || minor == 9)))) {
             std::printf("sm_%d%d: the lane kernel is off by default here (STRATA_IQ3_LANES=1 checks it): skipped\n",
                         major, minor);
             return 77;

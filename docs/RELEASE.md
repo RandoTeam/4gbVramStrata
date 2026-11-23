@@ -30,7 +30,7 @@ below is that capability filtered by what this project has a machine to verify o
 | **Linux x86-64** | CUDA 13 | engine `.tar.gz` + the installer tarball | **Built and measured here** — this is the reference platform |
 | **Linux x86-64** | CUDA 12 | engine `.tar.gz` | **Compiled in CI since 2026-11-21** (`sm_60;61;70;86`), never started on a Pascal or Volta card |
 | **Linux x86-64** | HIP (RX 7900 / RX 9070 / RX 6000 / Strix Halo) | engine `.tar.gz` per card family | **Compiled in CI since 2026-11-21** (`gfx1100;gfx1201`, ROCm 7.2), never started on an AMD card. Not shipped: compile is not a run |
-| **Windows x86-64** | CUDA 13 | engine `.zip` + the installer zip | **Shipped, not re-measured since poly.10.** Built on a Windows PC (no cross-compile from Linux: MSVC, `vcvars64.bat` and the CUDA toolkit are the release's tools) |
+| **Windows x86-64** | CUDA 13 | engine `.zip` + the installer zip | **Built in CI (`.github/workflows/release-windows.yml`) on `windows-2022` with CUDA 13.0.2 + MSVC, not re-measured since `v0.1.45-poly.10`.** |
 | **Windows x86-64** | HIP | engine `.zip` | **Not shipped**: same reason as Linux HIP |
 | **Linux aarch64** | CUDA 13 | engine `.tar.gz` | **Compiled in CI since 2026-11-21** (`ubuntu-24.04-arm`, 5m50s), never started on an ARM machine. Not shipped: compile is not a run |
 | **macOS arm64** | Metal | engine `.tar.gz` | **Compiled in CI since 2026-11-21** (macos-26, every Metal target and its parity tests), never started on a Mac. Not shipped: compile is not a run |
@@ -70,10 +70,10 @@ log. That is not bureaucracy — it is the only way "works on Linux and Windows"
     .venv/bin/python bench/speed/run.py --config strata-<model>.json --model <name> --task chat --runs 8
     .venv/bin/python bench/quality/run.py --model local --repeat 2      # 22 prompts, two attempts each
 
-    # 3. the engine and the tarball
+    # 3. the engine and the release archive
     .venv/bin/python tools/make_fourgbvram_release.py OUT_DIR      # portable engine + BUILD.json
-    .venv/bin/python tools/package_release_131k.py --check         # allowlist: what is missing or left out
-    .venv/bin/python tools/package_release_131k.py                 # dist/…-linux-x64.tar.gz
+    .venv/bin/python tools/package_release.py --check              # allowlist: what is missing or left out
+    .venv/bin/python tools/package_release.py --platform linux-x64 # dist/4gbVramStrata-v<VERSION>-linux-x64.tar.gz
 
     # 4. the tag, on the commit that was built
     git tag -a v<VERSION>-lowvram-4gb-<qualifier> -m "<what this release is, the numbers, the gate>"
@@ -89,19 +89,19 @@ log. That is not bureaucracy — it is the only way "works on Linux and Windows"
 
 ## What is deliberately not here
 
-- **No CI that builds engines.** A hosted runner has no 4 GB card, so it cannot produce a number; and a CUDA build
-  for `sm_86` on a shared runner proves only that it compiles, which `tools/build_131k.sh` proves locally in less
+- **No CI that benchmarks engines.** A hosted runner has no 4 GB card, so it cannot produce a number; and a CUDA build
+  for `sm_86` on a shared runner proves only that it compiles, which `tools/build_dev.sh` proves locally in less
   time. What CI is for here is the part that does catch bugs without a card, and `.github/workflows/checks.yml` is
-  that: the 784 `test_setup_*` tests, the brand and rename checks, the release sources, and the links in the pages a
+  that: the `test_setup_*` tests, the brand and rename checks, the release sources, and the links in the pages a
   user reads. On 2026-11-21 it ran green on **Ubuntu 24.04 (Python 3.10 and 3.12) and on Windows 3.12** — the first
   time this fork's suite ran on Windows, and the reason to trust that the tree really is one tree.
-  It does not run `package_release_131k.py --check` in full: that requires the compiled engine, so CI uses its
+  It does not run `package_release.py --check` in full: that requires the compiled engine, so CI uses its
   `--no-engine` form and a release runs the full one.
-  `.github/workflows/backends.yml` is the other half, and it compiles instead of testing: **CUDA 13, CUDA 12, HIP and
-  Metal, all four green on 2026-11-21** - the first time this fork compiled any of them but CUDA 13. On the way it
-  found three defects that had never been reachable: a CUDA-only constant in the 4 GB host-KV fallback that HIP does
-  not define, an `MTLGPUFamilyMetal4` name that only the macOS 26 SDK has, and the Metal tree needing a llama.cpp
-  checkout that a fresh clone does not carry. A compile is still not a run: the matrix above keeps saying so.
+  `.github/workflows/backends.yml` is the other half, and it compiles all backends (`CUDA 13`, `CUDA 12`, `HIP`,
+  `Linux aarch64`, `Windows x64 MSVC`, `macOS Metal`); `.github/workflows/release-windows.yml` builds the Windows
+  CUDA 13 release zips (`strata-fourgbvram-windows-x64-<src>.zip` and `4gbVramStrata-v<VERSION>-windows-x64.zip`) on
+  `windows-2022` using `Jimver/cuda-toolkit` + `ilammy/msvc-dev-cmd` + `ccache`. A compile is still not a run: the
+  matrix above keeps saying so.
 - **No signed feeds, no `.sig`.** Strata signs its assets; this fork does not. `setup.py` checks a downloaded engine
   against the size and SHA-256 GitHub's release API publishes for that asset, and `verify_engine_archive` states what
   that does not cover in its own docstring: a digest proves the bytes are the ones GitHub released, not that they are
@@ -111,9 +111,7 @@ log. That is not bureaucracy — it is the only way "works on Linux and Windows"
 - **No distribution for a platform nothing has run on.** Reachable today and deliberately not shipped: Linux aarch64
   (compiles, 5m50s in CI, no ARM machine here) and Linux HIP (compiles, no AMD card here). A tarball is a promise that
   somebody started it; a "build from source" line is the truth.
-- **No cross-compilation.** A Windows engine is built on Windows by `setup.py`, and that stays manual - GitHub's
-  images carry no CUDA toolkit and no MSVC+nvcc container exists. What is **not** manual anymore since 2026-11-21: the
-  Windows source paths, built and run in CI (`windows` job: 40 executables, 36 tests passing, 4 skipping for a missing
-  AVX-512), and every other backend, compiled in five jobs. `tools/build_131k.bat` used to exist here and was
-  removed as stale; when a Windows asset is rebuilt, it is rebuilt with `setup.py` on a Windows PC, by the same
-  configure line, and its `BUILD.json` names the commit.
+- **Windows releases built via GitHub Actions.** `.github/workflows/release-windows.yml` installs CUDA 13.0.2 on
+  `windows-2022`, activates MSVC x64 via `ilammy/msvc-dev-cmd`, and builds `strata-fourgbvram-windows-x64-<src>.zip`
+  and `4gbVramStrata-v<VERSION>-windows-x64.zip` without needing a local Windows PC; `docs/BENCH-4GB.md` continues to
+  record explicitly that Windows decode speed has not been re-measured since `v0.1.45-poly.10`.

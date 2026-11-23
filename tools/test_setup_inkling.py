@@ -75,6 +75,82 @@ class Main(unittest.TestCase):
         self.assertNotIn("--expert-swaps", args)
         self.assertEqual(args.count("--tail-skip"), 1)
         self.assertIn("holds part of", out)
+        self.assertNotIn("small_card", json.loads((self.t / "strata-inkling-ud-q3_k_xl.json").read_text()))
+
+    CFG = "strata-inkling-ud-q3_k_xl.json"
+    SMALL = ("--attn-requant", "--loop-bf16", "--tail-skip")
+
+    def small(self, argv=(), answers=None):
+        """UD-Q3_K_XL on an 8 GB card, which holds part of its experts: the run config's args and "small_card"."""
+        code, out, _ = self.main(argv, family="inkling", model="UD-Q3_K_XL", ram=32.0, vram=8188 / 1024,
+                                 answers=answers)
+        self.assertEqual(code, 0, out)
+        cfg = json.loads((self.t / self.CFG).read_text())
+        return cfg["args"], cfg.get("small_card"), out
+
+    def assert_on(self, args):
+        self.assertEqual(args[args.index("--attn-requant") + 1], "q5_0")
+        self.assertIn("--loop-bf16", args)
+        self.assertEqual(args[args.index("--tail-skip") + 1], "4")
+        self.assertEqual(args.count("--tail-skip"), 1)
+
+    def test_small_card_default_is_on_and_not_asked(self):
+        # the default stays the small-card settings; no question is added (Enter for every other question)
+        args, small, _ = self.small(answers={})
+        self.assertEqual([q for q in self.asked if "small" in q.lower()], [])
+        self.assert_on(args)
+        self.assertIsNone(small)
+
+    def test_small_card_off_is_the_high_accuracy_mode_and_kept(self):
+        args, small, out = self.small(("--inkling-small-card", "off"))
+        for flag in self.SMALL:
+            self.assertNotIn(flag, args)
+        self.assertEqual(small, "off")
+        self.assertIn("high-accuracy mode", out)
+        # a later setup run without the option keeps it, with --yes and with the questions asked
+        for answers in (None, {}):
+            args, small, _ = self.small(answers=answers)
+            for flag in self.SMALL:
+                self.assertNotIn(flag, args)
+            self.assertEqual(small, "off")
+        # --inkling-small-card on puts them back, and the config is the default one again
+        args, small, _ = self.small(("--inkling-small-card", "on"))
+        self.assert_on(args)
+        self.assertIsNone(small)
+        args, small, _ = self.small()
+        self.assert_on(args)
+        self.assertIsNone(small)
+
+    def test_small_card_off_on_a_card_that_holds_every_expert_is_kept(self):
+        # nothing to leave out there, but the choice is written, so the install moved back to an 8 GB card stays off
+        code, out, _ = self.main(("--inkling-small-card", "off"), family="inkling", model="UD-Q3_K_XL", ram=64.0,
+                                 vram=32607 / 1024)
+        self.assertEqual(code, 0, out)
+        cfg = json.loads((self.t / self.CFG).read_text())
+        for flag in self.SMALL:
+            self.assertNotIn(flag, cfg["args"])
+        self.assertEqual(cfg["small_card"], "off")
+        code, out, _ = self.main(family="inkling", model="UD-Q3_K_XL", ram=64.0, vram=32607 / 1024)   # again, 32 GB
+        self.assertEqual(code, 0, out)
+        self.assertEqual(json.loads((self.t / self.CFG).read_text())["small_card"], "off")
+        args, small, _ = self.small()                                              # then an 8 GB card
+        for flag in self.SMALL:
+            self.assertNotIn(flag, args)
+        self.assertEqual(small, "off")
+
+    def test_small_card_off_with_two_cards(self):
+        # Inkling 2 runs on one of them (an 8 GB card here), so off applies there as on one card
+        code, out, cfg = self.main(("--gpus", "0,1", "--inkling-small-card", "off"), family="inkling",
+                                   model="UD-Q3_K_XL", ram=32.0, vram=8188 / 1024, n_gpus=2)
+        self.assertEqual(code, 0, out)
+        for flag in self.SMALL:
+            self.assertNotIn(flag, cfg["args"])
+        self.assertEqual(cfg["small_card"], "off")
+
+    def test_small_card_option_of_another_family_is_not_used(self):
+        code, out, _ = self.main(("--inkling-small-card", "off"))                 # GLM, the harness's family
+        self.assertEqual(code, 0, out)
+        self.assertRegex(out, r"not used with .*--inkling-small-card")
 
     def test_requests_at_once_are_not_taken(self):
         code, out, _ = self.main(("--parallel", "4"), family="inkling", model="UD-Q3_K_XL", ram=64.0, vram=32607 / 1024)

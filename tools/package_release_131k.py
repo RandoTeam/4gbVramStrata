@@ -1,154 +1,21 @@
-"""Build the Linux release tarball of 4gbVramStrata with the 131K engine.
-
-The tarball is what a user downloads: setup.sh, update.sh, bench.sh, setup.py, the server and web app, the tools
-setup runs, the documents a user reads, engine-fourgbvram/ (the built strata-fourgbvram, strata-vision, and BUILD.json), and the
-engine's sources.  The sources are there because setup.source_hash() walks them: without them the shipped BUILD.json
-names a source the tarball does not have, and setup takes the engine for stale and tries to compile one.  Tests,
-benchmark records, the paper, the local build folders and the quarantined working files (_attic/) stay out.
-
-    python tools/package_release_131k.py             # build dist/4gbVramStrata-v<version>-131k-linux-x64.tar.gz
-    python tools/package_release_131k.py --check     # list what is missing or would be left out, write nothing
-    python tools/package_release_131k.py --engine DIR  # take the engine from DIR instead of engine-fourgbvram/
-
-Every required path is checked before anything is copied, so a release is never built from a half-cleaned tree.
-The version comes from CMakeLists.txt (project(strata VERSION x.y.z)).
-"""
-import argparse
-import os
-import re
-import shutil
-import sys
-import tarfile
+"""Compatibility wrapper around tools/package_release.py."""
 from pathlib import Path
+import sys
 
-ROOT = Path(__file__).resolve().parent.parent
+TOOLS = Path(__file__).resolve().parent
+if str(TOOLS) not in sys.path:
+    sys.path.insert(0, str(TOOLS))
 
-# Files a user runs or setup needs, relative to ROOT.  A missing one stops the build.
-FILES = [
-    "setup.sh", "update.sh", "bench.sh",
-    "setup.py", "fourgbvramstrata.py", "chat.py",
-    "requirements.txt", "LICENSE", "README.md",
-]
-# Whole trees, with the filter below applied to every file.
-TREES = ["serve", "tools", "data", "docs", "bench/quality", "bench/speed"]
-# The engine's sources, copied verbatim (no filter: setup.source_hash() covers every file, test sources included).
-SOURCES = ["CMakeLists.txt", "cmake", "src", "include", "third_party/ggml", "third_party/strata-ggml",
-           "third_party/zstd-dec", "ref/tqp", "tools/vision"]
-# Dropped everywhere: test sources, caches, and the paper (it has its own release).
-# `.bat` too: this is the Linux tarball, and the Windows tree ships its launchers in its own zip.
-SKIP_DIRS = {"__pycache__", ".pytest_cache", "paper", "superpowers"}
-SKIP_NAMES = {"test_setup_golden.json"}
-SKIP_PREFIXES = ("test_",)
-SKIP_SUFFIXES = ("_test.py", ".pyc", ".pyo", ".tmp", ".obj", ".exp", ".lib", ".pdb", ".bat", ".log")
-
-
-def version() -> str:
-    text = (ROOT / "CMakeLists.txt").read_text(encoding="utf-8")
-    m = re.search(r"project\(\s*strata\s+VERSION\s+([0-9.]+)", text)
-    if not m:
-        raise SystemExit("CMakeLists.txt has no project(strata VERSION x.y.z)")
-    return m.group(1)
-
-
-def wanted(rel: Path) -> bool:
-    if any(part in SKIP_DIRS for part in rel.parts):
-        return False
-    name = rel.name
-    return not (name in SKIP_NAMES or name.startswith(SKIP_PREFIXES) or name.endswith(SKIP_SUFFIXES))
-
-
-def tree_files(tree: str) -> list:
-    base = ROOT / tree
-    out = []
-    for dirpath, dirnames, filenames in os.walk(base):
-        dirnames[:] = sorted(d for d in dirnames if d not in SKIP_DIRS)
-        for name in sorted(filenames):
-            rel = Path(dirpath, name).relative_to(ROOT)
-            if wanted(rel):
-                out.append(rel)
-    return out
-
-
-def source_files() -> list:
-    """Every file under SOURCES, unfiltered: the engine's fingerprint covers all of them."""
-    out = []
-    for part in SOURCES:
-        base = ROOT / part
-        if base.is_file():
-            out.append(Path(part))
-        elif base.is_dir():
-            out += [p.relative_to(ROOT) for p in sorted(base.rglob("*")) if p.is_file()]
-    return out
-
-
-def engine_files(engine: Path) -> list:
-    if not engine.is_dir():
-        return []
-    return [Path("engine-fourgbvram", p.name) for p in sorted(engine.iterdir())
-            if p.is_file() and (p.name.startswith(("strata-fourgbvram", "strata-vision")) or p.name == "BUILD.json")]
-
-
-def main() -> int:
-    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("--check", action="store_true", help="list problems, write nothing")
-    ap.add_argument("--no-engine", action="store_true",
-                    help="check the tree only: do not require the compiled engine in --engine DIR (CI has no card to "
-                         "build one). Every other required file is still checked")
-    ap.add_argument("--engine", default=str(ROOT / "engine-fourgbvram"),
-                    help="folder with strata-fourgbvram, strata-vision, and BUILD.json (default: engine-fourgbvram/)")
-    a = ap.parse_args()
-
-    ver = version()
-    release_name = f"4gbVramStrata-v{ver}-131k-linux-x64"
-    dist = ROOT / "dist"
-    stage = dist / release_name
-    tar_path = dist / f"{release_name}.tar.gz"
-
-    missing = [f for f in FILES if not (ROOT / f).is_file()]
-    plan = [Path(f) for f in FILES if (ROOT / f).is_file()]
-    for tree in TREES:
-        if not (ROOT / tree).is_dir():
-            missing.append(tree + "/")
-        plan += tree_files(tree)
-    missing += [s + ("/" if (ROOT / s).is_dir() else "") for s in SOURCES if not (ROOT / s).exists()]
-    plan += source_files()
-    plan = list(dict.fromkeys(plan))                 # tools/vision arrives from TREES and SOURCES alike
-    eng = engine_files(Path(a.engine))
-    if not a.no_engine:
-        if not any(p.name.startswith("strata-fourgbvram") for p in eng):
-            missing.append(f"{Path(a.engine).name}/strata-fourgbvram")
-        if not any(p.name == "BUILD.json" for p in eng):
-            missing.append(f"{Path(a.engine).name}/BUILD.json")
-
-    print(f"release: {release_name}")
-    print(f"files:   {len(plan)} from the tree (the engine's sources included), {len(eng)} from {Path(a.engine).name}/")
-    if missing:
-        print("missing:")
-        for m in missing:
-            print(f"  ! {m}")
-        if a.check:
-            return 1
-        raise SystemExit("a required file is missing: fix the tree (or pass --engine DIR) and run again")
-    if a.check:
-        print("ok: every required file is present")
-        return 0
-
-    if stage.exists():
-        shutil.rmtree(stage)
-    stage.mkdir(parents=True)
-    for rel in plan + eng:
-        src = ROOT / rel if not rel.parts[0] == "engine-fourgbvram" else Path(a.engine) / rel.name
-        dst = stage / rel
-        dst.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(src, dst)
-
-    tar_path.parent.mkdir(parents=True, exist_ok=True)
-    with tarfile.open(tar_path, "w:gz", compresslevel=6) as tf:
-        for p in sorted(stage.rglob("*")):
-            if p.is_file():
-                tf.add(p, p.relative_to(dist), recursive=False)
-    print(f"ready: {tar_path} ({tar_path.stat().st_size / 2**20:.1f} MB)")
-    return 0
+from package_release import (  # noqa: E402, F401
+    ROOT,
+    SOURCES,
+    TREES,
+    engine_files,
+    main,
+    source_files,
+    tree_files,
+    version,
+)
 
 
 if __name__ == "__main__":

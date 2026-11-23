@@ -1,11 +1,13 @@
-# Manual release builder for Windows x86-64 (CUDA 13.0, portable AVX2, sm_75;80;86;89;120).
+# Automated release builder for Windows x86-64 (CUDA 13.0.2, portable AVX2, sm_75;80;86;89;120).
 #
-# GitHub's hosted windows-2025 runners carry MSVC Build Tools, not the CUDA toolkit, so normal CI compiles
-# host-only MSVC checks in backends.yml. Run this workflow manually when cutting a Windows binary asset and
-# Windows installer zip, or run `python tools/make_fourgbvram_release.py dist` directly on a Windows 10/11 PC.
+# Uses GitHub's windows-2022 runner with Jimver/cuda-toolkit + ilammy/msvc-dev-cmd + ccache so Windows release assets
+# (both `strata-fourgbvram-windows-x64-<src>.zip` for START-HERE.bat auto-download and `4gbVramStrata-v<ver>-windows-x64.zip`)
+# are built and uploaded from CI without needing a local Windows PC.
 name: Build Windows x64 CUDA 13 Release
 
 on:
+  release:
+    types: [published]
   workflow_dispatch:
     inputs:
       release_tag:
@@ -14,29 +16,54 @@ on:
         default: ''
 
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: release-windows-${{ github.event.release.tag_name || inputs.release_tag || github.ref }}
+  cancel-in-progress: false
+
+env:
+  CUDA_VERSION: "13.0.2"
+  TAG: ${{ github.event.release.tag_name || inputs.release_tag }}
 
 jobs:
   build-windows-cuda13:
     name: Windows x64 CUDA 13.0 (sm_75, sm_80, sm_86, sm_89, sm_120)
-    runs-on: windows-2025
-    timeout-minutes: 120
+    runs-on: windows-2022
+    timeout-minutes: 180
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v5
         with:
+          ref: ${{ env.TAG != '' && format('refs/tags/{0}', env.TAG) || github.ref }}
           fetch-depth: 1
+
+      - name: Install CUDA Toolkit 13.0.2
+        uses: Jimver/cuda-toolkit@v0.2.36
+        with:
+          cuda: ${{ env.CUDA_VERSION }}
+          method: network
+          sub-packages: '["nvcc", "cudart", "crt", "nvvm", "cublas_dev", "nvrtc_dev", "visual_studio_integration"]'
+          use-github-cache: true
+
+      - name: MSVC x64 environment
+        uses: ilammy/msvc-dev-cmd@v1.13.0
+        with:
+          arch: x64
 
       - uses: actions/setup-python@v6
         with:
           python-version: '3.12'
 
+      - uses: hendrikmuhs/ccache-action@v1.2.24
+        with:
+          key: windows-cuda13-${{ hashFiles('CMakeLists.txt') }}
+          restore-keys: windows-cuda13-
+          max-size: 1G
+
       - name: Install Python build tools
         run: python -m pip install --quiet cmake ninja jinja2 regex numpy
-
-      - name: Install CUDA Toolkit 13.0.0
-        uses: Jimver/cuda-toolkit@v0.2.23
-        with:
-          cuda: '13.0.0'
 
       - name: Verify nvcc and MSVC environment
         shell: pwsh
@@ -51,11 +78,8 @@ jobs:
         shell: pwsh
         run: |
           python - <<'PY'
-          import hashlib, shutil, zipfile
+          import hashlib, shutil, subprocess, sys, zipfile
           from pathlib import Path
-          import sys
-          sys.path.insert(0, str(Path("tools")))
-          import package_release_131k as P
 
           root = Path(".").resolve()
           dist = root / "dist"
@@ -67,35 +91,12 @@ jobs:
           with zipfile.ZipFile(eng_zips[0]) as zf:
               zf.extractall(eng_dir)
 
-          ver = P.version()
-          rel_name = f"4gbVramStrata-v{ver}-131k-win-x64"
-          stage = dist / rel_name
-          shutil.rmtree(stage, ignore_errors=True)
-          stage.mkdir(parents=True)
-
-          win_files = ["START-HERE.bat", "SETUP.bat", "UPDATE.bat", "BENCH.bat",
-                       "setup.py", "fourgbvramstrata.py", "chat.py", "requirements.txt", "LICENSE", "README.md"]
-          plan = [Path(f) for f in win_files if (root / f).is_file()]
-          for tree in P.TREES:
-              for rel in P.tree_files(tree):
-                  plan.append(rel)
-          plan += [p for p in P.source_files()]
-          plan = list(dict.fromkeys(plan))
-          eng_files = P.engine_files(eng_dir)
-          for rel in plan + eng_files:
-              src = root / rel if rel.parts[0] != "engine-fourgbvram" else eng_dir / rel.name
-              dst = stage / rel
-              dst.parent.mkdir(parents=True, exist_ok=True)
-              shutil.copy2(src, dst)
-
-          zip_path = dist / f"{rel_name}.zip"
-          with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
-              for p in sorted(stage.rglob("*")):
-                  if p.is_file():
-                      zf.write(p, p.relative_to(dist).as_posix())
+          subprocess.check_call([sys.executable, "tools/package_release.py", "--platform", "windows-x64", "--out", str(dist)])
+          win_zips = sorted(dist.glob("4gbVramStrata-v*-windows-x64.zip"))
+          assert len(win_zips) == 1, win_zips
 
           lines = []
-          for asset in (zip_path, eng_zips[0]):
+          for asset in (win_zips[0], eng_zips[0]):
               h = hashlib.sha256(asset.read_bytes()).hexdigest()
               lines.append(f"{h}  {asset.name}")
               print(f"{asset.name}: {asset.stat().st_size:,} bytes, sha256 {h}")
@@ -107,15 +108,15 @@ jobs:
         with:
           name: windows-x64-cuda13-release
           path: |
-            dist/4gbVramStrata-v*-131k-win-x64.zip
+            dist/4gbVramStrata-v*-windows-x64.zip
             dist/strata-fourgbvram-windows-x64-*.zip
             dist/SHA256SUMS-windows.txt
 
-      - name: Upload assets to GitHub release (if release_tag provided)
-        if: ${{ inputs.release_tag != '' }}
+      - name: Upload assets to GitHub release (if tagged)
+        if: ${{ env.TAG != '' }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: pwsh
         run: |
-          $tag = "${{ inputs.release_tag }}"
-          gh release upload $tag dist/4gbVramStrata-v*-131k-win-x64.zip dist/strata-fourgbvram-windows-x64-*.zip dist/SHA256SUMS-windows.txt --clobber
+          $tag = "${{ env.TAG }}"
+          gh release upload $tag dist/4gbVramStrata-v*-windows-x64.zip dist/strata-fourgbvram-windows-x64-*.zip dist/SHA256SUMS-windows.txt --clobber

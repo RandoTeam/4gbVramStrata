@@ -4,9 +4,7 @@ A 4 GB card, 32 GB of RAM, one SSD. Each tier is several times slower than the o
 is decided by how many bytes of a model each token has to pull through them. This page does the arithmetic for the two
 models measured here, from their own GGUF metadata and from runs on the laptop.
 
-The machine: RTX 3050 Laptop (4 GB, `sm_86`), Ryzen 5 5500U, 32 GB DDR4-3200, Windows 11. Engine: `strata-fourgbvram`
-at [PolyStrata](https://github.com/VecSzn/PolyStrata) v0.1.45-poly.10, CUDA 13 (the byte accounting below
-was taken on poly.7; the two engines hold the same experts on this card, docs/BENCH-4GB.md).
+The machine: RTX 3050 Laptop (4 GB, `sm_86`), Ryzen 5 5500U, 32 GB DDR4-3200. Linux reference engine: `strata-fourgbvram` (`4gbVramStrata v0.1.66`, Ubuntu 26.04, CUDA 13.3); Windows 11 historical baseline: `v0.1.45-poly.7/poly.10` (docs/BENCH-4GB.md).
 
 ## The tiers
 
@@ -67,6 +65,8 @@ only 1,024 rows, so 32K costs 840 MiB where a dense estimate says 5.5 GiB. That 
 **Its experts are heavier per token than either model above** — 766 MiB against Clover's 338 MB — because its 8 of 128
 experts are bigger (3.19 MiB each). Its dense part is smaller (1.29 against 1.75 GiB), and the draft block keeps 92 of
 108 guesses, so the two costs nearly cancel: 39.0 written tokens/s against Clover's 44.3 (`docs/BENCH-4GB.md`).
+
+**Inkling 2 Mini UD-Q4_K_XL on native Linux (`4gbVramStrata v0.1.66`, `--attn-requant q5_0 --loop-bf16 --tail-skip 4 --kv fp8`, 32K context):** a `17 GB` looped MoE (`48` passes over `24` blocks) that keeps **279–281 of 3,072 routed experts in VRAM (`1.2 GiB`)** and maps the remaining **2,791 experts in `13.8 GiB` of pinned RAM**, writing **24.1–25.1 tokens/s** in chat (`docs/BENCH-4GB.md`).
 
 ## The VRAM budget, by context length
 

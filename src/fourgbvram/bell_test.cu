@@ -219,8 +219,8 @@ void test_bell_handoff(Watchdog& wd, cudaStream_t s) {
 void test_null_slot_mmvq(cudaStream_t s) {
     namespace sk = strata::kernels;
     constexpr int kIn = 256, kOut = 64, kSlots = 3, kPicks = 3;
-    // Q8_0: ggml_type 8 (native_mmvq_slots_kernel / warp); Q4_K: 12; IQ3_XXS: 18 (iq_kernels mmvq_slots_iq3_kernel + mmvq_slots_kernel)
-    const int types[] = {8, 12, 18};
+    // Q8_0: 8; Q4_K: 12; IQ2_XXS: 16 (mmvq_slots_staged_kernel + mmvq_slots_kernel); IQ3_XXS: 18 (mmvq_slots_iq3_kernel + mmvq_slots_kernel)
+    const int types[] = {8, 12, 16, 18};
     const size_t q81_bytes = sk::native_q8_1_bytes(kIn);
     void* d_xq = nullptr;
     float *d_x = nullptr, *d_y = nullptr, *d_ref = nullptr;
@@ -260,7 +260,7 @@ void test_null_slot_mmvq(cudaStream_t s) {
         ck(cudaMemcpy(d_table, h_table, sizeof(h_table), cudaMemcpyHostToDevice), "copy table");
 
         for (bool lanes : {false, true}) {
-            if (ty != 18 && lanes) continue;
+            if (ty != 16 && ty != 18 && lanes) continue;
             // Poison output buffer before launch to catch unzeroed null slots
             std::vector<float> poison(kPicks * kOut, 1234.5f);
             ck(cudaMemcpy(d_y, poison.data(), poison.size() * sizeof(float), cudaMemcpyHostToDevice), "poison y");

@@ -1,7 +1,7 @@
 # The checks that catch a broken checkout without a graphics card.
 #
 # This is deliberately not a release builder: a hosted runner has no 4 GB card, so it cannot produce a speed number,
-# and a CUDA build there proves only that it compiles - ./tools/build_131k.sh proves that here, on the card, faster.
+# and a CUDA build there proves only that it compiles - ./tools/build_dev.sh proves that here, on the card, faster.
 # What it does catch is the class of bug a release has actually shipped here: a path that stopped resolving after a
 # rename, a test that only passes with a GPU present, an allowlist that drops a file a user needs.
 #
@@ -9,7 +9,7 @@
 #   .venv/bin/python -m unittest discover -s tools -p "test_setup_*.py"
 #   .venv/bin/python tools/brand_names.py --check
 #   .venv/bin/python tools/rename_fourgbvram.py --check
-#   .venv/bin/python tools/package_release_131k.py --check
+#   .venv/bin/python tools/package_release.py --check
 #
 # docs/RELEASE.md is the contract this workflow serves.
 name: Checks
@@ -77,12 +77,12 @@ jobs:
         run: python tools/rename_fourgbvram.py --check
 
       - name: The release sources are all in the tree
-        # NOT `package_release_131k.py --check` in full: that also requires the compiled engine in engine-fourgbvram/,
+        # NOT `package_release.py --check` in full: that also requires the compiled engine in engine-fourgbvram/,
         # which a runner has no card to build and which is not committed. What is checked here is the part that a merge
         # can break - the files and the source trees the packager walks - by running its own required-file test with the
         # engine's check disabled, which is exactly what `--check --no-engine` does.
         # Locally the full check runs with the engine present: see docs/RELEASE.md.
-        run: python tools/package_release_131k.py --check --no-engine
+        run: python tools/package_release.py --check --no-engine --platform "${{ matrix.os == 'windows-latest' && 'windows-x64' || 'linux-x64' }}"
 
       - name: The docs a user reads have no broken links
         # Every relative link in README.md must resolve in the checkout: docs get renamed by merges, and a release note

@@ -16,9 +16,10 @@ HuggingFace cards and the projects' own posts, with links; no review site was us
 | **Qwen3.6-35B-A3B** (Qwen) | 35B / 3B active | UD-Q3_K_M 17 GB, UD-Q2_K_XL 13, UD-Q4_K_M 23 | 17-27 GB | tested to 32K | yes, +1 GB | Apache 2.0 |
 | **Ornith 1.5-35B-A3B** (ornith-ai) | 35B / 3B active, Qwen3.6's architecture | APEX-I-COMPACT 17 GB, MINI 14, QUALITY 24 | 18-28 GB | tested to 32K | yes, MTP draft | its own (check the model page) |
 | **Tiel Coder 35B-A3B** (peculiar-ragdoll) | 35B / 3B active; **not a fine-tune**: Ornith 1.5 requantized with its own imatrix and Sharp template, weights unchanged | UD-Q3_K_XL 17 GB, UD-IQ3_XXS 14, UD-Q4_K_XL 23 | 18-27 GB | tested to 32K | yes, +1 GB | as its base |
-| **Clover-35B-A3B-Preview** (DiffuSpace) | 35B / 3B active, **diffusion** language model | Q3_K_M 17 GB, APEX-I-NANOPLUS 13, Q4_K_M 21 | 16-25 GB | tested at 32K | no, MTP off | Apache 2.0 |
+| **Clover-35B-A3B-Preview** (DiffuSpace) | 35B / 3B active, **diffusion** language model | Q3_K_M 17 GB, APEX-I-NANOPLUS 13, Q4_K_M 21 | 16-25 GB | tested at 32K (64K starts) | no, MTP off | Apache 2.0 |
 | **Flint 40B-A2.5B** (Recursive) | 40B / 2.5B active | UD-Q3_K_XL 18 GB, UD-Q4_K_XL 25, UD-Q6_K_XL 36, Q8_0 42 | 22-46 GB | 128K = +2.6 GB over 32K | no | Apache 2.0 |
-| **Gemma 4 26B-A4B** (Google) | 26B / 3.8B active | UD-Q3_K_M 13 GB, UD-Q2_K_XL 11, UD-Q4_K_M 17, QAT-UD-Q4_K_XL 15 | 15-21 GB | tested past 10K | yes, Google's draft | Gemma (check the terms) |
+| **Gemma 4 26B-A4B** (Google) | 26B / 3.8B active | UD-Q3_K_M 13 GB, UD-Q2_K_XL 11, UD-Q4_K_M 17, QAT-UD-Q4_K_XL 15 | 15-21 GB | tested at 32K | yes, Google's draft | Gemma (check the terms) |
+| **Inkling 2 Mini** (Unsloth UD-Q4_K_XL) | looped MoE (48 passes / 24 blocks) | UD-Q4_K_XL 17 GB, UD-Q3_K_XL 13.6, UD-Q2_K_XL 9.1 | 13-21 GB | tested at 32K | yes (text-only checked here) | check model card |
 | **MiniCPM-V 4.7 35B-A3B** (OpenBMB) | 35B / ~3B active, Qwen3.6's architecture | Q4_K_M 21 GB, mix_q3gud_im 16, Q6_K 29 | 19-31 GB | tested past 10K | yes, no draft | Apache 2.0 |
 | **Kolibri 1** (Aleph Alpha) | 78B / 3.5B active, German and English | Q2_K 29 GB, Q3_K_M 38, Q4_K_M 48 | 33-52 GB | 1M claimed, 262K recommended | no | Apache 2.0 |
 | **GLM 5.3 Flash** (Zhipu) | 320B / 18B active | 3.0BIT 114 GB, UD-IQ2_XXS 102, REAP50-Q3_K_M 79 | 60-96 GB, and a 32 GB card | tested past 29K | no, Linux only | MIT |
@@ -63,8 +64,7 @@ picks a size from your RAM.
   67.2, MMLU-Pro 73.7. Its base, Ornith 1.5, is above.
 - Community: the MTP GGUF has 2.9M downloads a month, the most of any coding build here. The author's own framing:
   a fast coder, bad at trivia.
-- For 4 GB: the two Cyber-Tiel-Coder sizes in the README's 4 GB table are this model's abliterated variant, and they
-  are the sizes that were measured at 131K on this laptop.
+- For 4 GB: Tiel Coder shares the `qwen35moe` architecture with Qwen3.6, Ornith 1.5 and Clover; estimated to need 4.4–4.8 GB before experts on native Linux, so not measured on 4 GB here yet.
 
 ### Clover-35B-A3B-Preview, 28-30 October 2026
 - <https://huggingface.co/Diffuspace/Clover-35B-A3B-Preview>, <https://diffuspace.ai/blog/clover-35b/>
@@ -72,22 +72,25 @@ picks a size from your RAM.
   ZebraLogic 95.8, BFCL-v4 67.9.
 - Community: 7 discussions, questions about GGUF, Vulkan and ROCm; about 100 tokens/s on an RTX 3090 with a Q4 file
   and a patched llama.cpp.
-- For 4 GB: it runs on this engine at 32K (see [BENCH-4GB.md](BENCH-4GB.md)), writes 26 to 30 tokens/s here, and is
-  the newest of the twelve, so the least proven.
+- For 4 GB: verified end-to-end at 32K on Ubuntu 26.04 and Windows 11 ([BENCH-4GB.md](BENCH-4GB.md)): writes **39.2–44.5 tokens/s** in chat on Linux (**22/22** quality gate).
 
 ### Flint 40B-A2.5B, 21 October 2026
 - <https://huggingface.co/RecursiveSI/flint>
 - Scores (the vendor): Terminal-Bench 2.1 54.9, SWE-Pro v2 89.7, SWE-Verified 74.2. AIME and GPQA: not published.
 - Community: 1,251 likes, 19K downloads a month. The card asks for one B300 or H200 and about 80 GB of download.
-- For 4 GB: the UD-Q3_K_XL file (17.2 GB) loads and serves at 32K on this laptop; its speed is not measured yet. Most
-  of its layers look back only 513 tokens, so a long conversation costs little VRAM.
+- For 4 GB: measured on Windows 11 before `v0.1.45-poly.10` (`21.9 tokens/s` in chat on the saved prompt, `21/22` quality gate). Most of its layers look back only 513 tokens, so a long conversation costs little VRAM.
 
 ### Gemma 4 26B-A4B, 11 March 2026
 - <https://huggingface.co/google/gemma-4-26B-A4B-it>
 - Scores (Google): MMLU-Pro 82.6, AIME 2026 88.3, LiveCodeBench v6 77.1, Codeforces 1718, GPQA Diamond 82.3. SWE:
   not published.
 - Community: 1,719 likes, 6.3M downloads a month, the most of the twelve. Unsloth's GGUF: 1.32M downloads.
-- For 4 GB: the best score per active parameter (3.8B active), but no official SWE numbers, and 4 GB is untested.
+- For 4 GB: QAT-UD-Q4_K_XL (14.7 GB) runs on Ubuntu 26.04 at 32K with `--draft-model` (`31.3–39.0 tokens/s` in chat, `21/22` gate).
+
+### Inkling 2 Mini, 2026
+- <https://huggingface.co/unsloth/Inkling-2-Mini-GGUF>
+- Architecture: looped MoE (48 passes over 24 blocks) with built-in DSpark speculative draft.
+- For 4 GB: UD-Q4_K_XL (17 GB) measured on Ubuntu 26.04 at 32K (`--attn-requant q5_0 --loop-bf16 --tail-skip 4 --kv fp8`): writes **24.1–25.1 tokens/s** in chat (`21/22` quality gate on `v0.2.19-poly.1`).
 
 ### MiniCPM-V 4.7 35B-A3B, 12 October 2026
 - <https://huggingface.co/openbmb/MiniCPM-V-4.7-35B-A3B>
@@ -136,8 +139,6 @@ experts from the model file on the SSD, and on Windows 10 WDDM can also page VRA
 reference laptop the owner has run **Qwen3.8-Flash-Next Q2_0**, **Qwen3.8-Flash-Next Coder**,
 **Gemma 4 QAT-UD-Q4_K_XL** and **Qwen3.6-35B-A3B UD-Q4_K_XL** there; they are slow, not impossible.
 
-Measured here so far: the two Cyber-Tiel-Coder sizes, Clover APEX-I-NANOPLUS and Flint UD-Q3_K_XL. At 32K to 131K
-they write 28 to 48 tokens/s; [the numbers, their logs and the settings measured one at a time](BENCH-4GB.md).
+Measured here so far: Clover APEX-I-NANOPLUS, Gemma 4 QAT-UD-Q4_K_XL, Inkling 2 Mini UD-Q4_K_XL (Linux, 32K), and Flint UD-Q3_K_XL (Windows history); [the numbers, their logs and the settings measured](BENCH-4GB.md).
 
-An order that costs little: Tiel Coder (re-measure the release's 131K numbers) then LFM2.5 (the fastest to load) then
-Qwen3.6 (the reference for the engine) then Ornith, Clover and Gemma 4.
+An order that costs little for remaining families: LFM2.5 (the smallest file), Ornith 1.5 (`qwen35moe` with a draft block), and MiniCPM-V 4.7.

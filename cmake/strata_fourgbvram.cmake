@@ -431,6 +431,13 @@ if(STRATA_BUILD_POLY AND STRATA_NATIVE_EXPERTS AND (STRATA_ENABLE_CUDA OR STRATA
     set_tests_properties(fourgbvram_iq3_lanes_test PROPERTIES SKIP_RETURN_CODE 77)
   endif()
   if(STRATA_ENABLE_CUDA)
+    add_executable(fourgbvram_iq_slot_lanes_test src/fourgbvram/iq_slot_lanes_test.cu)
+    target_include_directories(fourgbvram_iq_slot_lanes_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include ${_strata_gpu_include_directories})
+    target_link_libraries(fourgbvram_iq_slot_lanes_test PRIVATE strata_kernels ${_strata_gpu_runtime_target})
+    add_test(NAME fourgbvram_iq_slot_lanes_test COMMAND fourgbvram_iq_slot_lanes_test)
+    set_tests_properties(fourgbvram_iq_slot_lanes_test PROPERTIES SKIP_RETURN_CODE 77)
+  endif()
+  if(STRATA_ENABLE_CUDA)
     add_executable(fourgbvram_bell_test src/fourgbvram/bell_test.cu src/fourgbvram/kernels.cu)
     target_include_directories(fourgbvram_bell_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include
                                                       ${_strata_gpu_include_directories})

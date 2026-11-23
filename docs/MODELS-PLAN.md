@@ -5,8 +5,8 @@ is an estimate from the installer's own numbers and says so.
 
 ## Why there is so much left to do
 
-Twelve families ship in `setup.py`, and **this fork has measured three of them**: Clover APEX-I-NANOPLUS, Gemma 4
-QAT-UD-Q4_K_XL and Flint UD-Q3_K_XL (the last on Windows, before poly.10). The rest are the donor's list, and what this
+Twelve families ship in `setup.py`, and **this fork has measured four of them**: Clover APEX-I-NANOPLUS, Gemma 4
+QAT-UD-Q4_K_XL, Inkling 2 Mini UD-Q4_K_XL, and Flint UD-Q3_K_XL (the last on Windows, before `v0.1.45-poly.10`). The rest are the donor's list, and what this
 fork knows about them is what `setup.py` estimates — which has already been wrong once in the optimistic direction
 (Gemma 4: "does not fit", 4.1 GB, and it runs at 32K).
 
@@ -16,9 +16,10 @@ The order below is not alphabetical and not the README's: it is **what teaches t
 
 | Family | Size here | What this fork knows | Next step |
 | --- | --- | --- | --- |
-| **Clover APEX-I-NANOPLUS** | 12.6 GB | **Measured.** 43.2 tok/s, 546 tok/s read, 32K, 22/22 gate, 64K starts | keep as the reference |
-| **Gemma 4 QAT-UD-Q4_K_XL** | 14.7 GB | **Measured.** 39.0 tok/s, 524 tok/s read, 32K, 21/22 gate; 64K fails | the vision encoder (untested) |
-| **Flint UD-Q3_K_XL** | 17.2 GB | Measured on **Windows, before poly.10**: 21.9 tok/s | re-measure on Linux poly.10, then `--kv q8_0` (poly.8 added it, never tried here) |
+| **Clover APEX-I-NANOPLUS** | 12.6 GB | **Measured.** `39.2–43.2` tok/s chat, `542–547` tok/s read, 32K, 22/22 gate, 64K starts | keep as the reference |
+| **Gemma 4 QAT-UD-Q4_K_XL** | 14.7 GB | **Measured.** `31.3–39.0` tok/s chat, `471–524` tok/s read, 32K, 21/22 gate; 64K fails | the vision encoder (untested) |
+| **Inkling 2 Mini UD-Q4_K_XL** | 17.0 GB | **Measured.** `24.1–25.1` tok/s chat, `208–214` tok/s read, 32K, 21/22 gate | `--inkling-small-card off` accuracy check |
+| **Flint UD-Q3_K_XL** | 17.2 GB | Measured on **Windows, before `v0.1.45-poly.10`**: 21.9 tok/s, 21/22 gate | re-measure on Linux `v0.1.66`, then `--kv q8_0` |
 | **Ornith 1.5 APEX-I-MINI / -COMPACT / -QUALITY** | 14.4 / 17.4 / 23.7 GB | **Nothing.** `qwen35moe`, the architecture Clover proves; `--kv q8_0` applies | **highest value**: three sizes of a proven architecture, and a draft block in the file |
 | **LFM2.5-24B-A2B** | 10.9 GB | Nothing. The installer says "starts with a small expert cache" | cheap: the smallest file of the twelve |
 | **MiniCPM-V 4.7 35B-A3B** | 16 GB | Nothing. Installer says it should start; reads pictures | after Ornith |

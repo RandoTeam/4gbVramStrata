@@ -77,12 +77,12 @@ the visible answer starts: use 2000 and up.
 ## Build, test, release
 
     ./setup.sh                                # normal engine: builds strata-fourgbvram for this card with CUDA
-    ./tools/build_131k.sh                     # dev engine: CUDA, sm_86 (detected), into build-131k
+    ./tools/build_dev.sh                      # dev engine: CUDA, sm_86 (detected), into build-131k / build-dev
     ninja -C build-131k strata-fourgbvram     # incremental, with .venv/bin/ninja
     .venv/bin/python tools/make_fourgbvram_release.py OUT_DIR   # portable engine; needs a clean tree
-    .venv/bin/python -m unittest discover -s tools -p "test_setup_*.py"   # 784 tests, no GPU and no downloads
+    .venv/bin/python -m unittest discover -s tools -p "test_setup_*.py"   # setup tests, no GPU and no downloads
     .venv/bin/python tools/brand_names.py --check
-    .venv/bin/python tools/package_release_131k.py     # the Linux tarball; --check verifies the allowlist
+    .venv/bin/python tools/package_release.py --platform linux-x64   # release tarball; --check verifies allowlist
 
 **`docs/RELEASE.md` is the release contract** and outranks convenience: which platforms we build, what an asset must
 contain, the order of work, and what is deliberately not shipped. Two rules from it, because they are the ones broken

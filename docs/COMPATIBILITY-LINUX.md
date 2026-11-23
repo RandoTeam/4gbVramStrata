@@ -106,7 +106,7 @@ that the model cannot run on Windows. See the platform table above.
 ## Profiles of the models that may start
 
 These are the families whose smallest/estimated-fitting quants are in the table above. "May start" is
-setup's estimate; only Clover has been run end-to-end on **native Linux**. The Windows 10 runs of
+setup's estimate; Clover APEX-I-NANOPLUS, Gemma 4 26B-A4B QAT-UD-Q4_K_XL, and Inkling 2 Mini UD-Q4_K_XL have been run and measured end-to-end on **native Linux** (docs/BENCH-4GB.md). The Windows 10 runs of
 Qwen3.8 Coder, Qwen3.8 Q2_0, Gemma 4 QAT-Q4 and Qwen3.6 UD-Q4 are separate evidence and are recorded
 above. Dates and benchmarks are from the model cards and this repository's [MODELS-4GB.md](MODELS-4GB.md).
 

@@ -286,6 +286,7 @@ class Main(unittest.TestCase):
             mock.patch.object(setup, "get_llama_cpp", lambda: self.t / "llama.cpp"),
             mock.patch.object(setup, "get_prebuilt", mock.Mock(side_effect=AssertionError("the Qwen engine"))),
             mock.patch.object(setup, "build_engine_fourgbvram", fake_build),
+            mock.patch.object(setup, "get_fourgbvram_prebuilt", lambda *a: False),
             mock.patch.object(setup, "download", fake_download),
             mock.patch.object(setup, "whole_shard", lambda s: False),
             mock.patch.object(setup, "check_shards", lambda shards: None),

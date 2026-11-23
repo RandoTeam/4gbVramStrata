@@ -15,6 +15,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cctype>
 #include <chrono>
 #include <cmath>
 #include <condition_variable>
@@ -1732,8 +1733,10 @@ void usage() {
                  "                         the host routes (default 0 = none is)\n"
                  "  --attn-requant TYPE    Inkling 2: its attention's matrices quantized again to TYPE (q5_0, q4_0\n"
                  "                         or iq4_nl) at load: fewer bytes a token, and the answers move a little\n"
-                 "                         (default: the file's types; setup gives an 8 GB card q5_0)\n"
-                 "  --loop-bf16            Inkling 2: its loop controllers' matrices in BF16, not F32\n"
+                 "                         (default: the file's types; setup gives an 8 GB card q5_0); off or none\n"
+                 "                         says the default (the last --attn-requant counts)\n"
+                 "  --loop-bf16            Inkling 2: its loop controllers' matrices in BF16, not F32;\n"
+                 "                         --no-loop-bf16 says the default (F32; the last one counts)\n"
                  "  --prompt-int8          Inkling 2 on an RTX 20 (Turing): its prompt products on the int8 tensor\n"
                  "                         cores as on RTX 30 and newer, not as halves and cuBLAS (the default on\n"
                  "                         Turing): faster prompts, and the answers move more, activations int8 a\n"
@@ -1866,8 +1869,14 @@ int main(int argc, char** argv) {
         else if (a == "--ram-experts-mib") o.ram_experts_mib = std::atoll(val());
         else if (a == "--tail-skip") o.tail_skip = std::atoi(val());
         else if (a == "--route-top") o.route_top = std::atoi(val());
-        else if (a == "--attn-requant") o.attn_requant = val();
+        else if (a == "--attn-requant") {
+            // off / none: the file's types, so a flag appended to a run config can undo setup's q5_0
+            std::string t = val(), low = t;
+            for (char& c : low) c = (char) std::tolower((unsigned char) c);
+            o.attn_requant = (low == "off" || low == "none") ? std::string() : t;
+        }
         else if (a == "--loop-bf16") o.loop_bf16 = true;
+        else if (a == "--no-loop-bf16") o.loop_bf16 = false;
         else if (a == "--prompt-int8") o.prompt_int8 = 1;
         else if (a == "--no-prompt-int8") o.prompt_int8 = 0;
         else if (a == "--skip-weight") o.skip_weight = (float) std::atof(val());
